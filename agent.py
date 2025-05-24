@@ -6,6 +6,7 @@ from gevent.event import AsyncResult
 # Patch standard library to work with gevent
 monkey.patch_all()
 
+import inspect
 import json
 import uuid
 import websocket
@@ -161,13 +162,57 @@ class PubSub:
         
         return async_result
     
+    def _callback_adapter(self, callback):
+        """
+        Create an adapter that inspects a callback's signature and calls it with appropriate parameters.
+        Supports both modern (message object) and original VOLTTRON-style callbacks.
+        """
+        def adapter(message):
+            try:
+                # First try the traditional style with 6 parameters
+                # Extract needed fields from the message
+                peer = message.get("peer", "")
+                sender = message.get("sender", "")
+                bus = message.get("bus", "")
+                topic = message.get("topic", "")
+                headers = message.get("headers", {})
+                msg_data = message.get("message", {})
+                
+                try:
+                    # Try calling with traditional parameters
+                    return callback(peer, sender, bus, topic, headers, msg_data)
+                except TypeError as e:
+                    if "missing" in str(e) or "takes" in str(e) or "arguments" in str(e):
+                        # If we get a TypeError about missing or too many arguments,
+                        # it's likely not the traditional style
+                        # Try the modern style with just the message
+                        return callback(message)
+                    else:
+                        # Some other TypeError, re-raise it
+                        raise
+            except Exception as e:
+                print(f"Error in subscription callback: {e}")
+                import traceback
+                traceback.print_exc()
+                # Return None when there's an error
+                return None
+        
+        return adapter
+    
     def subscribe(self, prefix: str, callback: Optional[Callable] = None):
         """Subscribe to a topic prefix, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
         
         subscription_id = str(uuid.uuid4())
-        self._subscriptions[prefix] = callback or (lambda msg: print(f"Subscription callback for {prefix}: {msg}"))
+        
+        # Store the original callback
+        actual_callback = callback or (lambda msg: print(f"Subscription callback for {prefix}: {msg}"))
+        
+        # Wrap the callback with our adapter
+        adapted_callback = self._callback_adapter(actual_callback)
+        
+        self._subscriptions[prefix] = adapted_callback
         
         # Create an AsyncResult to track the subscription operation
         async_result = AsyncResult()
@@ -193,8 +238,14 @@ class PubSub:
             raise ConnectionError("Agent not connected")
         
         subscription_id = str(uuid.uuid4())
-        # Note: We're using the pattern as the key here
-        self._subscriptions[pattern] = callback or (lambda msg: print(f"Subscription callback for {pattern}: {msg}"))
+        
+        # Store the original callback
+        actual_callback = callback or (lambda msg: print(f"Subscription callback for {pattern}: {msg}"))
+        
+        # Wrap the callback with our adapter
+        adapted_callback = self._callback_adapter(actual_callback)
+        
+        self._subscriptions[pattern] = adapted_callback
         
         # Create an AsyncResult to track the subscription operation
         async_result = AsyncResult()
@@ -221,11 +272,16 @@ class PubSub:
     def handle_message(self, data: Dict):
         """Handle an incoming pubsub message."""
         topic = data.get("topic", "")
+        
+        # Find matching subscriptions and call their callbacks
         for prefix, callback in self._subscriptions.items():
-            if topic.startswith(prefix) or prefix in ["*", "all"]:
-                callback(data)
-                return True
-        return False
+            if topic.startswith(prefix) or prefix in ["", "*", "all"]:
+                try:
+                    callback(data)
+                except Exception as e:
+                    print(f"Error calling subscription callback: {e}")
+                    import traceback
+                    traceback.print_exc()
 
 
 class Config:
@@ -395,10 +451,10 @@ class Agent:
         # Create a WebSocketApp
         self.websocket = websocket.WebSocketApp(
             self.websocket_url,
-            on_message=self._on_message,
-            on_error=self._on_error,
-            on_close=self._on_close,
-            on_open=self._on_open
+            on_message=self.__on_ws_message__,
+            on_error=self.__on_ws_error__,
+            on_close=self.__on_ws_close__,
+            on_open=self.__on_ws_open__
         )
         
         # Start the WebSocket connection in a separate greenlet
@@ -441,12 +497,12 @@ class Agent:
             self.connected = False
             print(f"Agent {self.identity} disconnected")
     
-    def _on_open(self, ws):
+    def __on_ws_open__(self, ws):
         """Callback when WebSocket connection is opened."""
         self.connected = True
         print(f"DEBUG: Agent {self.identity} websocket connection opened")
     
-    def _on_message(self, ws, message):
+    def __on_ws_message__(self, ws, message):
         """Callback when a message is received."""
         try:
             data = json.loads(message)
@@ -588,11 +644,11 @@ class Agent:
             # Spawn a greenlet to process the response asynchronously
             gevent.spawn(send_vip_response)
     
-    def _on_error(self, ws, error):
+    def __on_ws_error__(self, ws, error):
         """Callback when an error occurs."""
         print(f"Agent {self.identity} error: {error}")
     
-    def _on_close(self, ws, close_status_code, close_msg):
+    def __on_ws_close__(self, ws, close_status_code, close_msg):
         """Callback when the connection is closed."""
         self.connected = False
         print(f"Agent {self.identity} connection closed: {close_status_code} {close_msg}")
