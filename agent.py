@@ -633,6 +633,7 @@ class Agent:
         self.received_messages = []
         self._listener_greenlet = None
         self.rpc_responses = {}  # Maps message IDs to AsyncResults
+        self._stop_event = gevent.event.Event() # type: ignore
         
         # Create subsystems
         self.core = Core(self)
@@ -876,3 +877,56 @@ class Agent:
     def clear_received_messages(self):
         """Clear the received messages list."""
         self.received_messages = []
+
+    def run(self):
+        """Run the agent and return exit code when finished."""
+        try:
+            # Connect to the message bus
+            print(f"Starting agent: {self.identity}")
+            self.connect()
+            
+            # Keep the agent running until stopped
+            print(f"Agent {self.identity} running. Press Ctrl+C to stop.")
+            while not self._stop_event.is_set():
+                gevent.sleep(1.0)  # Sleep to avoid busy waiting
+            
+            return 0  # Success
+            
+        except KeyboardInterrupt:
+            print(f"\nKeyboard interrupt received, stopping agent: {self.identity}")
+        except Exception as e:
+            print(f"Error running agent {self.identity}: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1  # Error
+        finally:
+            # Ensure proper shutdown
+            try:
+                self.core.stop().get(timeout=5)
+                print(f"Agent {self.identity} stopped cleanly")
+            except Exception as e:
+                print(f"Error stopping agent {self.identity}: {e}")
+                return 1  # Error
+    
+    def stop(self):
+        """Signal the agent to stop."""
+        self._stop_event.set()
+
+
+def run_agent(agent_class, identity=None, **kwargs):
+    """Run an agent from the command line."""
+    import argparse
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--identity", help="Agent identity", default=identity)
+    parser.add_argument("--host", help="Message bus host", default="127.0.0.1")
+    parser.add_argument("--port", help="Message bus port", type=int, default=8000)
+    
+    args = parser.parse_args()
+    
+    # Create the agent
+    agent_identity = args.identity or identity or agent_class.__name__.lower()
+    agent = agent_class(identity=agent_identity, host=args.host, port=args.port, **kwargs)
+    
+    # Run the agent
+    return agent.run()

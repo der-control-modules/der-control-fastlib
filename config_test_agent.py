@@ -1,9 +1,8 @@
-# config_test_agent.py
+import datetime
+import sys
 
 from agent import Agent, Core, RPC, AsyncResult
 import gevent
-import datetime
-import json
 
 
 class ConfigTestAgent(Agent):
@@ -187,24 +186,5 @@ class ConfigTestAgent(Agent):
 
 
 if __name__ == "__main__":
-    # Create and run the config test agent
-    agent = ConfigTestAgent()
-    
-    try:
-        # Connect to the server
-        print("Connecting config test agent to the platform...")
-        agent.connect()
-        
-        # Keep the agent running
-        print("Config test agent is running...")
-        while True:
-            gevent.sleep(10)  # Sleep to keep the agent alive
-            
-    except KeyboardInterrupt:
-        print("Keyboard interrupt received, stopping agent...")
-    finally:
-        # Ensure proper shutdown
-        if agent.core.stop().get(timeout=5):
-            print("Config test agent stopped cleanly")
-        else:
-            print("Error stopping config test agent")
+    from agent import run_agent
+    sys.exit(run_agent(ConfigTestAgent))

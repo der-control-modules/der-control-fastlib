@@ -1,8 +1,10 @@
-from agent import Agent, Core, RPC
+import datetime
+import sys
+
 import gevent
 from gevent.event import AsyncResult
-import datetime
 
+from agent import Agent, Core, RPC
 
 class ListenerAgent(Agent):
     """
@@ -89,24 +91,5 @@ class ListenerAgent(Agent):
 
 
 if __name__ == "__main__":
-    # Create and run the listener agent
-    listener = ListenerAgent()
-    
-    try:
-        # Connect to the server
-        print("Connecting listener agent to the platform...")
-        listener.connect()
-        
-        # Keep the agent running
-        print("Listener agent is running...")
-        while True:
-            gevent.sleep(10)  # Sleep to keep the agent alive
-            
-    except KeyboardInterrupt:
-        print("Keyboard interrupt received, stopping agent...")
-    finally:
-        # Ensure proper shutdown
-        if listener.core.stop().get():
-            print("Listener agent stopped cleanly")
-        else:
-            print("Error stopping listener agent")
+    from agent import run_agent
+    sys.exit(run_agent(ListenerAgent))
