@@ -115,12 +115,14 @@ class ConnectionManager:
         self.message_queue: asyncio.Queue = asyncio.Queue()
         self.prefix_subscriptions: Dict[str, Dict[str, List[Tuple[str, SubscriptionCallback]]]] = {}
         self.regex_subscriptions: Dict[str, List[Tuple[Pattern, str, SubscriptionCallback]]] = {}
+        self.rpc_responses: Dict[str, asyncio.Future] = {}
     
     async def connect(self, websocket: WebSocket, identity: str):
         """Connect a client to the message bus."""
         await websocket.accept()
         self.active_connections[identity] = websocket
         self.prefix_subscriptions[identity] = {}
+        print(f"DEBUG: Client {identity} connected")
     
     def disconnect(self, identity: str):
         """Disconnect a client from the message bus."""
@@ -134,13 +136,19 @@ class ConnectionManager:
             for identity_key, subscriptions in self.regex_subscriptions.items() 
             if identity_key != identity
         }
+        print(f"DEBUG: Client {identity} disconnected")
     
     async def send_message(self, identity: str, message: dict):
         """Send a message to a specific client."""
         if identity in self.active_connections:
             websocket = self.active_connections[identity]
             if websocket.client_state != WebSocketState.DISCONNECTED:
+                print(f"DEBUG: Sending message to {identity}: {message}")
                 await websocket.send_json(message)
+            else:
+                print(f"DEBUG: Cannot send message to {identity}, websocket is disconnected")
+        else:
+            print(f"DEBUG: Cannot send message to {identity}, client not found")
     
     async def broadcast(self, message: dict):
         """Broadcast a message to all connected clients."""
@@ -186,6 +194,82 @@ class ConnectionManager:
                         callback(peer, sender, bus, topic, headers, message)
                     except Exception as e:
                         print(f"Error in regex subscription callback: {e}")
+    
+    def register_rpc_response_future(self, msg_id: str) -> asyncio.Future:
+        """Register a future for an RPC response."""
+        future = asyncio.get_event_loop().create_future()
+        self.rpc_responses[msg_id] = future
+        print(f"DEBUG: Registered RPC response future for msg_id {msg_id}")
+        return future
+    
+    def set_rpc_response(self, msg_id: str, response: Any):
+        """Set the result for an RPC response future."""
+        if msg_id in self.rpc_responses:
+            future = self.rpc_responses.pop(msg_id)
+            if not future.done():
+                print(f"DEBUG: Setting RPC response for msg_id {msg_id}: {response}")
+                future.set_result(response)
+            else:
+                print(f"DEBUG: Future for msg_id {msg_id} was already done")
+        else:
+            print(f"DEBUG: No future found for msg_id {msg_id}")
+    
+    def clear_rpc_response(self, msg_id: str):
+        """Clear an RPC response future."""
+        if msg_id in self.rpc_responses:
+            future = self.rpc_responses.pop(msg_id)
+            if not future.done():
+                future.cancel()
+            print(f"DEBUG: Cleared RPC response future for msg_id {msg_id}")
+    
+    async def handle_rpc(self, sender: str, peer: str, method: str, args: list, kwargs: dict, msg_id: str):
+        """Handle RPC request between clients."""
+        print(f"DEBUG: RPC request from {sender} to {peer}: {method}({args}, {kwargs}) [msg_id: {msg_id}]")
+        
+        if peer not in self.active_connections:
+            print(f"DEBUG: RPC target {peer} not found")
+            await self.send_message(sender, {
+                "type": "rpc_error",
+                "msg_id": msg_id,
+                "error": f"Peer {peer} not found"
+            })
+            return
+            
+        # Create a message for the RPC call
+        rpc_message = {
+            "type": "rpc_request",
+            "sender": sender,
+            "method": method,
+            "args": args,
+            "kwargs": kwargs,
+            "msg_id": msg_id
+        }
+        
+        # Register a future for the response
+        future = self.register_rpc_response_future(msg_id)
+        
+        # Send to the target peer
+        print(f"DEBUG: Sending RPC request to {peer}")
+        await self.send_message(peer, rpc_message)
+            
+        # Wait for response with timeout
+        try:
+            print(f"DEBUG: Waiting for RPC response for msg_id {msg_id}")
+            response = await asyncio.wait_for(future, 10.0)  # 10 second timeout
+            print(f"DEBUG: Received RPC response for msg_id {msg_id}: {response}")
+            await self.send_message(sender, {
+                "type": "rpc_response",
+                "msg_id": msg_id,
+                "result": response
+            })
+        except asyncio.TimeoutError:
+            print(f"DEBUG: RPC request timed out for msg_id {msg_id}")
+            await self.send_message(sender, {
+                "type": "rpc_error",
+                "msg_id": msg_id,
+                "error": "RPC request timed out"
+            })
+            self.clear_rpc_response(msg_id)
 
 
 class FastAPIMessageBus(MessageBus):
@@ -213,23 +297,41 @@ class FastAPIMessageBus(MessageBus):
                 while True:
                     data = await websocket.receive_json()
                     
+                    print(f"DEBUG: Received data from {identity}: {data}")
+                    
                     # Process the incoming message based on its type
                     if "type" not in data:
                         continue
                     
                     if data["type"] == "vip":
                         # Handle VIP message
-                        message = Message(**data["message"])
+                        message_data = data["message"]
+                        message = Message(**message_data)
                         await self.message_queue.put(message)
                         
                         # If this is an RPC, handle it
-                        if hasattr(message, "subsystem") and message.subsystem == "rpc":
-                            # Process RPC message
-                            if message.peer in self.manager.active_connections:
-                                await self.manager.send_message(message.peer, {
-                                    "type": "vip",
-                                    "message": message.__dict__
-                                })
+                        if hasattr(message, "subsystem"):
+                            if message.subsystem == "rpc":
+                                # Forward the RPC message to the target peer
+                                if hasattr(message, "peer") and message.peer in self.manager.active_connections:
+                                    print(f"DEBUG: Forwarding VIP RPC message to {message.peer}")
+                                    await self.manager.send_message(message.peer, {
+                                        "type": "vip",
+                                        "message": message.__dict__
+                                    })
+                            elif message.subsystem == "rpc_response":
+                                # Handle RPC response
+                                if hasattr(message, "msg_id"):
+                                    print(f"DEBUG: Received VIP RPC response for msg_id {message.msg_id}")
+                                    # Set the result for the waiting future
+                                    self.manager.set_rpc_response(message.msg_id, message.args[0] if hasattr(message, "args") and message.args else None)
+                                    
+                                    # Forward the response to the original requester
+                                    if hasattr(message, "peer") and message.peer in self.manager.active_connections:
+                                        await self.manager.send_message(message.peer, {
+                                            "type": "vip",
+                                            "message": message.__dict__
+                                        })
                     
                     elif data["type"] == "subscribe":
                         # Handle subscription
@@ -280,11 +382,46 @@ class FastAPIMessageBus(MessageBus):
                                 data["message"],
                                 identity
                             )
+                    
+                    elif data["type"] == "rpc":
+                        # Handle direct RPC calls
+                        if all(k in data for k in ["peer", "method", "msg_id"]):
+                            peer = data["peer"]
+                            method = data["method"]
+                            args = data.get("args", [])
+                            kwargs = data.get("kwargs", {})
+                            msg_id = data["msg_id"]
+                            
+                            await self.manager.handle_rpc(
+                                sender=identity,
+                                peer=peer,
+                                method=method,
+                                args=args,
+                                kwargs=kwargs,
+                                msg_id=msg_id
+                            )
+                    
+                    elif data["type"] == "rpc_response":
+                        # Handle RPC response messages
+                        if "msg_id" in data and "result" in data:
+                            msg_id = data["msg_id"]
+                            result = data["result"]
+                            print(f"DEBUG: Setting RPC response for msg_id {msg_id}: {result}")
+                            self.manager.set_rpc_response(msg_id, result)
+                    
+                    elif data["type"] == "rpc_error":
+                        # Handle RPC error messages
+                        if "msg_id" in data and "error" in data:
+                            msg_id = data["msg_id"]
+                            error = data["error"]
+                            print(f"DEBUG: Setting RPC error for msg_id {msg_id}: {error}")
+                            self.manager.set_rpc_response(msg_id, {"error": error})
             
             except WebSocketDisconnect:
+                print(f"DEBUG: WebSocket disconnect for {identity}")
                 self.manager.disconnect(identity)
             except Exception as e:
-                print(f"Error in websocket connection: {e}")
+                print(f"Error in websocket connection for {identity}: {e}")
                 self.manager.disconnect(identity)
     
     def start(self):
@@ -303,6 +440,7 @@ class FastAPIMessageBus(MessageBus):
             self.server_thread.daemon = True
             self.server_thread.start()
             self.running = True
+            print(f"DEBUG: MessageBus started on {self.host}:{self.port}")
     
     def stop(self):
         """Stop the message bus."""
@@ -310,6 +448,7 @@ class FastAPIMessageBus(MessageBus):
             self.running = False
             if self._stop_handler:
                 self._stop_handler.message_bus_shutdown()
+            print("DEBUG: MessageBus stopped")
     
     def is_running(self) -> bool:
         """Check if the message bus is running."""
