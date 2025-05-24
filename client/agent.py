@@ -6,7 +6,6 @@ from gevent.event import AsyncResult
 # Patch standard library to work with gevent
 monkey.patch_all()
 
-import inspect
 import json
 import uuid
 import websocket
