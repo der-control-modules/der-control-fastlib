@@ -115,8 +115,9 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "run":
         # Just run the listener agent directly
         listener = ListenerAgent()
-        listener.vip.rpc.export("update_config", listener.update_config)
-        listener.vip.rpc.export("reconfigure", listener.reconfigure)
+        # Export RPC methods on the listener
+        listener.vip.rpc.export_method("update_config", listener.update_config)
+        listener.vip.rpc.export_method("reconfigure", listener.reconfigure)
         
         try:
             listener.connect()

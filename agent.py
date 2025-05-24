@@ -20,11 +20,52 @@ class RPC:
     def __init__(self, agent):
         self._agent = agent
         self._exported_methods = {}
+        
+        # Register any methods decorated with @RPC.export
+        self._register_decorated_methods(agent)
     
-    def export(self, method_name: str, method: Callable):
-        """Export an RPC method that can be called remotely."""
+    @staticmethod
+    def export(method=None, name=None):
+        """
+        Decorator to mark a method as remotely accessible.
+        
+        Usage:
+            @RPC.export
+            def my_method(self, arg1, arg2):
+                pass
+                
+            @RPC.export(name='custom_name')
+            def my_method(self, arg1, arg2):
+                pass
+        """
+        # Handle the case where decorator is used without parentheses
+        if callable(method):
+            setattr(method, "rpc_exported", True)
+            setattr(method, "rpc_name", None)  # Use the method's name
+            return method
+
+        # Handle the case where decorator is used with parentheses
+        def decorator(f):
+            setattr(f, "rpc_exported", True)
+            setattr(f, "rpc_name", name)
+            return f
+        return decorator
+    
+    def export_method(self, method_name: str, method: Callable):
+        """Programmatically export an RPC method that can be called remotely."""
         self._exported_methods[method_name] = method
         print(f"Agent {self._agent.identity} exported RPC method: {method_name}")
+        return method  # Return the method for chaining
+    
+    def _register_decorated_methods(self, agent):
+        """Find and register methods decorated with @RPC.export."""
+        for attr_name in dir(agent):
+            attr = getattr(agent, attr_name)
+            if callable(attr) and hasattr(attr, "rpc_exported"):
+                # Use the custom name if provided, otherwise use the method's name
+                method_name = getattr(attr, "rpc_name") or attr_name
+                self._exported_methods[method_name] = attr
+                print(f"Agent {self._agent.identity} exported RPC method: {method_name} (from decorator)")
     
     def call(self, peer: str, method: str, *args, **kwargs):
         """Make an RPC call to another agent, returning an AsyncResult."""
@@ -367,31 +408,6 @@ class VIP:
             async_result.set_exception(e)
         
         return async_result
-    
-    def ping(self, peer: str):
-        """Ping another agent to check if it's alive, returning an AsyncResult."""
-        try:
-            # Get the AsyncResult from the RPC call
-            async_result = self.rpc.call(peer, "ping")
-            
-            # Create a new AsyncResult for the ping result (True/False)
-            ping_result = AsyncResult()
-            
-            # Process the RPC result to determine if the peer is alive
-            def process_ping_result():
-                try:
-                    result = async_result.get(timeout=5)
-                    ping_result.set(result == "pong")
-                except Exception:
-                    ping_result.set(False)
-            
-            gevent.spawn(process_ping_result)
-            return ping_result
-        except Exception:
-            # If there's an error initiating the RPC call, the peer is not alive
-            result = AsyncResult()
-            result.set(False)
-            return result
 
 
 class Core:
@@ -539,14 +555,14 @@ class Agent:
             
             # Fire the ondisconnected event with self as sender
             self.core.fire_event('ondisconnected', sender=self)
-            
+
     def __on_ws_open__(self, ws):
         """Callback when WebSocket connection is opened."""
         self.connected = True
         print(f"DEBUG: Agent {self.identity} websocket connection opened")
     
     def __on_ws_message__(self, ws, message):
-        """Callback when a message is received."""
+        """Internal callback when a WebSocket message is received."""
         try:
             data = json.loads(message)
             self.received_messages.append(data)

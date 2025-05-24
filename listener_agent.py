@@ -1,9 +1,6 @@
-# listener_agent.py
-
-from agent import Agent, Core
+from agent import Agent, Core, RPC
 import gevent
 from gevent.event import AsyncResult
-import json
 import datetime
 
 
@@ -62,6 +59,7 @@ class ListenerAgent(Agent):
         print(f"  Headers: {headers}")
         print(f"  Message: {message}")
     
+    @RPC.export
     def reconfigure(self, config):
         """Update agent configuration."""
         if not config:
@@ -70,12 +68,10 @@ class ListenerAgent(Agent):
         
         self._config.update(config)
         
-        # Return an AsyncResult for API consistency
-        async_result = AsyncResult()
-        async_result.set(True)
-        return async_result
+        # Return success
+        return True
     
-    # Add an RPC method to update configuration
+    @RPC.export
     def update_config(self, config_name, value):
         """RPC method to update configuration at runtime."""
         if config_name in self._config:
@@ -85,16 +81,16 @@ class ListenerAgent(Agent):
             return f"Updated {config_name}"
         else:
             return f"Unknown config parameter: {config_name}"
+    
+    @RPC.export(name="get_version")
+    def version(self):
+        """Return the version of the agent."""
+        return "1.0.0"
 
 
 if __name__ == "__main__":
     # Create and run the listener agent
     listener = ListenerAgent()
-    
-    # Export RPC methods
-    listener.vip.rpc.export("update_config", listener.update_config)
-    listener.vip.rpc.export("reconfigure", listener.reconfigure)
-    listener.vip.rpc.export("ping", lambda: "pong from listener")
     
     try:
         # Connect to the server
