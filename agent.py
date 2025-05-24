@@ -376,7 +376,6 @@ class VIP:
         self._agent = agent
         self.rpc = RPC(agent)
         self.pubsub = PubSub(agent)
-        self.config = Config(agent)
     
     def send_message(self, peer: str, subsystem: str, args: list = None):
         """Send a VIP message, returning an AsyncResult."""
@@ -483,11 +482,151 @@ class Core:
                 except Exception as e:
                     print(f"Error in {event_name} handler: {e}")
 
+class ConfigStore:
+    """ConfigStore subsystem for the Agent."""
+    
+    def __init__(self, agent):
+        self._agent = agent
+        self._config_callbacks = {}
+        # Initialize httpx client
+        import httpx
+        self._client = httpx.AsyncClient()
+    
+    def get(self, config_name: str):
+        """Get a configuration from the config store."""
+        async_result = AsyncResult()
+        
+        # Prepare request
+        request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+        
+        # Use gevent to make the HTTP request asynchronously
+        def fetch_config():
+            try:
+                import httpx
+                with httpx.Client() as client:  # Synchronous client for gevent compatibility
+                    response = client.get(request_url)
+                    if response.status_code == 200:
+                        data = response.json()
+                        async_result.set(data["data"])
+                    else:
+                        async_result.set_exception(Exception(f"Failed to get config: {response.text}"))
+            except Exception as e:
+                async_result.set_exception(e)
+        
+        gevent.spawn(fetch_config)
+        return async_result
+    
+    def set(self, config_name: str, config_data: Any):
+        """Set a configuration in the config store."""
+        async_result = AsyncResult()
+        
+        # Prepare request
+        request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+        
+        # Use gevent to make the HTTP request asynchronously
+        def store_config():
+            try:
+                import httpx
+                with httpx.Client() as client:  # Synchronous client for gevent compatibility
+                    response = client.put(request_url, json=config_data)
+                    if response.status_code == 200:
+                        async_result.set(True)
+                    else:
+                        async_result.set_exception(Exception(f"Failed to store config: {response.text}"))
+            except Exception as e:
+                async_result.set_exception(e)
+        
+        gevent.spawn(store_config)
+        return async_result
+    
+    def delete(self, config_name: str):
+        """Delete a configuration from the config store."""
+        async_result = AsyncResult()
+        
+        # Prepare request
+        request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+        
+        # Use gevent to make the HTTP request asynchronously
+        def delete_config():
+            try:
+                import httpx
+                with httpx.Client() as client:  # Synchronous client for gevent compatibility
+                    response = client.delete(request_url)
+                    if response.status_code == 200:
+                        async_result.set(True)
+                    else:
+                        async_result.set_exception(Exception(f"Failed to delete config: {response.text}"))
+            except Exception as e:
+                async_result.set_exception(e)
+        
+        gevent.spawn(delete_config)
+        return async_result
+    
+    def list(self):
+        """List all configurations for this agent."""
+        async_result = AsyncResult()
+        
+        # Prepare request
+        request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/list?agent_id={self._agent.identity}"
+        
+        # Use gevent to make the HTTP request asynchronously
+        def list_configs():
+            try:
+                import httpx
+                with httpx.Client() as client:  # Synchronous client for gevent compatibility
+                    response = client.get(request_url)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if self._agent.identity in data["data"]:
+                            async_result.set(data["data"][self._agent.identity])
+                        else:
+                            async_result.set([])  # No configs for this agent
+                    else:
+                        async_result.set_exception(Exception(f"Failed to list configs: {response.text}"))
+            except Exception as e:
+                async_result.set_exception(e)
+        
+        gevent.spawn(list_configs)
+        return async_result
+    
+    def watch(self, config_name: str, callback: Callable):
+        """Register a callback to be called when a configuration changes."""
+        if config_name not in self._config_callbacks:
+            self._config_callbacks[config_name] = []
+        self._config_callbacks[config_name].append(callback)
+    
+    def unwatch(self, config_name: str, callback: Callable = None):
+        """Unregister a callback for configuration changes."""
+        if callback is None:
+            # Remove all callbacks for this config
+            if config_name in self._config_callbacks:
+                del self._config_callbacks[config_name]
+        else:
+            # Remove specific callback
+            if config_name in self._config_callbacks:
+                self._config_callbacks[config_name] = [
+                    cb for cb in self._config_callbacks[config_name] if cb != callback
+                ]
+                
+    def handle_update(self, config_name: str):
+        """Handle a configuration update notification."""
+        if config_name in self._config_callbacks:
+            # Get the updated config
+            config_data = self.get(config_name).get()
+            # Call all callbacks
+            for callback in self._config_callbacks[config_name]:
+                try:
+                    callback(config_name, config_data)
+                except Exception as e:
+                    print(f"Error in config update callback: {e}")
+    
 class Agent:
     """A gevent-based agent that connects to the VOLTTRON MessageBus."""
     
     def __init__(self, identity: str, host: str = "127.0.0.1", port: int = 8000):
         self.identity = identity
+        self._host = host
+        self._port = port
         self.websocket_url = f"ws://{host}:{port}/ws/{identity}"
         self.websocket = None
         self.connected = False
@@ -495,13 +634,16 @@ class Agent:
         self._listener_greenlet = None
         self.rpc_responses = {}  # Maps message IDs to AsyncResults
         
-        # Hierarchical structure
-        self.vip = VIP(self)
+        # Create subsystems
         self.core = Core(self)
+        self.config = ConfigStore(self)  # Initialize config before VIP
         
-        # Callbacks
-        self.on_start_callbacks = []
-        self.on_stop_callbacks = []
+        # Initialize VIP with all subsystems
+        self.vip = VIP(self)
+        
+        # Register any methods decorated with @Core.receiver or @RPC.export
+        self.core._register_decorated_methods(self)
+        self.vip.rpc._register_decorated_methods(self)
     
     def connect(self):
         """Connect to the message bus."""
@@ -574,7 +716,22 @@ class Agent:
             if msg_type == "pubsub":
                 # Handle pubsub messages
                 self.vip.pubsub.handle_message(data)
-                        
+            elif msg_type == "config_update":
+                # Handle config update notifications
+                config_name = data.get("config_name")
+                if config_name:
+                    self.config.handle_update(config_name)
+            
+            elif msg_type == "config_delete":
+                # Handle config delete notifications
+                config_name = data.get("config_name")
+                if config_name and config_name in self.config._config_callbacks:
+                    # Notify callbacks with None to indicate deletion
+                    for callback in self.config._config_callbacks[config_name]:
+                        try:
+                            callback(config_name, None)
+                        except Exception as e:
+                            print(f"Error in config delete callback: {e}")            
             elif msg_type == "rpc_request":
                 # Handle RPC request
                 print(f"DEBUG: Agent {self.identity} received RPC request: {data}")
