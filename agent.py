@@ -2,6 +2,7 @@
 
 import gevent
 from gevent import monkey
+from gevent.event import AsyncResult
 # Patch standard library to work with gevent
 monkey.patch_all()
 
@@ -25,12 +26,13 @@ class RPC:
         print(f"Agent {self._agent.identity} exported RPC method: {method_name}")
     
     def call(self, peer: str, method: str, *args, **kwargs):
-        """Make an RPC call to another agent."""
+        """Make an RPC call to another agent, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
         
         msg_id = str(uuid.uuid4())
-        self._agent.rpc_responses[msg_id] = None
+        async_result = AsyncResult()
+        self._agent.rpc_responses[msg_id] = async_result
         
         print(f"DEBUG: Agent {self._agent.identity} making RPC call to {peer}.{method} with msg_id {msg_id}")
         
@@ -45,26 +47,21 @@ class RPC:
         
         print(f"Agent {self._agent.identity} sent RPC call to {peer}: method={method}, args={args}, kwargs={kwargs}")
         
-        # Wait for the response with a timeout
-        timeout = 10  # seconds
-        start_time = gevent.time.time()
-        while self._agent.rpc_responses.get(msg_id) is None:
-            print(f"DEBUG: Agent {self._agent.identity} waiting for response to msg_id {msg_id}")
-            gevent.sleep(0.5)  # Longer sleep for more readable debug output
-            if gevent.time.time() - start_time > timeout:
-                print(f"DEBUG: Agent {self._agent.identity} RPC call timed out for msg_id {msg_id}")
-                del self._agent.rpc_responses[msg_id]
-                raise TimeoutError(f"RPC call timed out: {method}")
+        # Spawn a timeout watcher
+        gevent.spawn(self._watch_timeout, msg_id, async_result, 10)  # 10 second timeout
         
-        # Get and remove the response
-        result = self._agent.rpc_responses.pop(msg_id)
-        print(f"DEBUG: Agent {self._agent.identity} received final result for msg_id {msg_id}: {result}")
+        return async_result
+    
+    def _watch_timeout(self, msg_id: str, async_result: AsyncResult, timeout: int):
+        """Watch for timeout on an AsyncResult."""
+        # Wait for the timeout
+        gevent.sleep(timeout)
         
-        # Check if there was an error
-        if isinstance(result, dict) and "error" in result:
-            raise Exception(f"RPC error: {result['error']}")
-            
-        return result
+        # If the response hasn't been set yet, set an error
+        if msg_id in self._agent.rpc_responses:
+            del self._agent.rpc_responses[msg_id]
+            if not async_result.ready():
+                async_result.set_exception(TimeoutError(f"RPC call timed out"))
     
     def get_exports(self):
         """Get all exported RPC methods."""
@@ -82,28 +79,51 @@ class RPC:
             
             # Forward the call to the target agent
             try:
-                result = self.call(target, actual_method, *args, **kwargs)
-                return result, None
+                # Get an AsyncResult for the remote call
+                async_result = self.call(target, actual_method, *args, **kwargs)
+                
+                # Create a new async result to track the response back to the original sender
+                final_result = AsyncResult()
+                
+                # Spawn a greenlet to wait for the result and relay it
+                def relay_result():
+                    try:
+                        # Wait for the result from the remote agent
+                        result = async_result.get(timeout=10)
+                        # Return it to the requestor
+                        final_result.set(result)
+                    except Exception as e:
+                        final_result.set_exception(e)
+                
+                gevent.spawn(relay_result)
+                return final_result
             except Exception as e:
                 error_msg = f"Remote call error: {str(e)}"
-                return None, error_msg
+                print(f"DEBUG: {error_msg}")
+                async_result = AsyncResult()
+                async_result.set_exception(Exception(error_msg))
+                return async_result
         else:
             # This is a local method call
+            async_result = AsyncResult()
+            
             if method_name in self._exported_methods:
                 try:
                     method = self._exported_methods[method_name]
                     print(f"DEBUG: Agent {self._agent.identity} executing method {method_name}")
                     result = method(*args, **kwargs)
                     print(f"DEBUG: Agent {self._agent.identity} method {method_name} result: {result}")
-                    return result, None
+                    async_result.set(result)
                 except Exception as e:
                     error = str(e)
                     print(f"DEBUG: Agent {self._agent.identity} method {method_name} error: {error}")
-                    return None, error
+                    async_result.set_exception(e)
             else:
                 error = f"Method {method_name} not found or not exported"
                 print(f"DEBUG: {error}")
-                return None, error
+                async_result.set_exception(Exception(error))
+            
+            return async_result
 
 
 class PubSub:
@@ -114,42 +134,61 @@ class PubSub:
         self._subscriptions = {}
     
     def publish(self, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""):
-        """Publish a message to a topic."""
+        """Publish a message to a topic, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
         
         if headers is None:
             headers = {}
         
-        self._agent.websocket.send(json.dumps({
-            "type": "publish",
-            "bus": bus,
-            "topic": topic,
-            "headers": headers,
-            "message": message
-        }))
+        # Create an AsyncResult to track the publish operation
+        async_result = AsyncResult()
         
-        print(f"Agent {self._agent.identity} published to {topic}: {message}")
+        try:
+            self._agent.websocket.send(json.dumps({
+                "type": "publish",
+                "bus": bus,
+                "topic": topic,
+                "headers": headers,
+                "message": message
+            }))
+            
+            print(f"Agent {self._agent.identity} published to {topic}: {message}")
+            async_result.set(True)  # Success
+        except Exception as e:
+            print(f"Error publishing message: {e}")
+            async_result.set_exception(e)
+        
+        return async_result
     
     def subscribe(self, prefix: str, callback: Optional[Callable] = None):
-        """Subscribe to a topic prefix."""
+        """Subscribe to a topic prefix, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
         
         subscription_id = str(uuid.uuid4())
         self._subscriptions[prefix] = callback or (lambda msg: print(f"Subscription callback for {prefix}: {msg}"))
         
-        self._agent.websocket.send(json.dumps({
-            "type": "subscribe",
-            "prefix": prefix,
-            "id": subscription_id
-        }))
+        # Create an AsyncResult to track the subscription operation
+        async_result = AsyncResult()
         
-        print(f"Agent {self._agent.identity} subscribed to prefix: {prefix}")
-        return subscription_id
+        try:
+            self._agent.websocket.send(json.dumps({
+                "type": "subscribe",
+                "prefix": prefix,
+                "id": subscription_id
+            }))
+            
+            print(f"Agent {self._agent.identity} subscribed to prefix: {prefix}")
+            async_result.set(subscription_id)  # Return the subscription ID
+        except Exception as e:
+            print(f"Error subscribing to topic: {e}")
+            async_result.set_exception(e)
+        
+        return async_result
     
     def subscribe_regex(self, pattern: str, callback: Optional[Callable] = None):
-        """Subscribe to a topic pattern."""
+        """Subscribe to a topic pattern, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
         
@@ -157,14 +196,23 @@ class PubSub:
         # Note: We're using the pattern as the key here
         self._subscriptions[pattern] = callback or (lambda msg: print(f"Subscription callback for {pattern}: {msg}"))
         
-        self._agent.websocket.send(json.dumps({
-            "type": "subscribe",
-            "pattern": pattern,
-            "id": subscription_id
-        }))
+        # Create an AsyncResult to track the subscription operation
+        async_result = AsyncResult()
         
-        print(f"Agent {self._agent.identity} subscribed to pattern: {pattern}")
-        return subscription_id
+        try:
+            self._agent.websocket.send(json.dumps({
+                "type": "subscribe",
+                "pattern": pattern,
+                "id": subscription_id
+            }))
+            
+            print(f"Agent {self._agent.identity} subscribed to pattern: {pattern}")
+            async_result.set(subscription_id)  # Return the subscription ID
+        except Exception as e:
+            print(f"Error subscribing to pattern: {e}")
+            async_result.set_exception(e)
+        
+        return async_result
     
     def get_subscriptions(self):
         """Get all active subscriptions."""
@@ -190,14 +238,38 @@ class Config:
     def set(self, key: str, value: Any):
         """Set a configuration value."""
         self._config[key] = value
+        # Return AsyncResult for API consistency
+        result = AsyncResult()
+        result.set(True)
+        return result
     
     def get(self, key: str, default=None):
         """Get a configuration value."""
-        return self._config.get(key, default)
+        value = self._config.get(key, default)
+        # Return AsyncResult for API consistency
+        result = AsyncResult()
+        result.set(value)
+        return result
+    
+    def delete(self, key: str):
+        """Delete a configuration value."""
+        if key in self._config:
+            del self._config[key]
+            success = True
+        else:
+            success = False
+        # Return AsyncResult for API consistency
+        result = AsyncResult()
+        result.set(success)
+        return result
     
     def list(self):
         """List all configuration keys."""
-        return list(self._config.keys())
+        keys = list(self._config.keys())
+        # Return AsyncResult for API consistency
+        result = AsyncResult()
+        result.set(keys)
+        return result
 
 
 class VIP:
@@ -210,7 +282,7 @@ class VIP:
         self.config = Config(agent)
     
     def send_message(self, peer: str, subsystem: str, args: list = None):
-        """Send a VIP message."""
+        """Send a VIP message, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
         
@@ -218,28 +290,52 @@ class VIP:
             args = []
         
         msg_id = str(uuid.uuid4())
+        async_result = AsyncResult()
         
-        self._agent.websocket.send(json.dumps({
-            "type": "vip",
-            "message": {
-                "peer": peer,
-                "user": self._agent.identity,
-                "subsystem": subsystem,
-                "msg_id": msg_id,
-                "args": args
-            }
-        }))
+        try:
+            self._agent.websocket.send(json.dumps({
+                "type": "vip",
+                "message": {
+                    "peer": peer,
+                    "user": self._agent.identity,
+                    "subsystem": subsystem,
+                    "msg_id": msg_id,
+                    "args": args
+                }
+            }))
+            
+            print(f"Agent {self._agent.identity} sent VIP message to {peer}: subsystem={subsystem}, args={args}")
+            async_result.set(msg_id)  # Return the message ID
+        except Exception as e:
+            print(f"Error sending VIP message: {e}")
+            async_result.set_exception(e)
         
-        print(f"Agent {self._agent.identity} sent VIP message to {peer}: subsystem={subsystem}, args={args}")
-        return msg_id
+        return async_result
     
     def ping(self, peer: str):
-        """Ping another agent to check if it's alive."""
+        """Ping another agent to check if it's alive, returning an AsyncResult."""
         try:
-            result = self.rpc.call(peer, "ping")
-            return result == "pong"
+            # Get the AsyncResult from the RPC call
+            async_result = self.rpc.call(peer, "ping")
+            
+            # Create a new AsyncResult for the ping result (True/False)
+            ping_result = AsyncResult()
+            
+            # Process the RPC result to determine if the peer is alive
+            def process_ping_result():
+                try:
+                    result = async_result.get(timeout=5)
+                    ping_result.set(result == "pong")
+                except Exception:
+                    ping_result.set(False)
+            
+            gevent.spawn(process_ping_result)
+            return ping_result
         except Exception:
-            return False
+            # If there's an error initiating the RPC call, the peer is not alive
+            result = AsyncResult()
+            result.set(False)
+            return result
 
 
 class Core:
@@ -249,8 +345,14 @@ class Core:
         self._agent = agent
     
     def stop(self):
-        """Stop the agent."""
-        self._agent.disconnect()
+        """Stop the agent, returning an AsyncResult."""
+        async_result = AsyncResult()
+        try:
+            self._agent.disconnect()
+            async_result.set(True)
+        except Exception as e:
+            async_result.set_exception(e)
+        return async_result
     
     def identity(self):
         """Get the agent's identity."""
@@ -275,7 +377,7 @@ class Agent:
         self.connected = False
         self.received_messages = []
         self._listener_greenlet = None
-        self.rpc_responses = {}
+        self.rpc_responses = {}  # Maps message IDs to AsyncResults
         
         # Hierarchical structure
         self.vip = VIP(self)
@@ -367,24 +469,33 @@ class Agent:
                 kwargs = data.get("kwargs", {})
                 msg_id = data.get("msg_id")
                 
-                # Process the RPC request
-                result, error = self.vip.rpc.handle_request(sender, method_name, args, kwargs, msg_id)
+                # Process the RPC request - returns an AsyncResult
+                async_result = self.vip.rpc.handle_request(sender, method_name, args, kwargs, msg_id)
                 
-                # Send response
-                if error:
-                    print(f"DEBUG: Agent {self.identity} sending RPC error response: {error}")
-                    self.websocket.send(json.dumps({
-                        "type": "rpc_error",
-                        "msg_id": msg_id,
-                        "error": error
-                    }))
-                else:
-                    print(f"DEBUG: Agent {self.identity} sending RPC response: {result}")
-                    self.websocket.send(json.dumps({
-                        "type": "rpc_response",
-                        "msg_id": msg_id,
-                        "result": result
-                    }))
+                # Wait for the result and send the response
+                def send_response():
+                    try:
+                        # Wait for the result (with timeout)
+                        result = async_result.get(timeout=10)
+                        # Send successful response
+                        print(f"DEBUG: Agent {self.identity} sending RPC response: {result}")
+                        self.websocket.send(json.dumps({
+                            "type": "rpc_response",
+                            "msg_id": msg_id,
+                            "result": result
+                        }))
+                    except Exception as e:
+                        # Send error response
+                        error = str(e)
+                        print(f"DEBUG: Agent {self.identity} sending RPC error response: {error}")
+                        self.websocket.send(json.dumps({
+                            "type": "rpc_error",
+                            "msg_id": msg_id,
+                            "error": error
+                        }))
+                
+                # Spawn a greenlet to process the response asynchronously
+                gevent.spawn(send_response)
                 
             elif msg_type == "rpc_response":
                 # Handle RPC response
@@ -392,7 +503,9 @@ class Agent:
                 result = data.get("result")
                 print(f"DEBUG: Agent {self.identity} received RPC response for msg_id {msg_id}: {result}")
                 if msg_id in self.rpc_responses:
-                    self.rpc_responses[msg_id] = result
+                    # Get the AsyncResult for this message ID and set its result
+                    async_result = self.rpc_responses.pop(msg_id)
+                    async_result.set(result)
                 else:
                     print(f"DEBUG: No pending RPC request found for msg_id {msg_id}")
                 
@@ -402,7 +515,9 @@ class Agent:
                 error = data.get("error", "Unknown RPC error")
                 print(f"DEBUG: Agent {self.identity} received RPC error for msg_id {msg_id}: {error}")
                 if msg_id in self.rpc_responses:
-                    self.rpc_responses[msg_id] = {"error": error}
+                    # Get the AsyncResult for this message ID and set the exception
+                    async_result = self.rpc_responses.pop(msg_id)
+                    async_result.set_exception(Exception(error))
                 else:
                     print(f"DEBUG: No pending RPC request found for msg_id {msg_id}")
                 
@@ -419,7 +534,17 @@ class Agent:
                     msg_id = message.get("msg_id")
                     args = message.get("args", [])
                     if msg_id in self.rpc_responses and args:
-                        self.rpc_responses[msg_id] = args[0]  # Assuming first arg is result
+                        # Get the AsyncResult and set its value
+                        async_result = self.rpc_responses.pop(msg_id)
+                        async_result.set(args[0])  # Assuming first arg is result
+                elif subsystem == "rpc_error":
+                    # This is an RPC error via VIP
+                    msg_id = message.get("msg_id")
+                    args = message.get("args", [])
+                    if msg_id in self.rpc_responses and args:
+                        # Get the AsyncResult and set the exception
+                        async_result = self.rpc_responses.pop(msg_id)
+                        async_result.set_exception(Exception(args[0]))  # Assuming first arg is error message
             
         except Exception as e:
             print(f"Error processing message in agent {self.identity}: {e}")
@@ -438,22 +563,30 @@ class Agent:
             method_name = args[0]
             method_args = args[1:]
             
-            # Process the RPC request
-            result, error = self.vip.rpc.handle_request(peer, method_name, method_args, {}, msg_id)
+            # Process the RPC request - returns an AsyncResult
+            async_result = self.vip.rpc.handle_request(peer, method_name, method_args, {}, msg_id)
             
-            # Send response via VIP
-            if error:
-                self.vip.send_message(
-                    peer=peer, 
-                    subsystem="rpc_error",
-                    args=[error, msg_id]
-                )
-            else:
-                self.vip.send_message(
-                    peer=peer, 
-                    subsystem="rpc_response",
-                    args=[result, msg_id]
-                )
+            # Wait for the result and send the response via VIP
+            def send_vip_response():
+                try:
+                    # Wait for the result (with timeout)
+                    result = async_result.get(timeout=10)
+                    # Send successful response via VIP
+                    self.vip.send_message(
+                        peer=peer, 
+                        subsystem="rpc_response",
+                        args=[result, msg_id]
+                    )
+                except Exception as e:
+                    # Send error response via VIP
+                    self.vip.send_message(
+                        peer=peer, 
+                        subsystem="rpc_error",
+                        args=[str(e), msg_id]
+                    )
+            
+            # Spawn a greenlet to process the response asynchronously
+            gevent.spawn(send_vip_response)
     
     def _on_error(self, ws, error):
         """Callback when an error occurs."""

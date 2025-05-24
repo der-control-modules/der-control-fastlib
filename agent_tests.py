@@ -20,20 +20,20 @@ def run_publisher_subscriber_test():
     gevent.sleep(1)
     
     # Set up subscriptions - using the new hierarchical API
-    subscriber1.vip.pubsub.subscribe("test/")
-    subscriber2.vip.pubsub.subscribe("test/special/")
+    subscriber1.vip.pubsub.subscribe("test/").get()  # Wait for result
+    subscriber2.vip.pubsub.subscribe("test/special/").get()  # Wait for result
     
     # Set up pattern subscription
-    subscriber1.vip.pubsub.subscribe_regex(r"^pattern/\d+/test$")
+    subscriber1.vip.pubsub.subscribe_regex(r"^pattern/\d+/test$").get()  # Wait for result
     
     # Wait for subscriptions to be processed
     gevent.sleep(1)
     
-    # Publish messages - using the new hierarchical API
-    publisher.vip.pubsub.publish("test/topic1", "Hello from topic1")
-    publisher.vip.pubsub.publish("test/special/topic2", "Hello from special topic2")
-    publisher.vip.pubsub.publish("other/topic3", "Hello from other topic3")
-    publisher.vip.pubsub.publish("pattern/123/test", "Hello from pattern match")
+    # Publish messages - using the new hierarchical API with AsyncResult
+    publisher.vip.pubsub.publish("test/topic1", "Hello from topic1").get()  # Wait for result
+    publisher.vip.pubsub.publish("test/special/topic2", "Hello from special topic2").get()  # Wait for result
+    publisher.vip.pubsub.publish("other/topic3", "Hello from other topic3").get()  # Wait for result
+    publisher.vip.pubsub.publish("pattern/123/test", "Hello from pattern match").get()  # Wait for result
     
     # Wait for messages to be processed
     gevent.sleep(2)
@@ -48,9 +48,9 @@ def run_publisher_subscriber_test():
         print(f"  {msg}")
     
     # Clean up
-    publisher.core.stop()
-    subscriber1.core.stop()
-    subscriber2.core.stop()
+    publisher.core.stop().get()  # Wait for stop to complete
+    subscriber1.core.stop().get()  # Wait for stop to complete
+    subscriber2.core.stop().get()  # Wait for stop to complete
 
 
 def run_vip_message_test():
@@ -66,9 +66,9 @@ def run_vip_message_test():
     # Wait for connections to be established
     gevent.sleep(1)
     
-    # Send VIP messages - using the new hierarchical API
-    agent1.vip.send_message("agent2", "rpc", ["hello", "world"])
-    agent2.vip.send_message("agent1", "rpc", ["response", "received"])
+    # Send VIP messages - using AsyncResults to wait for completion
+    agent1.vip.send_message("agent2", "rpc", ["hello", "world"]).get()
+    agent2.vip.send_message("agent1", "rpc", ["response", "received"]).get()
     
     # Wait for messages to be processed
     gevent.sleep(2)
@@ -83,8 +83,8 @@ def run_vip_message_test():
         print(f"  {msg}")
     
     # Clean up
-    agent1.core.stop()
-    agent2.core.stop()
+    agent1.core.stop().get()
+    agent2.core.stop().get()
 
 
 def run_rpc_test():
@@ -100,7 +100,7 @@ def run_rpc_test():
     # Wait for connections to be established
     gevent.sleep(1)
     
-    # Export RPC methods on the server - using the new hierarchical API
+    # Export RPC methods on the server
     server.vip.rpc.export("add", lambda x, y: x + y)
     server.vip.rpc.export("multiply", lambda x, y: x * y)
     server.vip.rpc.export("greet", lambda name: f"Hello, {name}!")
@@ -108,25 +108,35 @@ def run_rpc_test():
     # Wait for methods to be registered
     gevent.sleep(1)
     
-    # Make RPC calls from the client to the server - using the new hierarchical API
+    # Make RPC calls from the client to the server - using AsyncResult
     try:
         print("\nMaking RPC calls:")
         
-        result1 = client.vip.rpc.call("server", "add", 5, 3)
+        # Get AsyncResult from RPC call then wait for the result
+        result1 = client.vip.rpc.call("server", "add", 5, 3).get(timeout=5)
         print(f"  add(5, 3) = {result1}")
         
-        result2 = client.vip.rpc.call("server", "multiply", 4, 7)
+        # Get AsyncResult from RPC call then wait for the result
+        result2 = client.vip.rpc.call("server", "multiply", 4, 7).get(timeout=5)
         print(f"  multiply(4, 7) = {result2}")
         
-        result3 = client.vip.rpc.call("server", "greet", "VOLTTRON")
+        # Get AsyncResult from RPC call then wait for the result
+        result3 = client.vip.rpc.call("server", "greet", "VOLTTRON").get(timeout=5)
         print(f"  greet('VOLTTRON') = {result3}")
+
+        # Test non-blocking operation - saving the AsyncResult for later use
+        print("\nTesting non-blocking operation:")
+        async_result = client.vip.rpc.call("server", "add", 10, 20)
+        print("  RPC call made, continuing without waiting...")
+        gevent.sleep(1)  # Do other work
+        print(f"  Now getting the result: {async_result.get()}")
         
     except Exception as e:
         print(f"Error in RPC test: {e}")
     
     # Clean up
-    server.core.stop()
-    client.core.stop()
+    server.core.stop().get()
+    client.core.stop().get()
 
 
 def run_multi_hop_rpc_test():
@@ -143,7 +153,7 @@ def run_multi_hop_rpc_test():
         # Wait for connections to be established
         gevent.sleep(2)
         
-        # Export RPC methods - using the new hierarchical API
+        # Export RPC methods
         agent1.vip.rpc.export("ping", lambda: "pong from agent1")
         agent2.vip.rpc.export("ping", lambda: "pong from agent2")
         
@@ -152,27 +162,27 @@ def run_multi_hop_rpc_test():
         
         print("\nTesting basic RPC calls:")
         
-        # Direct call from agent1 to agent2
+        # Direct call from agent1 to agent2 - using AsyncResult
         print("\nDirect call from agent1 to agent2:")
-        result = agent1.vip.rpc.call("agent2", "ping")
+        result = agent1.vip.rpc.call("agent2", "ping").get(timeout=5)
         print(f"  agent1 -> agent2.ping() = {result}")
         
         # Direct call from agent2 to agent1
         print("\nDirect call from agent2 to agent1:")
-        result = agent2.vip.rpc.call("agent1", "ping")
+        result = agent2.vip.rpc.call("agent1", "ping").get(timeout=5)
         print(f"  agent2 -> agent1.ping() = {result}")
         
         # Test ping utility function
         print("\nTesting ping utility:")
-        is_alive = agent1.vip.ping("agent2")
+        is_alive = agent1.vip.ping("agent2").get(timeout=5)
         print(f"  agent2 is alive: {is_alive}")
         
     except Exception as e:
         print(f"Error in multi-hop RPC test: {e}")
     finally:
         # Clean up
-        agent1.core.stop()
-        agent2.core.stop()
+        agent1.core.stop().get(timeout=2)
+        agent2.core.stop().get(timeout=2)
 
 
 def run_config_test():
@@ -183,15 +193,15 @@ def run_config_test():
     # Connect agent
     agent.connect()
     
-    # Set configuration values
-    agent.vip.config.set("max_retries", 3)
-    agent.vip.config.set("timeout", 30)
-    agent.vip.config.set("server_address", "tcp://127.0.0.1:22916")
+    # Set configuration values - using AsyncResult to wait for completion
+    agent.vip.config.set("max_retries", 3).get()
+    agent.vip.config.set("timeout", 30).get()
+    agent.vip.config.set("server_address", "tcp://127.0.0.1:22916").get()
     
-    # Get configuration values
-    max_retries = agent.vip.config.get("max_retries")
-    timeout = agent.vip.config.get("timeout")
-    server_address = agent.vip.config.get("server_address")
+    # Get configuration values - using AsyncResult to get values
+    max_retries = agent.vip.config.get("max_retries").get()
+    timeout = agent.vip.config.get("timeout").get()
+    server_address = agent.vip.config.get("server_address").get()
     
     print("\nConfiguration values:")
     print(f"  max_retries: {max_retries}")
@@ -199,11 +209,11 @@ def run_config_test():
     print(f"  server_address: {server_address}")
     
     # List all configuration keys
-    keys = agent.vip.config.list()
+    keys = agent.vip.config.list().get()
     print(f"  All keys: {keys}")
     
     # Clean up
-    agent.core.stop()
+    agent.core.stop().get()
 
 
 def run_core_callback_test():
@@ -234,10 +244,58 @@ def run_core_callback_test():
     print(f"\nStart callback was called: {start_called[0]}")
     
     # Stop agent (should trigger onstop)
-    agent.core.stop()
+    agent.core.stop().get()
     gevent.sleep(1)
     
     print(f"Stop callback was called: {stop_called[0]}")
+
+
+def run_async_result_test():
+    """Test AsyncResult functionality."""
+    # Create test agents
+    server = Agent("server")
+    client = Agent("client")
+    
+    # Connect agents
+    server.connect()
+    client.connect()
+    
+    # Export a method that takes time to complete
+    def slow_operation(seconds):
+        print(f"Starting slow operation for {seconds} seconds...")
+        gevent.sleep(seconds)  # Simulate a time-consuming operation
+        print("Slow operation completed")
+        return f"Completed after {seconds} seconds"
+    
+    server.vip.rpc.export("slow_operation", slow_operation)
+    
+    # Wait for method to be registered
+    gevent.sleep(1)
+    
+    print("\nTesting AsyncResult with non-blocking calls:")
+    
+    # Make a non-blocking RPC call
+    print("Making RPC call...")
+    async_result = client.vip.rpc.call("server", "slow_operation", 3)
+    print("RPC call made, continuing execution...")
+    
+    # Check if the result is ready
+    print(f"Result ready? {async_result.ready()}")
+    
+    # Do some other work while waiting
+    print("Doing other work while waiting for the result...")
+    for i in range(3):
+        print(f"  Working... {i+1}")
+        gevent.sleep(1)
+    
+    # Now wait for the result
+    print("Now waiting for the result...")
+    result = async_result.get()
+    print(f"Result received: {result}")
+    
+    # Clean up
+    server.core.stop().get()
+    client.core.stop().get()
 
 
 if __name__ == "__main__":
@@ -264,9 +322,12 @@ if __name__ == "__main__":
         elif test_name == "core":
             print("Running Core Callback Test")
             run_core_callback_test()
+        elif test_name == "async":
+            print("Running AsyncResult Test")
+            run_async_result_test()
         else:
             print(f"Unknown test: {test_name}")
-            print("Available tests: pubsub, vip, rpc, multihop, config, core")
+            print("Available tests: pubsub, vip, rpc, multihop, config, core, async")
     else:
         # Run all tests
         print("Running all tests")
@@ -287,3 +348,6 @@ if __name__ == "__main__":
         
         print("\n=== Running Core Callback Test ===")
         run_core_callback_test()
+        
+        print("\n=== Running AsyncResult Test ===")
+        run_async_result_test()
