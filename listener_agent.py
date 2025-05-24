@@ -1,6 +1,6 @@
 # listener_agent.py
 
-from agent import Agent
+from agent import Agent, Core
 import gevent
 from gevent.event import AsyncResult
 import json
@@ -13,8 +13,6 @@ class ListenerAgent(Agent):
     """
     
     def __init__(self, identity="listener", **kwargs):
-        super().__init__(identity=identity, **kwargs)
-        
         # Configure topic subscriptions
         self.default_config = {
             "subscribe_patterns": [""],    # Empty string subscribes to everything
@@ -24,32 +22,33 @@ class ListenerAgent(Agent):
         # Set up the configuration
         self._config = self.default_config.copy()
         
-        # Register callbacks
-        self.core.onstart(self._onstart)
-        self.core.onstop(self._onstop)
+        # Initialize the agent after setting up our attributes
+        super().__init__(identity=identity, **kwargs)
     
-    def _onstart(self):
+    @Core.receiver('onstart')
+    def _onstart(self, sender=None, **kwargs):
         """Handle startup tasks for the Listener agent."""
         print(f"{self.identity} agent starting...")
+        print(f"  Sender: {sender}")
+        print(f"  Additional parameters: {kwargs}")
         
         # Set up subscriptions
         for pattern in self._config["subscribe_patterns"]:
             print(f"Subscribing to pattern: '{pattern}' (empty string means all topics)")
-            # The PubSub subsystem will automatically adapt the callback as needed
             self.vip.pubsub.subscribe(pattern, self._on_message)
         
         # Start listening
         print(f"{self.identity} agent started!")
     
-    def _onstop(self):
+    @Core.receiver('onstop')
+    def _onstop(self, sender=None, **kwargs):
         """Handle shutdown tasks for the Listener agent."""
         print(f"{self.identity} agent stopping...")
+        print(f"  Sender: {sender}")
+        print(f"  Additional parameters: {kwargs}")
     
-    # This method uses the original VOLTTRON callback style
     def _on_message(self, peer, sender, bus, topic, headers, message):
-        """
-        Handle incoming pub/sub messages using original VOLTTRON callback style.
-        """
+        """Handle incoming pub/sub messages using original VOLTTRON callback style."""
         # Check if this is a topic we should ignore
         for ignore in self._config["ignore_patterns"]:
             if topic.startswith(ignore):

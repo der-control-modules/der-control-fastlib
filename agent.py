@@ -399,6 +399,39 @@ class Core:
     
     def __init__(self, agent):
         self._agent = agent
+        self._handlers = {
+            'onstart': [],
+            'onstop': [],
+            'onconnected': [],
+            'ondisconnected': [],
+        }
+        
+        # Register any methods decorated with @Core.receiver
+        self._register_decorated_methods(agent)
+    
+    @staticmethod
+    def receiver(event_name):
+        """
+        Decorator to register a method as a handler for a specific event.
+        
+        Usage:
+            @Core.receiver('onstart')
+            def my_onstart_handler(self, sender, **kwargs):
+                # do something when agent starts
+        """
+        def decorator(method):
+            setattr(method, "event_name", event_name)
+            return method
+        return decorator
+    
+    def _register_decorated_methods(self, agent):
+        """Find and register methods decorated with @Core.receiver."""
+        for attr_name in dir(agent):
+            attr = getattr(agent, attr_name)
+            if callable(attr) and hasattr(attr, "event_name"):
+                event_name = getattr(attr, "event_name")
+                if event_name in self._handlers:
+                    self._handlers[event_name].append(attr)
     
     def stop(self):
         """Stop the agent, returning an AsyncResult."""
@@ -414,14 +447,25 @@ class Core:
         """Get the agent's identity."""
         return self._agent.identity
     
-    def onstart(self, callback: Callable):
+    def onstart(self, callback):
         """Register a callback to be executed when the agent starts."""
-        self._agent.on_start_callbacks.append(callback)
+        self._handlers['onstart'].append(callback)
+        return callback  # Return the callback for use as a decorator
     
-    def onstop(self, callback: Callable):
+    def onstop(self, callback):
         """Register a callback to be executed when the agent stops."""
-        self._agent.on_stop_callbacks.append(callback)
-
+        self._handlers['onstop'].append(callback)
+        return callback  # Return the callback for use as a decorator
+    
+    def fire_event(self, event_name, sender=None, **kwargs):
+        """Fire an event by calling all registered handlers."""
+        if event_name in self._handlers:
+            for handler in self._handlers[event_name]:
+                try:
+                    # Pass sender and any kwargs to the handler
+                    handler(sender=sender, **kwargs)
+                except Exception as e:
+                    print(f"Error in {event_name} handler: {e}")
 
 class Agent:
     """A gevent-based agent that connects to the VOLTTRON MessageBus."""
@@ -473,30 +517,29 @@ class Agent:
         
         print(f"Agent {self.identity} connected")
         
-        # Call onstart callbacks
-        for callback in self.on_start_callbacks:
-            try:
-                callback()
-            except Exception as e:
-                print(f"Error in onstart callback: {e}")
+        # Fire the onconnected event with self as sender
+        self.core.fire_event('onconnected', sender=self)
+        
+        # Fire the onstart event with self as sender
+        self.core.fire_event('onstart', sender=self)
     
     def disconnect(self):
         """Disconnect from the message bus."""
         if self.websocket and self.connected:
-            # Call onstop callbacks
-            for callback in self.on_stop_callbacks:
-                try:
-                    callback()
-                except Exception as e:
-                    print(f"Error in onstop callback: {e}")
+            # Fire the onstop event with self as sender
+            self.core.fire_event('onstop', sender=self)
             
             self.websocket.close()
             # Wait for the close to complete
             if self._listener_greenlet:
                 self._listener_greenlet.join(timeout=1)
+            
             self.connected = False
             print(f"Agent {self.identity} disconnected")
-    
+            
+            # Fire the ondisconnected event with self as sender
+            self.core.fire_event('ondisconnected', sender=self)
+            
     def __on_ws_open__(self, ws):
         """Callback when WebSocket connection is opened."""
         self.connected = True
