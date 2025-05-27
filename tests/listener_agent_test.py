@@ -1,7 +1,7 @@
 # listener_agent_test.py
 
 import gevent
-from agent import Agent
+from aems.client.agent import Agent
 from listener_agent import ListenerAgent
 import datetime
 import random

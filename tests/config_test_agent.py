@@ -1,6 +1,6 @@
 # config_test_agent.py - Updated with cron example
 
-from agent import Agent, Core, RPC, AsyncResult
+from aems.client.agent import Agent, Core, RPC, AsyncResult
 import gevent
 import datetime
 import json

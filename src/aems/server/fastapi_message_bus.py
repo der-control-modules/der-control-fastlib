@@ -2,14 +2,14 @@
 
 import asyncio
 import threading
-from typing import Dict, Any
+from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 
-from models import MessageBus, Message, MessageBusStopHandler
-from connection_manager import ConnectionManager
-from config_store import ConfigStore
+from aems.server.models import MessageBus, Message, MessageBusStopHandler
+from aems.server.connection_manager import ConnectionManager
+from aems.server.config_store import ConfigStore
 
 
 class FastAPIMessageBus(MessageBus):
@@ -276,8 +276,7 @@ class FastAPIMessageBus(MessageBus):
         return loop.run_until_complete(self.message_queue.get())
 
 
-# Example usage
-if __name__ == "__main__":
+def _main():
     class SimpleStopHandler(MessageBusStopHandler):
         def message_bus_shutdown(self):
             print("Message bus is shutting down")
@@ -294,3 +293,8 @@ if __name__ == "__main__":
             time.sleep(1)
     except KeyboardInterrupt:
         message_bus.stop()
+
+# Example usage
+if __name__ == "__main__":
+    _main()
+    

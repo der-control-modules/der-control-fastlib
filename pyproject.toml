@@ -61,12 +61,12 @@ dev = [
 # ]
 
 [project.scripts]
-aems-server = "aems.server.messagebus:main"
+aems-server = "aems.server.fastapi_message_bus:_main"
 
-[project.urls]
-Documentation = "https://github.com/yourusername/aems"
-Source = "https://github.com/yourusername/aems"
-Issues = "https://github.com/yourusername/aems/issues"
+# [project.urls]
+# Documentation = "https://github.com/yourusername/aems"
+# Source = "https://github.com/yourusername/aems"
+# Issues = "https://github.com/yourusername/aems/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

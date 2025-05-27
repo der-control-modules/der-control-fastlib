@@ -1,7 +1,7 @@
 # config_test_agent_test.py - Updated with cron testing
 
 import gevent
-from agent import Agent
+from aems.client.agent import Agent
 from config_test_agent import ConfigTestAgent
 import datetime
 import random

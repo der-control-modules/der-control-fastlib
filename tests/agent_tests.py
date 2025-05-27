@@ -1,7 +1,7 @@
 # agent_tests.py
 
 import gevent
-from agent import Agent
+from aems.client.agent import Agent
 
 
 def run_publisher_subscriber_test():

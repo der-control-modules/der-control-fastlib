@@ -4,7 +4,7 @@ import sys
 import gevent
 from gevent.event import AsyncResult
 
-from agent import Agent, Core, RPC
+from aems.client.agent import Agent, Core, RPC
 
 class ListenerAgent(Agent):
     """
