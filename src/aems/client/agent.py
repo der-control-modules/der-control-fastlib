@@ -559,14 +559,19 @@ class Core:
                     print(f"Error in {event_name} handler: {e}")
 
 class ConfigStore:
-    """ConfigStore subsystem for the Agent."""
+    """
+    ConfigStore subsystem for the Agent.
+    
+    This subsystem follows VOLTTRON's config store pattern:
+    1. Configurations are stored on the server (centralized)
+    2. Agents can push configs to the store and retrieve them
+    3. Agents can watch for config changes
+    """
     
     def __init__(self, agent):
         self._agent = agent
         self._config_callbacks = {}
-        # Initialize httpx client
-        import httpx
-        self._client = httpx.AsyncClient()
+        self._watched_configs = set()
     
     def get(self, config_name: str):
         """Get a configuration from the config store."""
@@ -670,6 +675,8 @@ class ConfigStore:
         if config_name not in self._config_callbacks:
             self._config_callbacks[config_name] = []
         self._config_callbacks[config_name].append(callback)
+        self._watched_configs.add(config_name)  # Track this config
+        print(f"Watching for changes to config: {config_name}")
     
     def unwatch(self, config_name: str, callback: Callable = None):
         """Unregister a callback for configuration changes."""
@@ -677,24 +684,37 @@ class ConfigStore:
             # Remove all callbacks for this config
             if config_name in self._config_callbacks:
                 del self._config_callbacks[config_name]
+                self._watched_configs.discard(config_name)
         else:
             # Remove specific callback
             if config_name in self._config_callbacks:
                 self._config_callbacks[config_name] = [
                     cb for cb in self._config_callbacks[config_name] if cb != callback
                 ]
-                
+                if not self._config_callbacks[config_name]:
+                    del self._config_callbacks[config_name]
+                    self._watched_configs.discard(config_name)
+    
     def handle_update(self, config_name: str):
         """Handle a configuration update notification."""
         if config_name in self._config_callbacks:
-            # Get the updated config
-            config_data = self.get(config_name).get()
-            # Call all callbacks
-            for callback in self._config_callbacks[config_name]:
-                try:
-                    callback(config_name, config_data)
-                except Exception as e:
-                    print(f"Error in config update callback: {e}")
+            # Get the updated config from the server
+            try:
+                config_data = self.get(config_name).get()
+                # Call all callbacks
+                for callback in self._config_callbacks[config_name]:
+                    try:
+                        callback(config_name, config_data)
+                    except Exception as e:
+                        print(f"Error in config update callback: {e}")
+            except Exception as e:
+                print(f"Error fetching updated config {config_name}: {e}")
+                # Notify callbacks with None to indicate error
+                for callback in self._config_callbacks[config_name]:
+                    try:
+                        callback(config_name, None)
+                    except Exception as e:
+                        print(f"Error in config update error callback: {e}")
     
 class CronTimer:
     """
@@ -974,7 +994,25 @@ class Scheduler:
             self._stop_event.set()
             self._scheduler_greenlet.join(timeout=2)
             self._scheduler_greenlet = None
-    
+
+    @staticmethod
+    def cron(cronstring: str) -> str:
+        data = cronstring.split(cronstring)
+        assert len(data) == 5, "Invalid cron string"
+        invalid = False
+        for d in data:
+            if d == '*':
+                pass
+            else:
+                result = eval(d)
+                if not isinstance(result, (int, float)):
+                    invalid = True
+
+        if invalid:
+            raise AssertionError("Invalid cron string")
+        
+        return cronstring
+
     def schedule(self, function, interval_or_cron, args=None, kwargs=None, name=None):
         """
         Schedule a periodic function.
@@ -1112,10 +1150,12 @@ class Scheduler:
 class Agent:
     """A gevent-based agent that connects to the VOLTTRON MessageBus."""
     
-    def __init__(self, identity: str, host: str = "127.0.0.1", port: int = 8000):
+    def __init__(self, identity: str, host: str = "127.0.0.1", port: int = 8000,
+                 config_path: str = None, **kwargs):
         self.identity = identity
         self._host = host
         self._port = port
+        self.config_path = config_path
         self.websocket_url = f"ws://{host}:{port}/ws/{identity}"
         self.websocket = None
         self.connected = False
@@ -1182,6 +1222,11 @@ class Agent:
         try:
             # List available configurations for this agent
             configs = self.config.list().get(timeout=5)
+
+            # If a config_path was provided and no configs are found,
+            # try to load the configuration from the file
+            if self.config_path and not configs and self.connected:
+                self._load_config_from_path()
             
             # Fire the onconfigure event
             self.core.fire_event('onconfigure', sender=self, configs=configs)
@@ -1189,6 +1234,41 @@ class Agent:
         except Exception as e:
             print(f"Error loading configurations: {e}")
     
+    def _load_config_from_path(self):
+        """
+        Load configuration from the specified config_path and push it to the server's config store.
+        
+        This follows the VOLTTRON pattern where local file configs are pushed to the 
+        platform's config store, and then agents retrieve them from there.
+        """
+        import os
+        import json
+        
+        if not self.config_path or not os.path.exists(self.config_path):
+            return
+        
+        try:
+            print(f"Loading configuration from file: {self.config_path}")
+            with open(self.config_path, 'r') as f:
+                if self.config_path.endswith('.json'):
+                    config_data = json.load(f)
+                elif self.config_path.endswith(('.yml', '.yaml')):
+                    import yaml
+                    config_data = yaml.safe_load(f)
+                else:
+                    print(f"Unsupported config file format: {self.config_path}")
+                    return
+                
+                # Push the config to the server's config store
+                self.config.set("config", config_data).get(timeout=5)
+                print(f"Pushed configuration from {self.config_path} to the server's config store")
+                
+                # We don't need to store the config locally here, as we'll retrieve it
+                # from the server during the onconfigure phase
+        except Exception as e:
+            print(f"Error loading configuration from {self.config_path}: {e}")
+            self.health.set_status(Status.WARNING, f"Config load error: {e}")
+
     def disconnect(self):
         """Disconnect from the message bus."""
         if self.websocket and self.connected:
@@ -1420,20 +1500,85 @@ class Agent:
         self._stop_event.set()
 
 
-def run_agent(agent_class, identity=None, **kwargs):
-    """Run an agent from the command line."""
+# src/aems/client/agent.py - Updated run_agent function
+
+def run_agent(agent_class, config_path=None, identity=None, **kwargs):
+    """
+    Run an agent from the command line.
+    
+    Args:
+        agent_class: The Agent class to instantiate
+        config_path: Path to the agent's configuration file (JSON, YAML, etc.)
+        identity: Agent identity, if None will be derived from agent class name
+        **kwargs: Additional keyword arguments to pass to the agent constructor
+    
+    Returns:
+        Exit code (0 for success, non-zero for errors)
+    """
     import argparse
+    import os
+    import json
+    import yaml
     
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", help="Agent configuration file", default=config_path)
     parser.add_argument("--identity", help="Agent identity", default=identity)
     parser.add_argument("--host", help="Message bus host", default="127.0.0.1")
     parser.add_argument("--port", help="Message bus port", type=int, default=8000)
+    parser.add_argument("--volttron-home", help="VOLTTRON_HOME directory", 
+                       default=os.environ.get("VOLTTRON_HOME"))
     
     args = parser.parse_args()
     
+    # Set VOLTTRON_HOME environment variable if provided
+    if args.volttron_home:
+        os.environ["VOLTTRON_HOME"] = args.volttron_home
+        print(f"Using VOLTTRON_HOME: {args.volttron_home}")
+    
+    # Use command line config path if provided, otherwise use the argument
+    config_path = args.config or config_path
+    agent_config = {}
+    
+    # Load the configuration file if it exists
+    if config_path and os.path.exists(config_path):
+        try:
+            with open(config_path, 'r') as f:
+                if config_path.endswith('.json'):
+                    agent_config = json.load(f)
+                elif config_path.endswith(('.yml', '.yaml')):
+                    import yaml  # Only import if needed
+                    agent_config = yaml.safe_load(f)
+                else:
+                    print(f"Unsupported config file format: {config_path}")
+        except Exception as e:
+            print(f"Error loading configuration from {config_path}: {e}")
+            return 1
+    
     # Create the agent
     agent_identity = args.identity or identity or agent_class.__name__.lower()
-    agent = agent_class(identity=agent_identity, host=args.host, port=args.port, **kwargs)
-    
-    # Run the agent
-    return agent.run()
+    try:
+        agent = agent_class(
+            identity=agent_identity, 
+            host=args.host, 
+            port=args.port,
+            config_path=config_path,
+            **kwargs
+        )
+        
+        # Set initial configuration if loaded from file
+        if agent_config:
+            # Store the config in the agent's config store
+            if hasattr(agent, 'config') and hasattr(agent.config, 'set'):
+                try:
+                    agent.config.set("config", agent_config).get(timeout=5)
+                    print(f"Loaded configuration from {config_path}")
+                except Exception as e:
+                    print(f"Error storing initial configuration: {e}")
+        
+        # Run the agent
+        return agent.run()
+    except Exception as e:
+        print(f"Error initializing agent: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1

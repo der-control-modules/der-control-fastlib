@@ -15,8 +15,8 @@ from aems.server.config_store import ConfigStore
 class FastAPIMessageBus(MessageBus):
     """FastAPI implementation of the MessageBus."""
     
-    def __init__(self, host: str = "127.0.0.1", port: int = 8000):
-        self.app = FastAPI(title="VOLTTRON Modular MessageBus")
+    def __init__(self, host: str = "127.0.0.1", port: int = 8000, config_store_dir: str = None):
+        self.app = FastAPI(title="AEMS MessageBus")
         self.host = host
         self.port = port
         self.running = False
@@ -25,7 +25,7 @@ class FastAPIMessageBus(MessageBus):
         self.server = None
         self.setup_routes()
         
-        self.config_store = ConfigStore()
+        self.config_store = ConfigStore(config_store_dir)
         self.message_queue = asyncio.Queue()
     
     def setup_routes(self):
@@ -275,26 +275,74 @@ class FastAPIMessageBus(MessageBus):
         loop = asyncio.get_event_loop()
         return loop.run_until_complete(self.message_queue.get())
 
+def start_server(host="127.0.0.1", port=8000, config_store_dir=None):
+    """
+    Start the AEMS message bus server.
+    
+    Args:
+        host: Host address to bind to
+        port: Port to listen on
+        config_store_dir: Directory for the config store, defaults to VOLTTRON_HOME/aems_config_store
+        
+    Returns:
+        The running server instance
+    """
+    # Use VOLTTRON_HOME for config_store_dir if not explicitly provided
+    if config_store_dir is None:
+        volttron_home = os.environ.get("VOLTTRON_HOME")
+        if volttron_home:
+            config_store_dir = os.path.join(volttron_home, "aems_config_store")
+    
+    # Create and start the server
+    server = FastAPIMessageBus(host=host, port=port, config_store_dir=config_store_dir)
+    server.start()
+    print(f"AEMS message bus server started at {host}:{port}")
+    print(f"Using config store directory: {server.config_store.base_dir}")
+    
+    return server
+
 
 def _main():
-    class SimpleStopHandler(MessageBusStopHandler):
-        def message_bus_shutdown(self):
-            print("Message bus is shutting down")
+    """Main entry point for running the server from command line."""
+    import argparse
+    import os
     
-    # Create and start the message bus
-    message_bus = FastAPIMessageBus(host="127.0.0.1", port=8000)
-    message_bus.set_stop_handler(SimpleStopHandler())
-    message_bus.start()
+    parser = argparse.ArgumentParser(description="AEMS Message Bus Server")
+    parser.add_argument("--host", default="127.0.0.1", help="Host address to bind to")
+    parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
+    parser.add_argument(
+        "--volttron-home", 
+        default=os.environ.get("VOLTTRON_HOME"),
+        help="VOLTTRON_HOME directory"
+    )
+    parser.add_argument(
+        "--config-dir", 
+        help="Config store directory (defaults to VOLTTRON_HOME/aems_config_store)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Set VOLTTRON_HOME environment variable if provided
+    if args.volttron_home:
+        os.environ["VOLTTRON_HOME"] = args.volttron_home
+    
+    # Determine config store directory
+    config_dir = args.config_dir
+    if not config_dir and args.volttron_home:
+        config_dir = os.path.join(args.volttron_home, "aems_config_store")
+    
+    # Start the server
+    server = start_server(args.host, args.port, config_dir)
     
     try:
         # Keep the main thread alive
         import time
-        while message_bus.is_running():
+        while server.is_running():
             time.sleep(1)
     except KeyboardInterrupt:
-        message_bus.stop()
+        print("Stopping server...")
+        server.stop()
 
-# Example usage
+
 if __name__ == "__main__":
-    _main()
-    
+   _main()

@@ -14,22 +14,32 @@ class ConfigStore:
     """
     A service for storing and retrieving agent configurations.
     Configurations are stored as JSON files in a directory structure.
+    This follows VOLTTRON's config store pattern of centralized configuration management.
     """
     
     def __init__(self, base_dir: str = None):
         """
         Initialize the config store with a base directory.
-        If base_dir is None, uses the default location at ~/.volttron/config_store
+        
+        By default, uses VOLTTRON_HOME/aems_config_store if VOLTTRON_HOME is set,
+        otherwise falls back to ~/.aems/config_store
         """
         if base_dir is None:
-            home_dir = os.path.expanduser("~")
-            base_dir = os.path.join(home_dir, ".volttron", "config_store")
+            # Try to use VOLTTRON_HOME environment variable
+            volttron_home = os.environ.get("VOLTTRON_HOME")
+            if volttron_home:
+                base_dir = os.path.join(volttron_home, "aems_config_store")
+            else:
+                # Fall back to ~/.aems/config_store if VOLTTRON_HOME not set
+                home_dir = os.path.expanduser("~")
+                base_dir = os.path.join(home_dir, ".aems", "config_store")
         
         self.base_dir = base_dir
         self.lock = threading.RLock()  # For thread safety
         
         # Create the base directory if it doesn't exist
         os.makedirs(base_dir, exist_ok=True)
+        print(f"ConfigStore initialized with base directory: {base_dir}")
     
     def store(self, agent_id: str, config_name: str, config_data: Any, config_type: str = "json") -> bool:
         """
