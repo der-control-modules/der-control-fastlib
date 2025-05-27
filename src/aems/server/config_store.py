@@ -5,7 +5,7 @@ import json
 import csv
 import io
 import glob
-from typing import Dict, List, Optional, Any, Union
+from typing import Optional, Any, Union
 import threading
 import datetime
 
@@ -97,7 +97,7 @@ class ConfigStore:
             print(f"Error storing JSON config {config_name}: {e}")
             return False
     
-    def _store_csv(self, agent_dir: str, config_name: str, csv_data: Union[str, List[List[str]]]) -> bool:
+    def _store_csv(self, agent_dir: str, config_name: str, csv_data: Union[str, list[list[str]]]) -> bool:
         """Store a CSV configuration."""
         config_file = os.path.join(agent_dir, f"{config_name}")
         
@@ -180,7 +180,7 @@ class ConfigStore:
             print(f"Error retrieving JSON config from {config_file}: {e}")
             return None
     
-    def _retrieve_csv(self, config_file: str) -> Optional[List[List[str]]]:
+    def _retrieve_csv(self, config_file: str) -> Optional[list[list[str]]]:
         """Retrieve a CSV configuration as a list of rows."""
         try:
             with open(config_file, 'r', newline='') as f:
@@ -190,9 +190,9 @@ class ConfigStore:
             print(f"Error retrieving CSV config from {config_file}: {e}")
             return None
     
-    def list_configs(self, agent_id: Optional[str] = None) -> Dict[str, List[Dict[str, Any]]]:
+    def list_configs(self, agent_id: Optional[str] = None) -> dict[str, list[dict[str, Any]]]:
         """
-        List available configurations.
+        list available configurations.
         
         Args:
             agent_id: Optional agent identity to filter by
@@ -204,12 +204,12 @@ class ConfigStore:
             result = {}
             
             if agent_id:
-                # List configs for a specific agent
+                # list configs for a specific agent
                 agent_dir = os.path.join(self.base_dir, agent_id)
                 if os.path.exists(agent_dir) and os.path.isdir(agent_dir):
                     result[agent_id] = self._list_agent_configs(agent_dir)
             else:
-                # List configs for all agents
+                # list configs for all agents
                 if os.path.exists(self.base_dir):
                     agent_dirs = [d for d in os.listdir(self.base_dir) 
                                 if os.path.isdir(os.path.join(self.base_dir, d))]
@@ -220,8 +220,8 @@ class ConfigStore:
             
             return result
     
-    def _list_agent_configs(self, agent_dir: str) -> List[Dict[str, Any]]:
-        """List configurations for a specific agent directory."""
+    def _list_agent_configs(self, agent_dir: str) -> list[dict[str, Any]]:
+        """list configurations for a specific agent directory."""
         configs = []
         
         # Get all files that don't end with .metadata
@@ -287,7 +287,7 @@ class ConfigStore:
             
             return success
     
-    def csv_to_json(self, csv_data: Union[str, List[List[str]]]) -> Dict[str, Any]:
+    def csv_to_json(self, csv_data: Union[str, list[list[str]]]) -> dict[str, Any]:
         """
         Convert CSV data to a JSON object.
         

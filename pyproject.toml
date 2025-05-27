@@ -1,0 +1,89 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm>=6.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aems"
+description = "Agent Energy Management System"
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "C. Allwardt", email = "3979063+craig8@users.noreply.github.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+# Here's how to specify dependencies in pyproject.toml format:
+dependencies = [
+    "fastapi~=0.115.12",
+    "uvicorn~=0.34.2",
+    "websocket-client~=1.8.0",
+    "websockets~=15.0.1",
+    "gevent~=25.5.1",
+    "httpx~=0.28.1",
+    "pydantic~=2.11.5",
+    "pydantic_core~=2.33.2"
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+# Dependencies for development
+dev = [
+    "black>=23.3.0",
+    "pylint>=2.17.2",
+    "pytest>=7.3.1",
+    "pytest-cov>=4.1.0",
+]
+# # Dependencies for documentation
+# docs = [
+#     "sphinx>=6.1.3",
+#     "sphinx-rtd-theme>=1.2.0",
+# ]
+# # Dependencies for the server only
+# server = [
+#     "fastapi>=0.95.0",
+#     "uvicorn>=0.21.1",
+#     "pydantic>=1.10.7",
+# ]
+# # Dependencies for the client only
+# client = [
+#     "websocket-client>=1.5.1",
+#     "gevent>=22.10.2",
+#     "httpx>=0.24.0",
+# ]
+
+[project.scripts]
+aems-server = "aems.server.messagebus:main"
+
+[project.urls]
+Documentation = "https://github.com/yourusername/aems"
+Source = "https://github.com/yourusername/aems"
+Issues = "https://github.com/yourusername/aems/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools_scm]
+# Uses git tags for versioning
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
