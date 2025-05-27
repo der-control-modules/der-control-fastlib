@@ -1,7 +1,0 @@
-fastapi
-pydantic[standard]
-uvicorn
-httpx
-websockets
-gevent
-websocket-client
