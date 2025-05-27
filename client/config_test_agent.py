@@ -1,8 +1,9 @@
-import datetime
-import sys
+# config_test_agent.py - Updated with cron example
 
 from agent import Agent, Core, RPC, AsyncResult
 import gevent
+import datetime
+import json
 
 
 class ConfigTestAgent(Agent):
@@ -23,7 +24,9 @@ class ConfigTestAgent(Agent):
             "nested": {
                 "setting1": "value1",
                 "setting2": "value2"
-            }
+            },
+            "use_cron": False,
+            "cron_schedule": "*/5 * * * *"  # Every 5 minutes by default
         }
         
         # Current active configuration
@@ -37,14 +40,9 @@ class ConfigTestAgent(Agent):
             "startup_time": datetime.datetime.now().isoformat(),
             "config_updates": 0,
             "config_errors": 0,
-            "last_update": None
+            "last_update": None,
+            "process_count": 0
         }
-        
-        # Processing loop greenlet
-        self._processing_greenlet = None
-        
-        # Initialize the agent
-        super().__init__(identity=identity, **kwargs)
     
     @Core.receiver('onstart')
     def _onstart(self, sender=None, **kwargs):
@@ -57,8 +55,8 @@ class ConfigTestAgent(Agent):
         # Watch for configuration changes
         self.config.watch("config", self._config_updated)
         
-        # Start the processing loop
-        self._processing_greenlet = gevent.spawn(self._processing_loop)
+        # Schedule a cron-based task (separate from interval-based processing)
+        self.core.schedule(self._daily_report, "0 0 * * *", name="daily_report")  # Midnight every day
         
         print(f"{self.identity} agent started!")
     
@@ -66,13 +64,61 @@ class ConfigTestAgent(Agent):
     def _onstop(self, sender=None, **kwargs):
         """Handle shutdown tasks."""
         print(f"{self.identity} agent stopping...")
+    
+    @Core.periodic(10)  # Default to 10 second interval until config is loaded
+    def _process_data(self):
+        """Periodic task to process data based on configuration."""
+        if not hasattr(self, "_config") or not self._config.get("enabled", False):
+            return  # Skip processing if not configured or disabled
         
-        # Stop the processing loop
-        if self._processing_greenlet:
-            self._processing_greenlet.kill()
+        # Only process if enabled
+        current_time = datetime.datetime.now().isoformat()
+        targets = self._config.get("targets", [])
+        threshold = self._config.get("threshold", 100)
         
-        # Stop watching for configuration changes
-        self.config.unwatch("config")
+        print(f"[{current_time}] Processing {len(targets)} targets with threshold {threshold}")
+        for target in targets:
+            print(f"  - Processing target: {target}")
+        
+        # Update status
+        self._status["process_count"] += 1
+        self._status["last_process_time"] = current_time
+        
+        # Check if we need to switch between interval and cron scheduling
+        use_cron = self._config.get("use_cron", False)
+        current_tasks = self.core.list_events()
+        
+        if use_cron:
+            # If we're now using cron but we have an interval-based task, switch to cron
+            if "_process_data" in current_tasks and "interval" in current_tasks["_process_data"]:
+                print("Switching from interval to cron scheduling")
+                self.core.cancel("_process_data")
+                cron_schedule = self._config.get("cron_schedule", "*/5 * * * *")
+                self.core.schedule(self._process_data, cron_schedule, name="_process_data")
+                print(f"Now using cron schedule: {cron_schedule}")
+        else:
+            # If we're using interval but have a cron-based task, switch to interval
+            if "_process_data" in current_tasks and "cron" in current_tasks["_process_data"]:
+                print("Switching from cron to interval scheduling")
+                self.core.cancel("_process_data")
+                interval = self._config.get("interval", 60)
+                self.core.schedule(self._process_data, interval, name="_process_data")
+                print(f"Now using interval: {interval} seconds")
+            elif "_process_data" in current_tasks:
+                # Using interval - update it if needed
+                configured_interval = self._config.get("interval", 60)
+                current_interval = current_tasks["_process_data"].get("interval", 0)
+                if current_interval != configured_interval:
+                    print(f"Updating processing interval from {current_interval} to {configured_interval}")
+                    self.core.update_interval("_process_data", configured_interval)
+    
+    def _daily_report(self):
+        """Generate a daily report (cron-based task)."""
+        current_time = datetime.datetime.now().isoformat()
+        print(f"[{current_time}] Generating daily report")
+        print(f"  - Process count: {self._status['process_count']}")
+        print(f"  - Config updates: {self._status['config_updates']}")
+        print(f"  - Config errors: {self._status['config_errors']}")
     
     def _load_config(self):
         """Load configuration from config store."""
@@ -121,26 +167,44 @@ class ConfigTestAgent(Agent):
             self._status["last_update"] = self._last_update
             
             print(f"Applied new configuration: {self._config}")
+            
+            # Update scheduling based on configuration
+            use_cron = config.get("use_cron", False)
+            current_tasks = self.core.list_events()
+            
+            if "_process_data" in current_tasks:
+                if use_cron:
+                    # Switch to cron or update cron schedule
+                    cron_schedule = config.get("cron_schedule", "*/5 * * * *")
+                    if "cron" in current_tasks["_process_data"]:
+                        # Already using cron, check if schedule changed
+                        current_cron = current_tasks["_process_data"]["cron"]
+                        if current_cron != cron_schedule:
+                            print(f"Updating cron schedule from {current_cron} to {cron_schedule}")
+                            self.core.update_cron("_process_data", cron_schedule)
+                    else:
+                        # Switch from interval to cron
+                        print(f"Switching from interval to cron schedule: {cron_schedule}")
+                        self.core.cancel("_process_data")
+                        self.core.schedule(self._process_data, cron_schedule, name="_process_data")
+                else:
+                    # Switch to interval or update interval
+                    interval = config.get("interval", 60)
+                    if "interval" in current_tasks["_process_data"]:
+                        # Already using interval, check if it changed
+                        current_interval = current_tasks["_process_data"]["interval"]
+                        if current_interval != interval:
+                            print(f"Updating interval from {current_interval} to {interval}")
+                            self.core.update_interval("_process_data", interval)
+                    else:
+                        # Switch from cron to interval
+                        print(f"Switching from cron to interval: {interval}")
+                        self.core.cancel("_process_data")
+                        self.core.schedule(self._process_data, interval, name="_process_data")
+            
         except Exception as e:
             print(f"Error applying configuration: {e}")
             self._status["config_errors"] += 1
-    
-    def _processing_loop(self):
-        """Simulate periodic processing based on configuration."""
-        while True:
-            if self._config["enabled"]:
-                # Only process if enabled
-                current_time = datetime.datetime.now().isoformat()
-                targets = self._config["targets"]
-                
-                print(f"[{current_time}] Processing {len(targets)} targets with threshold {self._config['threshold']}")
-                for target in targets:
-                    print(f"  - Processing target: {target}")
-            
-            # Sleep for the configured interval
-            interval = self._config["interval"]
-            print(f"Sleeping for {interval} seconds...")
-            gevent.sleep(interval)
     
     @RPC.export
     def get_config(self):
@@ -179,12 +243,48 @@ class ConfigTestAgent(Agent):
             return {"success": False, "error": str(e)}
     
     @RPC.export
+    def switch_to_cron(self, cron_schedule=None):
+        """RPC method to switch to cron-based scheduling."""
+        try:
+            new_config = self._config.copy()
+            new_config["use_cron"] = True
+            if cron_schedule:
+                new_config["cron_schedule"] = cron_schedule
+            
+            result = self.config.set("config", new_config).get(timeout=5)
+            return {
+                "success": True, 
+                "message": f"Switched to cron scheduling with expression: {new_config['cron_schedule']}"
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    @RPC.export
+    def switch_to_interval(self, interval=None):
+        """RPC method to switch to interval-based scheduling."""
+        try:
+            new_config = self._config.copy()
+            new_config["use_cron"] = False
+            if interval is not None:
+                new_config["interval"] = interval
+            
+            result = self.config.set("config", new_config).get(timeout=5)
+            return {
+                "success": True, 
+                "message": f"Switched to interval scheduling with interval: {new_config['interval']} seconds"
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    @RPC.export
     def get_status(self):
         """RPC method to get the agent's status."""
         self._status["current_time"] = datetime.datetime.now().isoformat()
+        self._status["scheduled_events"] = self.core.list_events()
         return self._status
 
 
 if __name__ == "__main__":
     from agent import run_agent
+    import sys
     sys.exit(run_agent(ConfigTestAgent))

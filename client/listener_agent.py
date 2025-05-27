@@ -38,6 +38,11 @@ class ListenerAgent(Agent):
         
         # Start listening
         print(f"{self.identity} agent started!")
+
+    @Core.periodic(10)
+    def _publish_state(self):
+        """Just publish something so that we know we can do that."""
+        self.vip.pubsub.publish("holy/cow", "It Worked!")
     
     @Core.receiver('onstop')
     def _onstop(self, sender=None, **kwargs):

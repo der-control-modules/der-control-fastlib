@@ -1,5 +1,6 @@
 # agent.py
 
+from datetime import datetime, timedelta
 import gevent
 from gevent import monkey
 from gevent.event import AsyncResult
@@ -12,6 +13,10 @@ import websocket
 from typing import Dict, Any, Optional, Callable, List
 import ssl
 
+import time
+import heapq
+from typing import Optional, Callable, Any
+import numbers
 
 class RPC:
     """RPC subsystem for the Agent."""
@@ -419,10 +424,45 @@ class Core:
             'onconnected': [],
             'ondisconnected': [],
         }
+        self._scheduler = Scheduler(agent)
         
         # Register any methods decorated with @Core.receiver
         self._register_decorated_methods(agent)
+
+        # Register any methods decorated with @Core.periodic
+        self._register_periodic_methods(agent)
+
+    def schedule(self, function, interval_or_cron, *args, **kwargs):
+        """
+        Schedule a periodic function.
+        
+        Args:
+            function: The function to call
+            interval_or_cron: Either a number of seconds (interval) or a cron expression
+            *args: Positional arguments to pass to the function
+            **kwargs: Keyword arguments to pass to the function
+            
+        Returns:
+            The name of the scheduled event
+        """
+        return self._scheduler.schedule(function, interval_or_cron, args, kwargs)
     
+    def cancel(self, name):
+        """Cancel a scheduled event."""
+        return self._scheduler.cancel(name)
+    
+    def update_interval(self, name, interval):
+        """Update the interval of a scheduled event."""
+        return self._scheduler.update_interval(name, interval)
+    
+    def update_cron(self, name, cron_expression):
+        """Update the cron expression of a scheduled event."""
+        return self._scheduler.update_cron(name, cron_expression)
+    
+    def list_events(self):
+        """List all scheduled events."""
+        return self._scheduler.list_events()    
+
     @staticmethod
     def receiver(event_name):
         """
@@ -438,6 +478,8 @@ class Core:
             return method
         return decorator
     
+    
+    
     def _register_decorated_methods(self, agent):
         """Find and register methods decorated with @Core.receiver."""
         for attr_name in dir(agent):
@@ -446,16 +488,50 @@ class Core:
                 event_name = getattr(attr, "event_name")
                 if event_name in self._handlers:
                     self._handlers[event_name].append(attr)
+    @staticmethod
+    def periodic(interval_or_cron):
+        """
+        Decorator to register a method to run periodically.
+        
+        Usage:
+            @Core.periodic(30)  # Run every 30 seconds
+            def my_periodic_task(self):
+                # do something periodically
+                
+            @Core.periodic("*/5 * * * *")  # Run every 5 minutes (cron expression)
+            def my_cron_task(self):
+                # do something based on a cron schedule
+        """
+        def decorator(method):
+            setattr(method, "periodic", True)
+            setattr(method, "interval_or_cron", interval_or_cron)
+            return method
+        return decorator
     
+    def _register_periodic_methods(self, agent):
+        """Find and register methods decorated with @Core.periodic."""
+        for attr_name in dir(agent):
+            attr = getattr(agent, attr_name)
+            if callable(attr) and hasattr(attr, "periodic") and hasattr(attr, "interval_or_cron"):
+                interval_or_cron = getattr(attr, "interval_or_cron")
+                self._scheduler.schedule(attr, interval_or_cron)
+
     def stop(self):
         """Stop the agent, returning an AsyncResult."""
         async_result = AsyncResult()
         try:
+            # Stop the scheduler
+            self._scheduler.stop()
+
             self._agent.disconnect()
             async_result.set(True)
         except Exception as e:
             async_result.set_exception(e)
         return async_result
+    
+    def start_periodic_tasks(self):
+        """Start running periodic tasks."""
+        self._scheduler.start()
     
     def identity(self):
         """Get the agent's identity."""
@@ -619,6 +695,419 @@ class ConfigStore:
                 except Exception as e:
                     print(f"Error in config update callback: {e}")
     
+class CronTimer:
+    """
+    A timer that executes periodically based on a cron schedule.
+    This is a simplified version of VOLTTRON's cron schedule parser.
+    """
+    
+    def __init__(self, cron_pattern):
+        """Initialize a cron timer with a cron pattern."""
+        self.cron_pattern = cron_pattern
+        
+        # Parse the cron pattern
+        self.minutes, self.hours, self.days_of_month, self.months, self.days_of_week = self._parse_pattern(cron_pattern)
+    
+    def _parse_pattern(self, pattern):
+        """Parse a cron pattern into its components."""
+        if pattern is None:
+            raise ValueError("Cron pattern cannot be None")
+        
+        parts = pattern.strip().split()
+        if len(parts) != 5:
+            raise ValueError(f"Cron pattern must have 5 components, got {len(parts)}: {pattern}")
+        
+        minutes = self._parse_component(parts[0], 0, 59)
+        hours = self._parse_component(parts[1], 0, 23)
+        days_of_month = self._parse_component(parts[2], 1, 31)
+        
+        # Parse months (by name or number)
+        months = set()
+        for month in self._parse_component(parts[3], 1, 12, is_months=True):
+            if isinstance(month, str):
+                month_num = self._month_name_to_number(month)
+                months.add(month_num)
+            else:
+                months.add(month)
+        
+        # Parse days of week (by name or number, 0 or 7 = Sunday)
+        days_of_week = set()
+        for day in self._parse_component(parts[4], 0, 7, is_dow=True):
+            if isinstance(day, str):
+                day_num = self._day_name_to_number(day)
+                days_of_week.add(day_num if day_num < 7 else 0)  # Convert 7 to 0 (both represent Sunday)
+            else:
+                days_of_week.add(day if day < 7 else 0)  # Convert 7 to 0
+        
+        return minutes, hours, days_of_month, months, days_of_week
+    
+    def _parse_component(self, component, min_val, max_val, is_months=False, is_dow=False):
+        """
+        Parse a component of a cron pattern.
+        
+        Args:
+            component: The component to parse (e.g., "1,2,3", "*/5", "1-5", etc.)
+            min_val: The minimum valid value
+            max_val: The maximum valid value
+            is_months: Whether this component represents months
+            is_dow: Whether this component represents days of week
+            
+        Returns:
+            A set of values for the component
+        """
+        if component == "*":
+            return set(range(min_val, max_val + 1))
+        
+        values = set()
+        
+        for part in component.split(","):
+            if part == "*":
+                values.update(range(min_val, max_val + 1))
+                continue
+            
+            # Handle */n (every n units)
+            if "/" in part:
+                base, step = part.split("/", 1)
+                if base == "*":
+                    base_range = range(min_val, max_val + 1)
+                else:
+                    if "-" in base:
+                        base_min, base_max = base.split("-", 1)
+                        if is_months:
+                            base_min = self._parse_month(base_min)
+                            base_max = self._parse_month(base_max)
+                        elif is_dow:
+                            base_min = self._parse_dow(base_min)
+                            base_max = self._parse_dow(base_max)
+                        else:
+                            base_min = int(base_min)
+                            base_max = int(base_max)
+                        base_range = range(base_min, base_max + 1)
+                    else:
+                        if is_months:
+                            base = self._parse_month(base)
+                        elif is_dow:
+                            base = self._parse_dow(base)
+                        else:
+                            base = int(base)
+                        base_range = range(base, max_val + 1)
+                
+                step = int(step)
+                values.update(range(base_range[0], base_range[-1] + 1, step))
+                continue
+            
+            # Handle ranges (e.g., 1-5)
+            if "-" in part:
+                start, end = part.split("-", 1)
+                if is_months:
+                    start = self._parse_month(start)
+                    end = self._parse_month(end)
+                elif is_dow:
+                    start = self._parse_dow(start)
+                    end = self._parse_dow(end)
+                else:
+                    start = int(start)
+                    end = int(end)
+                values.update(range(start, end + 1))
+                continue
+            
+            # Handle single values
+            if is_months:
+                values.add(self._parse_month(part))
+            elif is_dow:
+                values.add(self._parse_dow(part))
+            else:
+                values.add(int(part))
+        
+        return values
+    
+    def _parse_month(self, month):
+        """Parse a month name or number."""
+        try:
+            return int(month)
+        except ValueError:
+            return month.lower()
+    
+    def _parse_dow(self, dow):
+        """Parse a day of week name or number."""
+        try:
+            return int(dow)
+        except ValueError:
+            return dow.lower()
+    
+    def _month_name_to_number(self, name):
+        """Convert a month name to its corresponding number (1-12)."""
+        name = name.lower()
+        months = {
+            'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+            'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+        }
+        for abbr, num in months.items():
+            if name.startswith(abbr):
+                return num
+        raise ValueError(f"Invalid month name: {name}")
+    
+    def _day_name_to_number(self, name):
+        """Convert a day of week name to its corresponding number (0-6, 0=Sunday)."""
+        name = name.lower()
+        days = {
+            'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6
+        }
+        for abbr, num in days.items():
+            if name.startswith(abbr):
+                return num
+        raise ValueError(f"Invalid day of week name: {name}")
+    
+    def get_next(self, now=None):
+        """
+        Get the next time this cron schedule should run.
+        
+        Args:
+            now: The reference time (defaults to current time)
+            
+        Returns:
+            The next scheduled time as a datetime object
+        """
+        if now is None:
+            now = datetime.now()
+        
+        # Start from the next minute
+        next_time = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+        
+        # Check up to 1000 minutes ahead to avoid infinite loops
+        for _ in range(1000):
+            # Check if this time matches the schedule
+            if (next_time.month in self.months and
+                next_time.day in self.days_of_month and
+                next_time.hour in self.hours and
+                next_time.minute in self.minutes and
+                next_time.weekday() in self.days_of_week):
+                return next_time
+            
+            # Increment to the next minute
+            next_time += timedelta(minutes=1)
+        
+        # If we get here, we couldn't find a match within the limit
+        raise ValueError("Could not find next scheduled time within reasonable limits")
+
+
+
+
+class ScheduledEvent:
+    """A scheduled periodic event."""
+    
+    def __init__(self, function, interval_or_cron, args=None, kwargs=None, name=None):
+        """
+        Initialize a scheduled event.
+        
+        Args:
+            function: The function to call
+            interval_or_cron: Either a number of seconds (interval) or a cron expression
+            args: Positional arguments to pass to the function
+            kwargs: Keyword arguments to pass to the function
+            name: Name of the event (defaults to function name)
+        """
+        self.function = function
+        self.args = args or []
+        self.kwargs = kwargs or {}
+        self.name = name or function.__name__
+        self.running = True
+        self.periodic = True
+        self.greenlet = None
+        
+        # Check if we have a cron expression or an interval
+        self.is_cron = isinstance(interval_or_cron, str)
+        
+        if self.is_cron:
+            # Cron schedule
+            self.cron_expression = interval_or_cron
+            self.cron_timer = CronTimer(interval_or_cron)
+            next_time = self.cron_timer.get_next()
+            self.next_time = time.mktime(next_time.timetuple())
+        else:
+            # Interval schedule
+            self.interval = interval_or_cron
+            self.next_time = time.time() + interval_or_cron
+    
+    def __lt__(self, other):
+        """Compare based on next scheduled time."""
+        return self.next_time < other.next_time
+    
+    def compute_next_time(self):
+        """Compute the next execution time."""
+        if self.is_cron:
+            next_time = self.cron_timer.get_next(
+                datetime.fromtimestamp(time.time())
+            )
+            self.next_time = time.mktime(next_time.timetuple())
+        else:
+            self.next_time = time.time() + self.interval
+    
+    def __str__(self):
+        if self.is_cron:
+            return f"ScheduledEvent({self.name}, cron='{self.cron_expression}', next_at={datetime.fromtimestamp(self.next_time)})"
+        else:
+            return f"ScheduledEvent({self.name}, interval={self.interval}, next_at={datetime.fromtimestamp(self.next_time)})"
+
+
+class Scheduler:
+    """Scheduler for periodic tasks."""
+    
+    def __init__(self, agent):
+        """Initialize the scheduler."""
+        self._agent = agent
+        self._event_queue = []  # Priority queue of scheduled events
+        self._events = {}  # Map of event names to event objects
+        self._scheduler_greenlet = None
+        self._stop_event = gevent.event.Event()
+    
+    def start(self):
+        """Start the scheduler."""
+        if self._scheduler_greenlet is None or self._scheduler_greenlet.dead:
+            self._stop_event.clear()
+            self._scheduler_greenlet = gevent.spawn(self._scheduler_loop)
+    
+    def stop(self):
+        """Stop the scheduler."""
+        if self._scheduler_greenlet:
+            self._stop_event.set()
+            self._scheduler_greenlet.join(timeout=2)
+            self._scheduler_greenlet = None
+    
+    def schedule(self, function, interval_or_cron, args=None, kwargs=None, name=None):
+        """
+        Schedule a periodic function.
+        
+        Args:
+            function: The function to call
+            interval_or_cron: Either a number of seconds (interval) or a cron expression
+            args: Positional arguments to pass to the function
+            kwargs: Keyword arguments to pass to the function
+            name: Name of the event (defaults to function name)
+            
+        Returns:
+            The name of the scheduled event
+        """
+        if isinstance(interval_or_cron, numbers.Number):
+            if interval_or_cron <= 0:
+                raise ValueError("Interval must be a positive number")
+        elif not isinstance(interval_or_cron, str):
+            raise ValueError("Schedule must be either a positive number (interval) or a cron expression")
+        
+        name = name or function.__name__
+        
+        # Create a new event
+        event = ScheduledEvent(function, interval_or_cron, args, kwargs, name)
+        
+        # Add to the event queue and map
+        self._events[name] = event
+        heapq.heappush(self._event_queue, event)
+        
+        return name
+    
+    def cancel(self, name):
+        """Cancel a scheduled event."""
+        if name in self._events:
+            event = self._events.pop(name)
+            event.running = False
+            # Note: The event may still be in the queue, but we'll skip it
+            # when it comes up in the scheduler loop
+            return True
+        return False
+    
+    def update_interval(self, name, interval):
+        """Update the interval of a scheduled event."""
+        if name in self._events:
+            event = self._events[name]
+            
+            if event.is_cron:
+                raise ValueError("Cannot update interval for a cron-based event")
+            
+            if not isinstance(interval, numbers.Number) or interval <= 0:
+                raise ValueError("Interval must be a positive number")
+            
+            event.interval = interval
+            event.next_time = time.time() + interval
+            
+            # Rebuild the queue to maintain the heap property
+            self._rebuild_queue()
+            return True
+        return False
+    
+    def update_cron(self, name, cron_expression):
+        """Update the cron expression of a scheduled event."""
+        if name in self._events:
+            event = self._events[name]
+            
+            if not event.is_cron:
+                raise ValueError("Cannot update cron for an interval-based event")
+            
+            try:
+                from croniter import croniter
+                # Validate cron expression
+                if not croniter.is_valid(cron_expression):
+                    raise ValueError(f"Invalid cron expression: {cron_expression}")
+                
+                event.cron_expression = cron_expression
+                event.iter = croniter(cron_expression, datetime.now())
+                event.next_time = event.iter.get_next(float)
+                
+                # Rebuild the queue to maintain the heap property
+                self._rebuild_queue()
+                return True
+            except ImportError:
+                raise ImportError("croniter package is required for cron schedules.")
+        return False
+    
+    def list_events(self):
+        """List all scheduled events."""
+        return {name: {
+            "interval" if not event.is_cron else "cron": event.interval if not event.is_cron else event.cron_expression,
+            "next_time": datetime.fromtimestamp(event.next_time).isoformat(),
+            "running": event.running
+        } for name, event in self._events.items()}
+    
+    def _rebuild_queue(self):
+        """Rebuild the event queue."""
+        events = list(self._events.values())
+        self._event_queue = []
+        for event in events:
+            if event.running:
+                heapq.heappush(self._event_queue, event)
+    
+    def _scheduler_loop(self):
+        """Main scheduler loop."""
+        while not self._stop_event.is_set():
+            now = time.time()
+            
+            # Process events that are due
+            while self._event_queue and self._event_queue[0].next_time <= now:
+                event = heapq.heappop(self._event_queue)
+                
+                # Skip if event was cancelled
+                if event.name not in self._events or not event.running:
+                    continue
+                
+                # Execute the function in a new greenlet
+                try:
+                    gevent.spawn(event.function, *event.args, **event.kwargs)
+                except Exception as e:
+                    print(f"Error spawning periodic task {event.name}: {e}")
+                
+                # Compute the next execution time
+                event.compute_next_time()
+                
+                # Reschedule the event
+                heapq.heappush(self._event_queue, event)
+            
+            # Sleep until the next event or a short timeout
+            sleep_time = 0.1  # Default sleep time
+            if self._event_queue:
+                next_time = self._event_queue[0].next_time
+                sleep_time = max(0, min(next_time - time.time(), 0.5))
+            
+            gevent.sleep(sleep_time)
+
 class Agent:
     """A gevent-based agent that connects to the VOLTTRON MessageBus."""
     
@@ -680,6 +1169,9 @@ class Agent:
         
         # Fire the onstart event with self as sender
         self.core.fire_event('onstart', sender=self)
+
+        # Start periodic tasks
+        self.core.start_periodic_tasks()
     
     def disconnect(self):
         """Disconnect from the message bus."""

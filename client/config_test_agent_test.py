@@ -1,4 +1,4 @@
-# config_test_agent_test.py
+# config_test_agent_test.py - Updated with cron testing
 
 import gevent
 from agent import Agent
@@ -61,6 +61,35 @@ def run_config_test():
         
         # Get the updated status
         print("\n=== Updated Status ===")
+        status = controller.vip.rpc.call("config_test", "get_status").get(timeout=5)
+        print(f"Status: {status}")
+        
+        # Test switching to cron scheduling
+        print("\n=== Switching to Cron Scheduling ===")
+        # Use "*/1 * * * *" for testing to ensure it runs every minute
+        result = controller.vip.rpc.call("config_test", "switch_to_cron", "*/1 * * * *").get(timeout=5)
+        print(f"Switch to cron result: {result}")
+        
+        # Wait to see the effect of cron scheduling
+        print("Waiting for cron schedule to trigger (up to 70 seconds)...")
+        gevent.sleep(70)  # Wait long enough for the cron schedule to trigger
+        
+        # Check the status after cron scheduling
+        print("\n=== Status After Cron Scheduling ===")
+        status = controller.vip.rpc.call("config_test", "get_status").get(timeout=5)
+        print(f"Status: {status}")
+        
+        # Switch back to interval scheduling
+        print("\n=== Switching Back to Interval Scheduling ===")
+        result = controller.vip.rpc.call("config_test", "switch_to_interval", 15).get(timeout=5)
+        print(f"Switch to interval result: {result}")
+        
+        # Wait to see the effect of interval scheduling
+        print("Waiting for interval schedule to trigger (20 seconds)...")
+        gevent.sleep(20)
+        
+        # Check the status after interval scheduling
+        print("\n=== Status After Interval Scheduling ===")
         status = controller.vip.rpc.call("config_test", "get_status").get(timeout=5)
         print(f"Status: {status}")
         
