@@ -423,6 +423,7 @@ class Core:
             'onstop': [],
             'onconnected': [],
             'ondisconnected': [],
+            'onconfigure': []
         }
         self._scheduler = Scheduler(agent)
         
@@ -1166,12 +1167,27 @@ class Agent:
         
         # Fire the onconnected event with self as sender
         self.core.fire_event('onconnected', sender=self)
+
+        # Trigger the onconfigure event - load config before starting
+        self._load_configs()
         
         # Fire the onstart event with self as sender
         self.core.fire_event('onstart', sender=self)
 
         # Start periodic tasks
         self.core.start_periodic_tasks()
+
+    def _load_configs(self):
+        """Load configurations and trigger the onconfigure event."""
+        try:
+            # List available configurations for this agent
+            configs = self.config.list().get(timeout=5)
+            
+            # Fire the onconfigure event
+            self.core.fire_event('onconfigure', sender=self, configs=configs)
+            
+        except Exception as e:
+            print(f"Error loading configurations: {e}")
     
     def disconnect(self):
         """Disconnect from the message bus."""

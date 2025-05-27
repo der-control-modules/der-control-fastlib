@@ -9,6 +9,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from models import MessageBus, Message, MessageBusStopHandler
 from connection_manager import ConnectionManager
+from config_store import ConfigStore
 
 
 class FastAPIMessageBus(MessageBus):
@@ -23,6 +24,8 @@ class FastAPIMessageBus(MessageBus):
         self._stop_handler = None
         self.server = None
         self.setup_routes()
+        
+        self.config_store = ConfigStore()
         self.message_queue = asyncio.Queue()
     
     def setup_routes(self):
@@ -162,6 +165,68 @@ class FastAPIMessageBus(MessageBus):
             except Exception as e:
                 print(f"Error in websocket connection for {identity}: {e}")
                 self.manager.disconnect(identity)
+
+        @self.app.get("/config-store/list")
+        async def list_configs(agent_id: Optional[str] = None):
+            """List all available configurations."""
+            configs = self.config_store.list_configs(agent_id)
+            return {"status": "success", "data": configs}
+
+        @self.app.get("/config-store/{agent_id}/{config_name}")
+        async def get_config(agent_id: str, config_name: str, raw: bool = False):
+            """Retrieve a configuration for an agent."""
+            config = self.config_store.retrieve(agent_id, config_name, raw)
+            if config is None:
+                raise HTTPException(status_code=404, detail=f"Config {config_name} not found for agent {agent_id}")
+            return {"status": "success", "data": config}
+
+        @self.app.put("/config-store/{agent_id}/{config_name}")
+        async def store_config(agent_id: str, config_name: str, request: Request):
+            """Store a configuration for an agent."""
+            try:
+                content_type = request.headers.get("Content-Type", "application/json")
+                
+                if "json" in content_type:
+                    # Process as JSON
+                    config_data = await request.json()
+                    success = self.config_store.store(agent_id, config_name, config_data, "json")
+                elif "csv" in content_type:
+                    # Process as CSV
+                    csv_content = await request.body()
+                    csv_text = csv_content.decode('utf-8')
+                    success = self.config_store.store(agent_id, config_name, csv_text, "csv")
+                else:
+                    # Default to JSON
+                    config_data = await request.json()
+                    success = self.config_store.store(agent_id, config_name, config_data, "json")
+                
+                if success:
+                    # Notify the agent of the config update if it's connected
+                    if agent_id in self.manager.active_connections:
+                        await self.manager.send_message(agent_id, {
+                            "type": "config_update",
+                            "config_name": config_name
+                        })
+                    return {"status": "success"}
+                else:
+                    raise HTTPException(status_code=500, detail="Failed to store configuration")
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid config data: {str(e)}")
+
+        @self.app.delete("/config-store/{agent_id}/{config_name}")
+        async def delete_config(agent_id: str, config_name: str):
+            """Delete a configuration for an agent."""
+            success = self.config_store.delete_config(agent_id, config_name)
+            if success:
+                # Notify the agent of the config deletion if it's connected
+                if agent_id in self.manager.active_connections:
+                    await self.manager.send_message(agent_id, {
+                        "type": "config_delete",
+                        "config_name": config_name
+                    })
+                return {"status": "success"}
+            else:
+                raise HTTPException(status_code=404, detail=f"Config {config_name} not found for agent {agent_id}")
     
     def start(self):
         """Start the message bus."""

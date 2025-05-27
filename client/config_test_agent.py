@@ -49,14 +49,18 @@ class ConfigTestAgent(Agent):
         """Handle startup tasks."""
         print(f"{self.identity} agent starting...")
         
-        # Try to load configuration from config store
-        self._load_config()
-        
         # Watch for configuration changes
         self.config.watch("config", self._config_updated)
         
-        # Schedule a cron-based task (separate from interval-based processing)
-        self.core.schedule(self._daily_report, "0 0 * * *", name="daily_report")  # Midnight every day
+        # Schedule initial processing task (config should be loaded via onconfigure)
+        self._schedule_processing_task()
+        
+        # Schedule a daily report task (won't change with config)
+        self.core.schedule(
+            self._daily_report, 
+            "0 0 * * *",  # Midnight every day
+            name="daily_report"
+        )
         
         print(f"{self.identity} agent started!")
     
@@ -111,7 +115,34 @@ class ConfigTestAgent(Agent):
                 if current_interval != configured_interval:
                     print(f"Updating processing interval from {current_interval} to {configured_interval}")
                     self.core.update_interval("_process_data", configured_interval)
-    
+
+    @Core.receiver('onconfigure')
+    def _onconfigure(self, sender=None, configs=None, **kwargs):
+        """
+        Handle configuration loading during startup.
+        This is called after connection but before onstart.
+        """
+        print(f"{self.identity} agent configuring...")
+        print(f"Available configs: {configs}")
+        
+        # Try to get the main configuration
+        try:
+            config_future = self.config.get("config")
+            config = config_future.get(timeout=5)
+            
+            if config:
+                print(f"Loaded configuration from config store: {config}")
+                self._apply_config(config)
+            else:
+                print("No configuration found in config store, using defaults")
+                # Store the default configuration
+                self.config.set("config", self.default_config).get(timeout=5)
+                print("Default configuration stored in config store")
+        except Exception as e:
+            print(f"Error loading configuration: {e}")
+            self._status["config_errors"] += 1
+        
+        print(f"{self.identity} agent configured!")
     def _daily_report(self):
         """Generate a daily report (cron-based task)."""
         current_time = datetime.datetime.now().isoformat()
@@ -283,6 +314,60 @@ class ConfigTestAgent(Agent):
         self._status["scheduled_events"] = self.core.list_events()
         return self._status
 
+    def _schedule_processing_task(self):
+        """Schedule or reschedule the processing task based on current config."""
+        # Cancel any existing task
+        if self._process_task_name:
+            self.core.cancel(self._process_task_name)
+        
+        # Skip scheduling if the agent is disabled
+        if not self._config.get("enabled", True):
+            print("Agent is disabled, not scheduling processing task")
+            return
+        
+        # Choose scheduling mode based on configuration
+        use_cron = self._config.get("use_cron", False)
+        
+        if use_cron:
+            # Use cron-based scheduling
+            cron_schedule = self._config.get("cron_schedule", "*/5 * * * *")
+            task_name = self.core.schedule(
+                self._process_data,
+                cron_schedule,
+                name="process_data"
+            )
+            print(f"Scheduled processing with cron expression: {cron_schedule}")
+        else:
+            # Use interval-based scheduling
+            interval = self._config.get("interval", 60)
+            task_name = self.core.schedule(
+                self._process_data,
+                interval,
+                name="process_data"
+            )
+            print(f"Scheduled processing with interval: {interval} seconds")
+        
+        # Remember the task name for later updates
+        self._process_task_name = task_name
+
+    def _process_data(self):
+        """Task to process data based on configuration."""
+        if not self._config.get("enabled", False):
+            print("Processing skipped - agent is disabled")
+            return  # Skip processing if disabled
+        
+        # Process data
+        current_time = datetime.datetime.now().isoformat()
+        targets = self._config.get("targets", [])
+        threshold = self._config.get("threshold", 100)
+        
+        print(f"[{current_time}] Processing {len(targets)} targets with threshold {threshold}")
+        for target in targets:
+            print(f"  - Processing target: {target}")
+        
+        # Update status
+        self._status["process_count"] += 1
+        self._status["last_process_time"] = current_time
 
 if __name__ == "__main__":
     from agent import run_agent
