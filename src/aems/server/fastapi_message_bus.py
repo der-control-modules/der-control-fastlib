@@ -1,6 +1,7 @@
 # fastapi_message_bus.py
 
 import asyncio
+import os
 import threading
 from typing import Optional
 
