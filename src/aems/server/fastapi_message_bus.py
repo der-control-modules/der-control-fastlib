@@ -6,7 +6,7 @@ import threading
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 
 from aems.server.models import MessageBus, Message, MessageBusStopHandler
 from aems.server.connection_manager import ConnectionManager
@@ -16,7 +16,8 @@ from aems.server.config_store import ConfigStore
 class FastAPIMessageBus(MessageBus):
     """FastAPI implementation of the MessageBus."""
     
-    def __init__(self, host: str = "127.0.0.1", port: int = 8000, config_store_dir: str = None):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8000, config_store_dir: str = None,
+                 reload: bool = False, reload_dirs: list = None, reload_delay: float = 0.25):
         self.app = FastAPI(title="AEMS MessageBus")
         self.host = host
         self.port = port
@@ -24,6 +25,10 @@ class FastAPIMessageBus(MessageBus):
         self.manager = ConnectionManager()
         self._stop_handler = None
         self.server = None
+
+        self.reload = reload
+        self.reload_dirs = reload_dirs or ["./"]
+        self.reload_delay = reload_delay
         self.setup_routes()
         
         self.config_store = ConfigStore(config_store_dir)
@@ -36,6 +41,7 @@ class FastAPIMessageBus(MessageBus):
         async def websocket_endpoint(websocket: WebSocket, identity: str):
             # In a production environment, we'd validate the credentials here
             await self.manager.connect(websocket, identity)
+
             try:
                 while True:
                     data = await websocket.receive_json()
@@ -231,28 +237,59 @@ class FastAPIMessageBus(MessageBus):
     
     def start(self):
         """Start the message bus."""
-        if not self.running:
-            # Start the uvicorn server in a separate thread
-            self.server_thread = threading.Thread(
-                target=uvicorn.run,
-                kwargs={
-                    "app": self.app,
-                    "host": self.host,
-                    "port": self.port,
-                }
-            )
-            self.server_thread.daemon = True
-            self.server_thread.start()
-            self.running = True
-            print(f"DEBUG: MessageBus started on {self.host}:{self.port}")
-    
+        self.running = True
+        
+        # Configure uvicorn with hot reload if enabled
+        config = uvicorn.Config(
+            app=self.app,
+            host=self.host,
+            port=self.port,
+            log_level="info",
+            reload=self.reload,
+            reload_dirs=self.reload_dirs,
+            reload_delay=self.reload_delay
+        )
+        
+        # Create and start the server
+        self.server = uvicorn.Server(config)
+        
+        # Run the server in a separate thread
+        self._server_thread = threading.Thread(
+            target=self._run_server,
+            daemon=True,
+            name="FastAPIMessageBus-Server"
+        )
+        self._server_thread.start()
+        
+        print(f"FastAPIMessageBus running on http://{self.host}:{self.port}")
+        
+        # Initialize other components after server start
+        if hasattr(self, '_init_after_start'):
+            self._init_after_start()
+    def _run_server(self):
+        """Run the uvicorn server."""
+        self.server.run()
+        self.running = False
+
     def stop(self):
         """Stop the message bus."""
-        if self.running:
-            self.running = False
-            if self._stop_handler:
-                self._stop_handler.message_bus_shutdown()
-            print("DEBUG: MessageBus stopped")
+        if not self.running or self.server is None:
+            return
+        
+        if self._stop_handler:
+            self._stop_handler.message_bus_shutdown()
+
+        print("Stopping FastAPIMessageBus...")
+                
+        # Signal the server to stop
+        self.server.should_exit = True
+
+        # Wait for the server thread to finish
+        if hasattr(self, '_server_thread') and self._server_thread.is_alive():
+            self._server_thread.join(timeout=5.0)
+
+        self.running = False
+        print("DEBUG: MessageBus stopped")
     
     def is_running(self) -> bool:
         """Check if the message bus is running."""
@@ -319,6 +356,10 @@ def _main():
     parser.add_argument(
         "--config-dir", 
         help="Config store directory (defaults to VOLTTRON_HOME/aems_config_store)"
+    )
+    parser.add_argument(
+        "--reload", action="store_true", default=False,
+        help="Puts the server into debug mode and will reload the server when changes are made."
     )
     
     args = parser.parse_args()

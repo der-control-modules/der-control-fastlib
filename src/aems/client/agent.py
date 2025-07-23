@@ -1,22 +1,25 @@
-# agent.py
+from __future__ import annotations
 
 from datetime import datetime, timedelta
 import gevent
 from gevent import monkey
 from gevent.event import AsyncResult
+import logging
 # Patch standard library to work with gevent
 monkey.patch_all()
 
+import yaml
 import json
 import uuid
 import websocket
-from typing import Dict, Any, Optional, Callable, List
+from typing import Dict, Any, Optional, Callable, List, overload
 import ssl
 
 import time
 import heapq
 from typing import Optional, Callable, Any
 import numbers
+from aems.client import dualmethod
 
 class RPC:
     """RPC subsystem for the Agent."""
@@ -179,7 +182,7 @@ class PubSub:
         self._agent = agent
         self._subscriptions = {}
     
-    def publish(self, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""):
+    def publish(self, peer:str, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""):
         """Publish a message to a topic, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
@@ -191,6 +194,11 @@ class PubSub:
         async_result = AsyncResult()
         
         try:
+            # If this is a default_config then we need to not worry about the message itself being
+            # sent as it will be updated by the config store.
+            if topic == "config/config":
+                message = {}
+                
             self._agent.websocket.send(json.dumps({
                 "type": "publish",
                 "bus": bus,
@@ -199,7 +207,10 @@ class PubSub:
                 "message": message
             }))
             
-            print(f"Agent {self._agent.identity} published to {topic}: {message}")
+            if topic == "config/config":
+                print(f"Agent {self._agent.identity} published to {topic}: default update sent")
+            else:
+                print(f"Agent {self._agent.identity} published to {topic}: {message}")
             async_result.set(True)  # Success
         except Exception as e:
             print(f"Error publishing message: {e}")
@@ -244,7 +255,7 @@ class PubSub:
         
         return adapter
     
-    def subscribe(self, prefix: str, callback: Optional[Callable] = None):
+    def subscribe(self, prefix: str, callback: Optional[Callable] = None, **kwargs):
         """Subscribe to a topic prefix, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
@@ -328,51 +339,6 @@ class PubSub:
                     import traceback
                     traceback.print_exc()
 
-
-class Config:
-    """Config subsystem for the Agent."""
-    
-    def __init__(self, agent):
-        self._agent = agent
-        self._config = {}
-    
-    def set(self, key: str, value: Any):
-        """Set a configuration value."""
-        self._config[key] = value
-        # Return AsyncResult for API consistency
-        result = AsyncResult()
-        result.set(True)
-        return result
-    
-    def get(self, key: str, default=None):
-        """Get a configuration value."""
-        value = self._config.get(key, default)
-        # Return AsyncResult for API consistency
-        result = AsyncResult()
-        result.set(value)
-        return result
-    
-    def delete(self, key: str):
-        """Delete a configuration value."""
-        if key in self._config:
-            del self._config[key]
-            success = True
-        else:
-            success = False
-        # Return AsyncResult for API consistency
-        result = AsyncResult()
-        result.set(success)
-        return result
-    
-    def list(self):
-        """List all configuration keys."""
-        keys = list(self._config.keys())
-        # Return AsyncResult for API consistency
-        result = AsyncResult()
-        result.set(keys)
-        return result
-
-
 class VIP:
     """VIP subsystem for the Agent."""
     
@@ -380,6 +346,8 @@ class VIP:
         self._agent = agent
         self.rpc = RPC(agent)
         self.pubsub = PubSub(agent)
+        self.config = Config(agent)
+        self.peerlist = Peerlist(agent)
     
     def send_message(self, peer: str, subsystem: str, args: list = None):
         """Send a VIP message, returning an AsyncResult."""
@@ -418,13 +386,22 @@ class Core:
     
     def __init__(self, agent):
         self._agent = agent
-        self._handlers = {
-            'onstart': [],
-            'onstop': [],
-            'onconnected': [],
-            'ondisconnected': [],
-            'onconfigure': []
+        self.onstart = Signal('onstart')
+        self.onstop = Signal('onstop')
+        self.onfinish = Signal('onfinish')
+        self.onconnected = Signal('onconnected')
+        self.ondisconnected = Signal('ondisconnected')
+        self.onconfigure = Signal('onconfigure')
+
+        self._signals = {
+            'onstart': self.onstart,
+            'onstop': self.onstop,
+            'onconfigure': self.onconfigure,
+            'onfinish': self.onfinish,
+            'onconnected': self.onconnected,
+            'ondisconnected': self.ondisconnected
         }
+        self._handlers = {event: [] for event in self._signals.keys()}
         self._scheduler = Scheduler(agent)
         
         # Register any methods decorated with @Core.receiver
@@ -433,7 +410,7 @@ class Core:
         # Register any methods decorated with @Core.periodic
         self._register_periodic_methods(agent)
 
-    def schedule(self, function, interval_or_cron, *args, **kwargs):
+    def schedule(self, interval_or_cron, function, *args, **kwargs):
         """
         Schedule a periodic function.
         
@@ -479,18 +456,12 @@ class Core:
             return method
         return decorator
     
-    
-    
-    def _register_decorated_methods(self, agent):
-        """Find and register methods decorated with @Core.receiver."""
-        for attr_name in dir(agent):
-            attr = getattr(agent, attr_name)
-            if callable(attr) and hasattr(attr, "event_name"):
-                event_name = getattr(attr, "event_name")
-                if event_name in self._handlers:
-                    self._handlers[event_name].append(attr)
-    @staticmethod
-    def periodic(interval_or_cron):
+    @dualmethod
+    def periodic(self, interval_or_cron: int | str, function):
+        self._scheduler.schedule(function, interval_or_cron)
+
+    @periodic.classmethod
+    def periodic(cls, interval_or_cron):
         """
         Decorator to register a method to run periodically.
         
@@ -521,6 +492,8 @@ class Core:
         """Stop the agent, returning an AsyncResult."""
         async_result = AsyncResult()
         try:
+            self.fire_event('onstop', self)
+
             # Stop the scheduler
             self._scheduler.stop()
 
@@ -528,6 +501,8 @@ class Core:
             async_result.set(True)
         except Exception as e:
             async_result.set_exception(e)
+        finally:
+            self.fire_event('onfinish', self)
         return async_result
     
     def start_periodic_tasks(self):
@@ -538,27 +513,36 @@ class Core:
         """Get the agent's identity."""
         return self._agent.identity
     
-    def onstart(self, callback):
-        """Register a callback to be executed when the agent starts."""
-        self._handlers['onstart'].append(callback)
-        return callback  # Return the callback for use as a decorator
-    
-    def onstop(self, callback):
-        """Register a callback to be executed when the agent stops."""
-        self._handlers['onstop'].append(callback)
-        return callback  # Return the callback for use as a decorator
+    def start(self):
+        """Start the agent."""
+        # Fire the onstart event
+        self.fire_event('onstart', self)
+               
+
+
+    def _register_decorated_methods(self, agent):
+        """Find and register methods decorated with @Core.receiver."""
+        for attr_name in dir(agent):
+            attr = getattr(agent, attr_name)
+            if callable(attr) and hasattr(attr, "event_name"):
+                event_name = getattr(attr, "event_name")
+                if event_name in self._handlers:
+                    self._handlers[event_name].append(attr)
     
     def fire_event(self, event_name, sender=None, **kwargs):
         """Fire an event by calling all registered handlers."""
+        if event_name in self._signals:
+            # Fire the signal
+            self._signals[event_name].fire(sender, **kwargs)
+
         if event_name in self._handlers:
             for handler in self._handlers[event_name]:
                 try:
-                    # Pass sender and any kwargs to the handler
-                    handler(sender=sender, **kwargs)
+                    gevent.spawn(handler, sender, **kwargs)
                 except Exception as e:
                     print(f"Error in {event_name} handler: {e}")
 
-class ConfigStore:
+class Config:
     """
     ConfigStore subsystem for the Agent.
     
@@ -568,10 +552,14 @@ class ConfigStore:
     3. Agents can watch for config changes
     """
     
-    def __init__(self, agent):
+    def __init__(self, agent: Agent):
         self._agent = agent
         self._config_callbacks = {}
+        self._default_configs = {}
+        self._pending_subscriptions = []
+        self._connected = False
         self._watched_configs = set()
+        self._agent.core.onconfigure.connect(self._on_connection_established)
     
     def get(self, config_name: str):
         """Get a configuration from the config store."""
@@ -595,7 +583,7 @@ class ConfigStore:
                 async_result.set_exception(e)
         
         gevent.spawn(fetch_config)
-        return async_result
+        return async_result.get()
     
     def set(self, config_name: str, config_data: Any):
         """Set a configuration in the config store."""
@@ -670,30 +658,46 @@ class ConfigStore:
         gevent.spawn(list_configs)
         return async_result
     
-    def watch(self, config_name: str, callback: Callable):
-        """Register a callback to be called when a configuration changes."""
-        if config_name not in self._config_callbacks:
-            self._config_callbacks[config_name] = []
-        self._config_callbacks[config_name].append(callback)
-        self._watched_configs.add(config_name)  # Track this config
-        print(f"Watching for changes to config: {config_name}")
+    def subscribe(self, callback, actions=None, pattern=None):
+        """
+        Subscribe to configuration changes.
+        
+        Args:
+            callback: Function to call when matching changes occur
+            actions: List of action types to subscribe to ('NEW', 'UPDATE', 'DELETE')
+            pattern: Pattern to match against config names
+        
+        Returns:
+            Subscription ID that can be used to unsubscribe
+        """
+        if actions is None:
+            actions = ['NEW', 'UPDATE', 'DELETE']
+        
+        # Convert pattern to string if it's a regex object
+        pattern_str = pattern.pattern if hasattr(pattern, 'pattern') else pattern or '*'
+        
+        subscription = {
+            'callback': callback,
+            'actions': actions,
+            'pattern': pattern
+        }
+
+        if self._connected:
+            return self._setup_subscription(subscription)
+        
+        self._pending_subscriptions.append(subscription)
+        return len(self._pending_subscriptions)
     
-    def unwatch(self, config_name: str, callback: Callable = None):
-        """Unregister a callback for configuration changes."""
-        if callback is None:
-            # Remove all callbacks for this config
-            if config_name in self._config_callbacks:
-                del self._config_callbacks[config_name]
-                self._watched_configs.discard(config_name)
-        else:
-            # Remove specific callback
-            if config_name in self._config_callbacks:
-                self._config_callbacks[config_name] = [
-                    cb for cb in self._config_callbacks[config_name] if cb != callback
-                ]
-                if not self._config_callbacks[config_name]:
-                    del self._config_callbacks[config_name]
-                    self._watched_configs.discard(config_name)
+        # def adapted_callback(data):
+        #     if data.get('action') in actions:
+        #         callback(data.get('config_name'), data.get('action'), data.get('config'))
+        
+        # # Use the existing subscription mechanism
+        # return self._agent.vip.pubsub.subscribe(pattern_str, adapted_callback)
+
+    def unsubscribe(self, subscription_id):
+        """Remove a configuration subscription."""
+        return self._agent.vip.pubsub.unsubscribe(subscription_id)
     
     def handle_update(self, config_name: str):
         """Handle a configuration update notification."""
@@ -715,6 +719,87 @@ class ConfigStore:
                         callback(config_name, None)
                     except Exception as e:
                         print(f"Error in config update error callback: {e}")
+    
+    def set_default(self, name, value):
+        """
+        Set a default configuration value.
+        
+        Args:
+            name: Configuration name
+            value: Default configuration value
+        """
+        self._default_configs[name] = value
+        
+        # Don't save this to the server, because it's a local change.  
+        
+        # If connected, send the default to the server
+        # if self._connected:
+        #     self._send_default_config(name, value)
+        
+    def _on_connection_established(self, sender, **kwargs):
+        """Called when connection to the server is established."""
+        print(f"Agent {self._agent.identity} connected to server now doing defaults config and subscriptions")
+        self._connected = True
+
+        # Set up all pending subscriptions
+        for subscription in self._pending_subscriptions:
+            self._setup_subscription(subscription)
+        
+        # Send all default configs
+        # TODO verify that the agent has its default config here.
+        for name, value in self._default_configs.items():
+            data = dict(name=name, value=value, action='NEW')
+
+            self._agent.vip.pubsub.publish(peer='pubsub', topic=f"config/{name}", message=data).get()
+            #self._send_default_config(name, value)
+    
+    def _setup_subscription(self, subscription):
+        """
+        Set up a subscription with the server.
+        
+        Args:
+            subscription: Dictionary containing callback, actions, and pattern
+        """
+        # Extract subscription details
+        callback = subscription['callback']
+        actions = subscription['actions']
+        pattern = subscription['pattern']
+        
+        # Register with the agent's pubsub system
+        def handler(peer, sender, bus, topic, headers, message):
+            if not isinstance(message, dict):
+                message = json.loads(message)
+            action = message.get('action', 'NEW')
+            if action in actions:
+                config_name = message.get('name')
+
+                config_value = self._default_configs.get(config_name, None)
+
+                # config_value = message.get('value')
+                # if isinstance(config_value, str):
+                #     config_value = json.loads(config_value)  # Convert JSON string to dict if needed
+                callback(config_name, action, config_value)
+        
+        # Subscribe using the agent's VIP connection
+        topic = f"config/{pattern}" if pattern else "config/*"
+        return self._agent.vip.pubsub.subscribe(peer='pubsub',
+                                                prefix=topic,
+                                                callback=handler)
+    
+    def _send_default_config(self, name, value):
+        """
+        Send a default config to the server.
+        
+        Args:
+            name: Configuration name
+            value: Default value
+        """
+        # Send a message to the server to set the default config
+        # This would need to match your server's API for setting defaults
+        self._agent.vip.rpc.call('config.store',
+                                 'set_default',
+                                 name,
+                                 value).get()
     
 class CronTimer:
     """
@@ -896,7 +981,7 @@ class CronTimer:
         next_time = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
         
         # Check up to 1000 minutes ahead to avoid infinite loops
-        for _ in range(1000):
+        for _ in range(10000):
             # Check if this time matches the schedule
             if (next_time.month in self.months and
                 next_time.day in self.days_of_month and
@@ -911,8 +996,32 @@ class CronTimer:
         # If we get here, we couldn't find a match within the limit
         raise ValueError("Could not find next scheduled time within reasonable limits")
 
+class Peerlist:
+    """Peerlist subsystem for the Agent."""
 
+    def __init__(self, agent):
+        self._agent = agent
+        self._connected_peers = set()
 
+    def add_peer(self, peer: str):
+        """Add a peer to the list."""
+        self._connected_peers.add(peer)
+        print(f"Peer added: {peer}")
+
+    def remove_peer(self, peer: str):
+        """Remove a peer from the list."""
+        self._connected_peers.discard(peer)
+        print(f"Peer removed: {peer}")
+
+    def list_peers(self) -> list | AsyncResult:
+        """List all connected peers."""
+        async_result = AsyncResult()
+        async_result.set(list(self._connected_peers))
+        return async_result
+    
+    def __call__(self) -> list | AsyncResult:
+        """Return the list of connected peers."""
+        return self.list_peers()
 
 class ScheduledEvent:
     """A scheduled periodic event."""
@@ -997,7 +1106,7 @@ class Scheduler:
 
     @staticmethod
     def cron(cronstring: str) -> str:
-        data = cronstring.split(cronstring)
+        data = cronstring.split()
         assert len(data) == 5, "Invalid cron string"
         invalid = False
         for d in data:
@@ -1152,6 +1261,7 @@ class Agent:
     
     def __init__(self, identity: str, host: str = "127.0.0.1", port: int = 8000,
                  config_path: str = None, **kwargs):
+        self._logger = logging.getLogger("Agent")
         self.identity = identity
         self._host = host
         self._port = port
@@ -1166,7 +1276,7 @@ class Agent:
         
         # Create subsystems
         self.core = Core(self)
-        self.config = ConfigStore(self)  # Initialize config before VIP
+        self.config = Config(self)  # Initialize config before VIP
         
         # Initialize VIP with all subsystems
         self.vip = VIP(self)
@@ -1207,10 +1317,14 @@ class Agent:
         
         # Fire the onconnected event with self as sender
         self.core.fire_event('onconnected', sender=self)
-
+        
         # Trigger the onconfigure event - load config before starting
         self._load_configs()
-        
+        #self.core.fire_event('onconfigure', sender=self)
+
+        # Right before calling agent onst
+        #self.vip.config._on_connection_established()
+
         # Fire the onstart event with self as sender
         self.core.fire_event('onstart', sender=self)
 
@@ -1248,8 +1362,12 @@ class Agent:
             return
         
         try:
-            print(f"Loading configuration from file: {self.config_path}")
+            self._logger.debug(f"Loading configuration from file: {self.config_path}")
             with open(self.config_path, 'r') as f:
+                import yaml
+                config_data = yaml.safe_load(f)
+                print("After loaind configuration from path")
+
                 if self.config_path.endswith('.json'):
                     config_data = json.load(f)
                 elif self.config_path.endswith(('.yml', '.yaml')):
@@ -1296,7 +1414,7 @@ class Agent:
         try:
             data = json.loads(message)
             self.received_messages.append(data)
-            print(f"Agent {self.identity} received: {data}")
+            print(f"Agent {self.identity} received data.")
             
             # Handle different message types
             msg_type = data.get("type")
@@ -1499,6 +1617,32 @@ class Agent:
         """Signal the agent to stop."""
         self._stop_event.set()
 
+class Signal:
+    """A simple signal/slot implementation for event handling."""
+    
+    def __init__(self, name):
+        self.name = name
+        self._handlers = []
+    
+    def connect(self, handler):
+        """Connect a handler function to this signal."""
+        if handler not in self._handlers:
+            self._handlers.append(handler)
+        return handler  # Return handler for potential chaining
+    
+    def disconnect(self, handler):
+        """Disconnect a handler function from this signal."""
+        if handler in self._handlers:
+            self._handlers.remove(handler)
+        return handler
+    
+    def fire(self, sender, **kwargs):
+        """Fire the signal, calling all connected handlers."""
+        for handler in self._handlers[:]:  # Copy to avoid issues if handlers are added/removed during iteration
+            try:
+                gevent.spawn(handler, sender, **kwargs)
+            except Exception as e:
+                print(f"Error in {self.name} handler: {e}")
 
 # src/aems/client/agent.py - Updated run_agent function
 
@@ -1519,7 +1663,7 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     import os
     import json
     import yaml
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", help="Agent configuration file", default=config_path)
     parser.add_argument("--identity", help="Agent identity", default=identity)
@@ -1543,12 +1687,14 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     if config_path and os.path.exists(config_path):
         try:
             with open(config_path, 'r') as f:
-                if config_path.endswith('.json'):
-                    agent_config = json.load(f)
-                elif config_path.endswith(('.yml', '.yaml')):
-                    import yaml  # Only import if needed
+                try:
                     agent_config = yaml.safe_load(f)
-                else:
+                except ImportError:
+                    try:
+                        agent_config = json.load(f)
+                    except json.JSONDecodeError:
+                        print(f"Error decoding JSON from {config_path}. Ensure it is a valid JSON file.")
+                        
                     print(f"Unsupported config file format: {config_path}")
         except Exception as e:
             print(f"Error loading configuration from {config_path}: {e}")
@@ -1556,29 +1702,33 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     
     # Create the agent
     agent_identity = args.identity or identity or agent_class.__name__.lower()
+    
+    agent = agent_class(
+        identity=agent_identity, 
+        host=args.host, 
+        port=args.port,
+        config_path=config_path,
+        **kwargs
+    )
+    
+    # Set initial configuration if loaded from file
+    if agent_config:
+        # Store the config in the agent's config store
+        if hasattr(agent, 'config') and hasattr(agent.config, 'set'):
+            try:
+                agent.config.set("config", agent_config).get(timeout=5)
+                print(f"Loaded configuration from {config_path}")
+            except Exception as e:
+                print(f"Error storing initial configuration: {e}")
+    
+    # Run the agent
     try:
-        agent = agent_class(
-            identity=agent_identity, 
-            host=args.host, 
-            port=args.port,
-            config_path=config_path,
-            **kwargs
-        )
-        
-        # Set initial configuration if loaded from file
-        if agent_config:
-            # Store the config in the agent's config store
-            if hasattr(agent, 'config') and hasattr(agent.config, 'set'):
-                try:
-                    agent.config.set("config", agent_config).get(timeout=5)
-                    print(f"Loaded configuration from {config_path}")
-                except Exception as e:
-                    print(f"Error storing initial configuration: {e}")
-        
-        # Run the agent
-        return agent.run()
-    except Exception as e:
-        print(f"Error initializing agent: {e}")
-        import traceback
-        traceback.print_exc()
-        return 1
+        run = agent.run
+    except AttributeError:
+        run = agent.core.run
+    task = gevent.spawn(run)
+    try:
+        task.join()
+    finally:
+        task.kill()
+    

@@ -9,6 +9,11 @@ from typing import Optional, Any, Union
 import threading
 import datetime
 
+from watchdog.observers import Observer
+
+from aems.server.config_store_handler import ConfigFileHandler
+from aems.server.models import Message, MessageBus
+
 
 class ConfigStore:
     """
@@ -17,7 +22,7 @@ class ConfigStore:
     This follows VOLTTRON's config store pattern of centralized configuration management.
     """
     
-    def __init__(self, base_dir: str = None):
+    def __init__(self, base_dir: str = None, messagebus: MessageBus = None):
         """
         Initialize the config store with a base directory.
         
@@ -36,9 +41,15 @@ class ConfigStore:
         
         self.base_dir = base_dir
         self.lock = threading.RLock()  # For thread safety
-        
+        self.messagebus = messagebus
         # Create the base directory if it doesn't exist
         os.makedirs(base_dir, exist_ok=True)
+        
+        # In ConfigStore initialization
+        observer = Observer()
+        observer.schedule(ConfigFileHandler(self), self.base_dir, recursive=True)
+        observer.start()
+
         print(f"ConfigStore initialized with base directory: {base_dir}")
     
     def store(self, agent_id: str, config_name: str, config_data: Any, config_type: str = "json") -> bool:
@@ -349,3 +360,54 @@ class ConfigStore:
             result.append(row_dict)
         
         return result
+    
+    def notify_change(self, config_name: str, action: str, value: Optional[Any] = None):
+        """
+        Notify subscribers about configuration changes using VIP messages.
+        
+        Args:
+            config_name: Name of the configuration that changed
+            action: Type of change ('NEW', 'UPDATE', or 'DELETE')
+            value: The new configuration value (None for DELETE actions)
+        """
+        if self.messagebus is None:
+            print("Config change not published: No message bus provided")
+            return
+        
+        try:
+            # Create payload
+            payload = {
+                "name": config_name,
+                "action": action,
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+            
+            # Include value for non-DELETE actions
+            if action != "DELETE" and value is not None:
+                payload["value"] = value
+            
+            print(f"Publishing config change: {config_name} ({action})")
+            
+            # Format topic for easier subscription matching
+            topic = f"config/{config_name}"
+            
+            # Get all active connections from the manager
+            if hasattr(self.messagebus, 'manager') and hasattr(self.messagebus.manager, 'active_connections'): # type: ignore
+                # Create and send a message to each connected client
+                for client_id in self.messagebus.manager.active_connections: # type: ignore  The implemented messagebus has this.
+                    message = Message(
+                        peer=client_id,  # Target specific client
+                        subsystem="pubsub",
+                        data={
+                            "topic": topic,
+                            "headers": {},
+                            "message": payload,
+                            "sender": "configstore"
+                        }
+                    )
+                    self.messagebus.send_vip_message(message)
+            else:
+                print("Cannot publish config change: No active connections found")
+                
+        except Exception as e:
+            print(f"Error publishing config change notification: {e}")
