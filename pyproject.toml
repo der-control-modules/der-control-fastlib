@@ -30,7 +30,10 @@ dependencies = [
     "gevent~=25.5.1",
     "httpx~=0.28.1",
     "pydantic~=2.11.5",
-    "pydantic_core~=2.33.2"
+    "pydantic_core~=2.33.2",
+    "PyYAML==6.0.2",
+    "watchdog==6.0.0",
+    "watchgod==0.8.2"
 ]
 dynamic = ["version"]
 
