@@ -126,6 +126,18 @@ class ConnectionManager:
         else:
             print(f"DEBUG: No future found for msg_id {msg_id}")
 
+    def set_rpc_error(self, msg_id: str, error: str):
+        """Set an exception for an RPC response future."""
+        if msg_id in self.rpc_responses:
+            future = self.rpc_responses.pop(msg_id)
+            if not future.done():
+                print(f"DEBUG: Setting RPC error for msg_id {msg_id}: {error}")
+                future.set_exception(Exception(error))
+            else:
+                print(f"DEBUG: Future for msg_id {msg_id} was already done")
+        else:
+            print(f"DEBUG: No future found for msg_id {msg_id}")
+
     def clear_rpc_response(self, msg_id: str):
         """Clear an RPC response future."""
         if msg_id in self.rpc_responses:
@@ -179,6 +191,13 @@ class ConnectionManager:
             print(f"DEBUG: RPC request timed out for msg_id {msg_id}")
             await self.send_message(
                 sender, {"type": "rpc_error", "msg_id": msg_id, "error": "RPC request timed out"}
+            )
+            self.clear_rpc_response(msg_id)
+        except Exception as e:
+            # Handle exceptions from RPC method execution
+            print(f"DEBUG: RPC request failed for msg_id {msg_id}: {e}")
+            await self.send_message(
+                sender, {"type": "rpc_error", "msg_id": msg_id, "error": str(e)}
             )
             self.clear_rpc_response(msg_id)
 

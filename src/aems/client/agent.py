@@ -19,6 +19,15 @@ from gevent.event import AsyncResult
 
 from aems.client import dualmethod
 
+# Use volttron-core JSON-RPC utilities for compatibility
+try:
+    from volttron.utils.jsonrpc import exception_from_json, Error, RemoteError, MethodNotFound
+    VOLTTRON_JSONRPC_AVAILABLE = True
+except ImportError:
+    # Fallback to our custom implementation
+    from .jsonrpc import exception_from_json, Error, RemoteError, MethodNotFound
+    VOLTTRON_JSONRPC_AVAILABLE = False
+
 # Patch standard library to work with gevent
 monkey.patch_all()
 
@@ -1768,7 +1777,22 @@ class Agent:
                 if msg_id in self.rpc_responses:
                     # Get the AsyncResult for this message ID and set the exception
                     async_result = self.rpc_responses.pop(msg_id)
-                    async_result.set_exception(Exception(error))
+                    # Create proper volttron-core compatible exception
+                    if isinstance(error, dict) and "code" in error:
+                        # JSON-RPC style error with code, message, data
+                        exception = exception_from_json(
+                            error.get("code", -32603),
+                            error.get("message", "Internal Error"),
+                            error.get("data")
+                        )
+                    else:
+                        # Simple string error - use our fallback or basic Exception
+                        try:
+                            exception = RemoteError(str(error))
+                        except Exception:
+                            # Fallback if RemoteError has issues
+                            exception = Exception(f"Remote error: {error}")
+                    async_result.set_exception(exception)
                 else:
                     print(f"DEBUG: No pending RPC request found for msg_id {msg_id}")
 
@@ -1795,9 +1819,23 @@ class Agent:
                     if msg_id in self.rpc_responses and args:
                         # Get the AsyncResult and set the exception
                         async_result = self.rpc_responses.pop(msg_id)
-                        async_result.set_exception(
-                            Exception(args[0])
-                        )  # Assuming first arg is error message
+                        # Create proper volttron-core compatible exception
+                        error_data = args[0]  # Assuming first arg is error
+                        if isinstance(error_data, dict) and "code" in error_data:
+                            # JSON-RPC style error
+                            exception = exception_from_json(
+                                error_data.get("code", -32603),
+                                error_data.get("message", "Internal Error"),
+                                error_data.get("data")
+                            )
+                        else:
+                            # Simple error - use fallback if RemoteError has issues
+                            try:
+                                exception = RemoteError(str(error_data))
+                            except Exception:
+                                # Fallback if RemoteError has issues
+                                exception = Exception(f"Remote error: {error_data}")
+                        async_result.set_exception(exception)
 
         except Exception as e:
             print(f"Error processing message in agent {self.identity}: {e}")

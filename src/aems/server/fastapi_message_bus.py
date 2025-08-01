@@ -227,12 +227,12 @@ class FastAPIMessageBus(MessageBus):
                             self.manager.set_rpc_response(msg_id, result)
 
                     elif data["type"] == "rpc_error":
-                        # Handle RPC error messages
+                        # Handle RPC error messages - use proper error handling
                         if "msg_id" in data and "error" in data:
                             msg_id = data["msg_id"]
                             error = data["error"]
                             print(f"DEBUG: Setting RPC error for msg_id {msg_id}: {error}")
-                            self.manager.set_rpc_response(msg_id, {"error": error})
+                            self.manager.set_rpc_error(msg_id, error)
 
             except WebSocketDisconnect:
                 print(f"DEBUG: WebSocket disconnect for {identity}")
