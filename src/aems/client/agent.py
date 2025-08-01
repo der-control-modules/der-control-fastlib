@@ -1,25 +1,27 @@
 from __future__ import annotations
 
+import heapq
+import json
+import logging
+import numbers
+import ssl
+import time
+import traceback
+import uuid
+import websocket
 from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, Callable, List
+
 import gevent
+import httpx
 from gevent import monkey
 from gevent.event import AsyncResult
-import logging
+
+from aems.client import dualmethod
+
 # Patch standard library to work with gevent
 monkey.patch_all()
 
-import yaml
-import json
-import uuid
-import websocket
-from typing import Dict, Any, Optional, Callable, List, overload
-import ssl
-
-import time
-import heapq
-from typing import Optional, Callable, Any
-import numbers
-from aems.client import dualmethod
 
 class RPC:
     """RPC subsystem for the Agent."""
@@ -56,6 +58,7 @@ class RPC:
             setattr(f, "rpc_exported", True)
             setattr(f, "rpc_name", name)
             return f
+
         return decorator
 
     def export_method(self, method_name: str, method: Callable):
@@ -72,7 +75,10 @@ class RPC:
                 # Use the custom name if provided, otherwise use the method's name
                 method_name = getattr(attr, "rpc_name") or attr_name
                 self._exported_methods[method_name] = attr
-                print(f"Agent {self._agent.identity} exported RPC method: {method_name} (from decorator)")
+                print(
+                    f"Agent {self._agent.identity} exported RPC method: "
+                    f"{method_name} (from decorator)"
+                )
 
     def call(self, peer: str, method: str, *args, **kwargs):
         """Make an RPC call to another agent, returning an AsyncResult."""
@@ -83,18 +89,28 @@ class RPC:
         async_result = AsyncResult()
         self._agent.rpc_responses[msg_id] = async_result
 
-        print(f"DEBUG: Agent {self._agent.identity} making RPC call to {peer}.{method} with msg_id {msg_id}")
+        print(
+            f"DEBUG: Agent {self._agent.identity} making RPC call to "
+            f"{peer}.{method} with msg_id {msg_id}"
+        )
 
-        self._agent.websocket.send(json.dumps({
-            "type": "rpc",
-            "peer": peer,
-            "method": method,
-            "args": args,
-            "kwargs": kwargs,
-            "msg_id": msg_id
-        }))
+        self._agent.websocket.send(
+            json.dumps(
+                {
+                    "type": "rpc",
+                    "peer": peer,
+                    "method": method,
+                    "args": args,
+                    "kwargs": kwargs,
+                    "msg_id": msg_id,
+                }
+            )
+        )
 
-        print(f"Agent {self._agent.identity} sent RPC call to {peer}: method={method}, args={args}, kwargs={kwargs}")
+        print(
+            f"Agent {self._agent.identity} sent RPC call to {peer}: "
+            f"method={method}, args={args}, kwargs={kwargs}"
+        )
 
         # Spawn a timeout watcher
         gevent.spawn(self._watch_timeout, msg_id, async_result, 10)  # 10 second timeout
@@ -110,7 +126,7 @@ class RPC:
         if msg_id in self._agent.rpc_responses:
             del self._agent.rpc_responses[msg_id]
             if not async_result.ready():
-                async_result.set_exception(TimeoutError(f"RPC call timed out"))
+                async_result.set_exception(TimeoutError("RPC call timed out"))
 
     def get_exports(self):
         """Get all exported RPC methods."""
@@ -161,11 +177,15 @@ class RPC:
                     method = self._exported_methods[method_name]
                     print(f"DEBUG: Agent {self._agent.identity} executing method {method_name}")
                     result = method(*args, **kwargs)
-                    print(f"DEBUG: Agent {self._agent.identity} method {method_name} result: {result}")
+                    print(
+                        f"DEBUG: Agent {self._agent.identity} method {method_name} result: {result}"
+                    )
                     async_result.set(result)
                 except Exception as e:
                     error = str(e)
-                    print(f"DEBUG: Agent {self._agent.identity} method {method_name} error: {error}")
+                    print(
+                        f"DEBUG: Agent {self._agent.identity} method {method_name} error: {error}"
+                    )
                     async_result.set_exception(e)
             else:
                 error = f"Method {method_name} not found or not exported"
@@ -182,7 +202,9 @@ class PubSub:
         self._agent = agent
         self._subscriptions = {}
 
-    def publish(self, peer:str, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""):
+    def publish(
+        self, peer: str, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""
+    ):
         """Publish a message to a topic, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
@@ -199,13 +221,17 @@ class PubSub:
             if topic == "config/config":
                 message = {}
 
-            self._agent.websocket.send(json.dumps({
-                "type": "publish",
-                "bus": bus,
-                "topic": topic,
-                "headers": headers,
-                "message": message
-            }))
+            self._agent.websocket.send(
+                json.dumps(
+                    {
+                        "type": "publish",
+                        "bus": bus,
+                        "topic": topic,
+                        "headers": headers,
+                        "message": message,
+                    }
+                )
+            )
 
             if topic == "config/config":
                 print(f"Agent {self._agent.identity} published to {topic}: default update sent")
@@ -223,6 +249,7 @@ class PubSub:
         Create an adapter that inspects a callback's signature and calls it with appropriate parameters.
         Supports both modern (message object) and original VOLTTRON-style callbacks.
         """
+
         def adapter(message):
             try:
                 # First try the traditional style with 6 parameters
@@ -248,7 +275,6 @@ class PubSub:
                         raise
             except Exception as e:
                 print(f"Error in subscription callback: {e}")
-                import traceback
                 traceback.print_exc()
                 # Return None when there's an error
                 return None
@@ -263,7 +289,9 @@ class PubSub:
         subscription_id = str(uuid.uuid4())
 
         # Store the original callback
-        actual_callback = callback or (lambda msg: print(f"Subscription callback for {prefix}: {msg}"))
+        actual_callback = callback or (
+            lambda msg: print(f"Subscription callback for {prefix}: {msg}")
+        )
 
         # Wrap the callback with our adapter
         adapted_callback = self._callback_adapter(actual_callback)
@@ -274,11 +302,9 @@ class PubSub:
         async_result = AsyncResult()
 
         try:
-            self._agent.websocket.send(json.dumps({
-                "type": "subscribe",
-                "prefix": prefix,
-                "id": subscription_id
-            }))
+            self._agent.websocket.send(
+                json.dumps({"type": "subscribe", "prefix": prefix, "id": subscription_id})
+            )
 
             print(f"Agent {self._agent.identity} subscribed to prefix: {prefix}")
             async_result.set(subscription_id)  # Return the subscription ID
@@ -296,7 +322,9 @@ class PubSub:
         subscription_id = str(uuid.uuid4())
 
         # Store the original callback
-        actual_callback = callback or (lambda msg: print(f"Subscription callback for {pattern}: {msg}"))
+        actual_callback = callback or (
+            lambda msg: print(f"Subscription callback for {pattern}: {msg}")
+        )
 
         # Wrap the callback with our adapter
         adapted_callback = self._callback_adapter(actual_callback)
@@ -307,11 +335,9 @@ class PubSub:
         async_result = AsyncResult()
 
         try:
-            self._agent.websocket.send(json.dumps({
-                "type": "subscribe",
-                "pattern": pattern,
-                "id": subscription_id
-            }))
+            self._agent.websocket.send(
+                json.dumps({"type": "subscribe", "pattern": pattern, "id": subscription_id})
+            )
 
             print(f"Agent {self._agent.identity} subscribed to pattern: {pattern}")
             async_result.set(subscription_id)  # Return the subscription ID
@@ -336,8 +362,8 @@ class PubSub:
                     callback(data)
                 except Exception as e:
                     print(f"Error calling subscription callback: {e}")
-                    import traceback
                     traceback.print_exc()
+
 
 class VIP:
     """VIP subsystem for the Agent."""
@@ -361,18 +387,24 @@ class VIP:
         async_result = AsyncResult()
 
         try:
-            self._agent.websocket.send(json.dumps({
-                "type": "vip",
-                "message": {
-                    "peer": peer,
-                    "user": self._agent.identity,
-                    "subsystem": subsystem,
-                    "msg_id": msg_id,
-                    "args": args
-                }
-            }))
+            self._agent.websocket.send(
+                json.dumps(
+                    {
+                        "type": "vip",
+                        "message": {
+                            "peer": peer,
+                            "user": self._agent.identity,
+                            "subsystem": subsystem,
+                            "msg_id": msg_id,
+                            "args": args,
+                        },
+                    }
+                )
+            )
 
-            print(f"Agent {self._agent.identity} sent VIP message to {peer}: subsystem={subsystem}, args={args}")
+            print(
+                f"Agent {self._agent.identity} sent VIP message to {peer}: subsystem={subsystem}, args={args}"
+            )
             async_result.set(msg_id)  # Return the message ID
         except Exception as e:
             print(f"Error sending VIP message: {e}")
@@ -386,20 +418,20 @@ class Core:
 
     def __init__(self, agent):
         self._agent = agent
-        self.onstart = Signal('onstart')
-        self.onstop = Signal('onstop')
-        self.onfinish = Signal('onfinish')
-        self.onconnected = Signal('onconnected')
-        self.ondisconnected = Signal('ondisconnected')
-        self.onconfigure = Signal('onconfigure')
+        self.onstart = Signal("onstart")
+        self.onstop = Signal("onstop")
+        self.onfinish = Signal("onfinish")
+        self.onconnected = Signal("onconnected")
+        self.ondisconnected = Signal("ondisconnected")
+        self.onconfigure = Signal("onconfigure")
 
         self._signals = {
-            'onstart': self.onstart,
-            'onstop': self.onstop,
-            'onconfigure': self.onconfigure,
-            'onfinish': self.onfinish,
-            'onconnected': self.onconnected,
-            'ondisconnected': self.ondisconnected
+            "onstart": self.onstart,
+            "onstop": self.onstop,
+            "onconfigure": self.onconfigure,
+            "onfinish": self.onfinish,
+            "onconnected": self.onconnected,
+            "ondisconnected": self.ondisconnected,
         }
         self._handlers = {event: [] for event in self._signals.keys()}
         self._scheduler = Scheduler(agent)
@@ -416,14 +448,62 @@ class Core:
 
         Args:
             function: The function to call
-            interval_or_cron: Either a number of seconds (interval) or a cron expression
+            interval_or_cron: Either a number of seconds (interval), a cron expression,
+                             a datetime object, or a datetime string
             *args: Positional arguments to pass to the function
             **kwargs: Keyword arguments to pass to the function
 
         Returns:
             The name of the scheduled event
         """
+        # Convert datetime (object or string) to cron expression if needed
+        if isinstance(interval_or_cron, datetime):
+            # Convert datetime object to cron expression: minute hour day month dayofweek
+            cron_expr = (
+                f"{interval_or_cron.minute} {interval_or_cron.hour} "
+                f"{interval_or_cron.day} {interval_or_cron.month} *"
+            )
+            interval_or_cron = cron_expr
+        elif isinstance(interval_or_cron, str) and not self._is_cron_expression(interval_or_cron):
+            # Try to parse as datetime string
+            try:
+                # Parse common datetime string formats
+                dt = self._parse_datetime_string(interval_or_cron)
+                cron_expr = f"{dt.minute} {dt.hour} " f"{dt.day} {dt.month} *"
+                interval_or_cron = cron_expr
+            except ValueError:
+                # If parsing fails, assume it's already a cron expression
+                pass
+
         return self._scheduler.schedule(function, interval_or_cron, args, kwargs)
+
+    def _is_cron_expression(self, expr):
+        """Check if a string looks like a cron expression."""
+        parts = expr.strip().split()
+        return len(parts) == 5
+
+    def _parse_datetime_string(self, dt_str):
+        """Parse a datetime string into a datetime object."""
+        # Common datetime formats to try
+        formats = [
+            "%Y-%m-%d %H:%M:%S",  # 2025-12-25 14:30:00
+            "%Y-%m-%d %H:%M",  # 2025-12-25 14:30
+            "%Y-%m-%dT%H:%M:%S",  # 2025-12-25T14:30:00 (ISO format)
+            "%Y-%m-%dT%H:%M",  # 2025-12-25T14:30
+            "%m/%d/%Y %H:%M:%S",  # 12/25/2025 14:30:00
+            "%m/%d/%Y %H:%M",  # 12/25/2025 14:30
+            "%d-%m-%Y %H:%M:%S",  # 25-12-2025 14:30:00
+            "%d-%m-%Y %H:%M",  # 25-12-2025 14:30
+        ]
+
+        for fmt in formats:
+            try:
+                return datetime.strptime(dt_str, fmt)
+            except ValueError:
+                continue
+
+        # If none of the formats work, raise an error
+        raise ValueError(f"Unable to parse datetime string: {dt_str}")
 
     def cancel(self, name):
         """Cancel a scheduled event."""
@@ -451,9 +531,11 @@ class Core:
             def my_onstart_handler(self, sender, **kwargs):
                 # do something when agent starts
         """
+
         def decorator(method):
             setattr(method, "event_name", event_name)
             return method
+
         return decorator
 
     @dualmethod
@@ -474,10 +556,12 @@ class Core:
             def my_cron_task(self):
                 # do something based on a cron schedule
         """
+
         def decorator(method):
             setattr(method, "periodic", True)
             setattr(method, "interval_or_cron", interval_or_cron)
             return method
+
         return decorator
 
     def _register_periodic_methods(self, agent):
@@ -492,7 +576,7 @@ class Core:
         """Stop the agent, returning an AsyncResult."""
         async_result = AsyncResult()
         try:
-            self.fire_event('onstop', self)
+            self.fire_event("onstop", self)
 
             # Stop the scheduler
             self._scheduler.stop()
@@ -502,7 +586,7 @@ class Core:
         except Exception as e:
             async_result.set_exception(e)
         finally:
-            self.fire_event('onfinish', self)
+            self.fire_event("onfinish", self)
         return async_result
 
     def start_periodic_tasks(self):
@@ -516,9 +600,7 @@ class Core:
     def start(self):
         """Start the agent."""
         # Fire the onstart event
-        self.fire_event('onstart', self)
-
-
+        self.fire_event("onstart", self)
 
     def _register_decorated_methods(self, agent):
         """Find and register methods decorated with @Core.receiver."""
@@ -542,12 +624,13 @@ class Core:
                 except Exception as e:
                     print(f"Error in {event_name} handler: {e}")
 
+
 class ConfigCallback:
     """A callback for configuration changes."""
 
     def __init__(self, callback: Callable, actions: List[str] = None):
         self.callback = callback
-        self.actions = actions or ['NEW', 'UPDATE', 'DELETE']
+        self.actions = actions or ["NEW", "UPDATE", "DELETE"]
         self.is_default = False  # Indicates if this is a default config callback
 
     def __hash__(self):
@@ -561,6 +644,7 @@ class ConfigCallback:
                 self.callback(config_name, action, value)
             except Exception as e:
                 print(f"Error in config callback for {config_name}: {e}")
+
 
 class Config:
     """
@@ -611,18 +695,16 @@ class Config:
         # Use gevent to make the HTTP request asynchronously
         def fetch_config():
             try:
-                import httpx
                 with httpx.Client() as client:
                     response = client.get(request_url)
                     if response.status_code == 200:
                         data = response.json()
-                        self._server_configs[config_name] = data[
-                            "data"]  # Cache the result
+                        self._server_configs[config_name] = data["data"]  # Cache the result
                         async_result.set(data["data"])
                     else:
                         async_result.set_exception(
-                            Exception(
-                                f"Failed to get config: {response.text}"))
+                            Exception(f"Failed to get config: {response.text}")
+                        )
             except Exception as e:
                 async_result.set_exception(e)
 
@@ -631,7 +713,6 @@ class Config:
             return {}
 
         return result
-
 
     def set(self, config_name: str, config_data: Any):
         """Set a configuration in the config store."""
@@ -643,13 +724,14 @@ class Config:
         # Use gevent to make the HTTP request asynchronously
         def store_config():
             try:
-                import httpx
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
                     response = client.put(request_url, json=config_data)
                     if response.status_code == 200:
                         async_result.set(True)
                     else:
-                        async_result.set_exception(Exception(f"Failed to store config: {response.text}"))
+                        async_result.set_exception(
+                            Exception(f"Failed to store config: {response.text}")
+                        )
             except Exception as e:
                 async_result.set_exception(e)
 
@@ -666,13 +748,14 @@ class Config:
         # Use gevent to make the HTTP request asynchronously
         def delete_config():
             try:
-                import httpx
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
                     response = client.delete(request_url)
                     if response.status_code == 200:
                         async_result.set(True)
                     else:
-                        async_result.set_exception(Exception(f"Failed to delete config: {response.text}"))
+                        async_result.set_exception(
+                            Exception(f"Failed to delete config: {response.text}")
+                        )
             except Exception as e:
                 async_result.set_exception(e)
 
@@ -689,7 +772,6 @@ class Config:
         # Use gevent to make the HTTP request asynchronously
         def list_configs():
             try:
-                import httpx
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
                     response = client.get(request_url)
                     if response.status_code == 200:
@@ -699,18 +781,16 @@ class Config:
                         else:
                             async_result.set([])  # No configs for this agent
                     else:
-                        async_result.set_exception(Exception(f"Failed to list configs: {response.text}"))
+                        async_result.set_exception(
+                            Exception(f"Failed to list configs: {response.text}")
+                        )
             except Exception as e:
                 async_result.set_exception(e)
 
         gevent.spawn(list_configs)
         return async_result
 
-    def subscribe(self,
-                  callback,
-                  actions=None,
-                  pattern=None,
-                  config_name=None):
+    def subscribe(self, callback, actions=None, pattern=None, config_name=None):
         """
         Subscribe to configuration changes.
         Args:
@@ -720,7 +800,7 @@ class Config:
             config_name: Specific config name to subscribe to (takes precedence over pattern)
         """
         if actions is None:
-            actions = ['NEW', 'UPDATE', 'DELETE']
+            actions = ["NEW", "UPDATE", "DELETE"]
 
         # If a specific config_name is provided, use that directly
         if pattern:
@@ -739,34 +819,22 @@ class Config:
                 value = self._default_configs[pattern]
                 try:
                     callback(pattern, value)
-                    print(
-                        f"Called callback with existing default config: {pattern}"
-                    )
+                    print(f"Called callback with existing default config: {pattern}")
                 except Exception as e:
-                    print(
-                        f"Error calling callback for default {pattern}: {e}"
-                    )
+                    print(f"Error calling callback for default {pattern}: {e}")
             elif pattern in self._server_configs:
                 value = self._server_configs[pattern]
                 try:
                     callback(pattern, value)
-                    print(
-                        f"Called callback with existing server config: {pattern}"
-                    )
+                    print(f"Called callback with existing server config: {pattern}")
                 except Exception as e:
-                    print(
-                        f"Error calling callback for server config {pattern}: {e}"
-                    )
+                    print(f"Error calling callback for server config {pattern}: {e}")
 
             # Return some identifier for this subscription
             return f"{pattern}:{len(self._config_callbacks[pattern])}"
 
         # For pattern-based subscriptions, use the old mechanism with the server
-        subscription = {
-            'callback': callback,
-            'actions': actions,
-            'pattern': pattern
-        }
+        subscription = {"callback": callback, "actions": actions, "pattern": pattern}
 
         if self._connected:
             return self._setup_subscription(subscription)
@@ -817,7 +885,7 @@ class Config:
     def _on_configure(self, sender, **kwargs):
         """Called when the agent receives its configuration."""
         print(f"Agent {self._agent.identity} received configuration")
-        configs = kwargs.get('configs', [])
+        configs = kwargs.get("configs", [])
 
         if not self._new_default_configs_sent:
             # Send all default configs to the server
@@ -825,7 +893,7 @@ class Config:
                 try:
                     for callback in self._config_callbacks.get(name, []):
                         callback(name, "NEW", value)
-                    #self._send_default_config(name, "NEW", value)
+                    # self._send_default_config(name, "NEW", value)
                     print(f"Sent default config to server: {name} = {value}")
                 except Exception as e:
                     print(f"Error sending default config {name}: {e}")
@@ -840,11 +908,11 @@ class Config:
         # Process configs from server if available
         for cfg in configs:
 
-            config_name = cfg.get('name')
+            config_name = cfg.get("name")
 
             # Get the config from server
             config_data = self.get(config_name)
-            #.get(timeout=5)
+            # .get(timeout=5)
             self._server_configs[config_name] = config_data
 
             # Notify callbacks
@@ -855,11 +923,7 @@ class Config:
 
                         callback(config_name, "NEW", config_data)
                     except Exception as e:
-                        print(
-                            f"Error in config callback for {config_name}: {e}"
-                        )
-
-
+                        print(f"Error in config callback for {config_name}: {e}")
 
     def _on_connection_established(self, sender, **kwargs):
         """Called when connection to the server is established."""
@@ -872,27 +936,26 @@ class Config:
 
         self._pending_subscriptions = []
 
-
     def _setup_subscription(self, subscription):
         """Set up a pattern-based subscription with the server."""
         # Extract subscription details
-        callback = subscription['callback']
-        actions = subscription['actions']
-        pattern = subscription['pattern']
+        callback = subscription["callback"]
+        actions = subscription["actions"]
+        pattern = subscription["pattern"]
 
         # Register with the agent's pubsub system
         def handler(peer, sender, bus, topic, headers, message):
             if not isinstance(message, dict):
                 message = json.loads(message)
 
-            action = message.get('action', 'NEW')
+            action = message.get("action", "NEW")
             if action in actions:
-                config_name = message.get('name')
-                config_value = message.get('value')
+                config_name = message.get("name")
+                config_value = message.get("value")
 
                 # Update our server config cache
                 if config_name and config_value is not None:
-                    if action != 'DELETE':
+                    if action != "DELETE":
                         self._server_configs[config_name] = config_value
                     elif config_name in self._server_configs:
                         del self._server_configs[config_name]
@@ -905,9 +968,7 @@ class Config:
 
         # Subscribe using the agent's VIP connection
         topic = f"config/{pattern}" if pattern else "config/*"
-        return self._agent.vip.pubsub.subscribe(peer='pubsub',
-                                                prefix=topic,
-                                                callback=handler)
+        return self._agent.vip.pubsub.subscribe(peer="pubsub", prefix=topic, callback=handler)
 
     def _send_default_config(self, name, value):
         """
@@ -919,10 +980,8 @@ class Config:
         """
         # Send a message to the server to set the default config
         # This would need to match your server's API for setting defaults
-        self._agent.vip.rpc.call('config.store',
-                                 'set_default',
-                                 name,
-                                 value).get()
+        self._agent.vip.rpc.call("config.store", "set_default", name, value).get()
+
 
 class CronTimer:
     """
@@ -935,7 +994,9 @@ class CronTimer:
         self.cron_pattern = cron_pattern
 
         # Parse the cron pattern
-        self.minutes, self.hours, self.days_of_month, self.months, self.days_of_week = self._parse_pattern(cron_pattern)
+        self.minutes, self.hours, self.days_of_month, self.months, self.days_of_week = (
+            self._parse_pattern(cron_pattern)
+        )
 
     def _parse_pattern(self, pattern):
         """Parse a cron pattern into its components."""
@@ -964,7 +1025,9 @@ class CronTimer:
         for day in self._parse_component(parts[4], 0, 7, is_dow=True):
             if isinstance(day, str):
                 day_num = self._day_name_to_number(day)
-                days_of_week.add(day_num if day_num < 7 else 0)  # Convert 7 to 0 (both represent Sunday)
+                days_of_week.add(
+                    day_num if day_num < 7 else 0
+                )  # Convert 7 to 0 (both represent Sunday)
             else:
                 days_of_week.add(day if day < 7 else 0)  # Convert 7 to 0
 
@@ -1068,8 +1131,18 @@ class CronTimer:
         """Convert a month name to its corresponding number (1-12)."""
         name = name.lower()
         months = {
-            'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-            'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+            "jan": 1,
+            "feb": 2,
+            "mar": 3,
+            "apr": 4,
+            "may": 5,
+            "jun": 6,
+            "jul": 7,
+            "aug": 8,
+            "sep": 9,
+            "oct": 10,
+            "nov": 11,
+            "dec": 12,
         }
         for abbr, num in months.items():
             if name.startswith(abbr):
@@ -1079,9 +1152,7 @@ class CronTimer:
     def _day_name_to_number(self, name):
         """Convert a day of week name to its corresponding number (0-6, 0=Sunday)."""
         name = name.lower()
-        days = {
-            'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6
-        }
+        days = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
         for abbr, num in days.items():
             if name.startswith(abbr):
                 return num
@@ -1106,11 +1177,13 @@ class CronTimer:
         # Check up to 1000 minutes ahead to avoid infinite loops
         for _ in range(10000):
             # Check if this time matches the schedule
-            if (next_time.month in self.months and
-                next_time.day in self.days_of_month and
-                next_time.hour in self.hours and
-                next_time.minute in self.minutes and
-                next_time.weekday() in self.days_of_week):
+            if (
+                next_time.month in self.months
+                and next_time.day in self.days_of_month
+                and next_time.hour in self.hours
+                and next_time.minute in self.minutes
+                and next_time.weekday() in self.days_of_week
+            ):
                 return next_time
 
             # Increment to the next minute
@@ -1118,6 +1191,7 @@ class CronTimer:
 
         # If we get here, we couldn't find a match within the limit
         raise ValueError("Could not find next scheduled time within reasonable limits")
+
 
 class Peerlist:
     """Peerlist subsystem for the Agent."""
@@ -1145,6 +1219,7 @@ class Peerlist:
     def __call__(self) -> list | AsyncResult:
         """Return the list of connected peers."""
         return self.list_peers()
+
 
 class ScheduledEvent:
     """A scheduled periodic event."""
@@ -1189,9 +1264,7 @@ class ScheduledEvent:
     def compute_next_time(self):
         """Compute the next execution time."""
         if self.is_cron:
-            next_time = self.cron_timer.get_next(
-                datetime.fromtimestamp(time.time())
-            )
+            next_time = self.cron_timer.get_next(datetime.fromtimestamp(time.time()))
             self.next_time = time.mktime(next_time.timetuple())
         else:
             self.next_time = time.time() + self.interval
@@ -1233,7 +1306,7 @@ class Scheduler:
         assert len(data) == 5, "Invalid cron string"
         invalid = False
         for d in data:
-            if d == '*':
+            if d == "*":
                 pass
             else:
                 result = eval(d)
@@ -1263,7 +1336,9 @@ class Scheduler:
             if interval_or_cron <= 0:
                 raise ValueError("Interval must be a positive number")
         elif not isinstance(interval_or_cron, str):
-            raise ValueError("Schedule must be either a positive number (interval) or a cron expression")
+            raise ValueError(
+                "Schedule must be either a positive number (interval) or a cron expression"
+            )
 
         name = name or function.__name__
 
@@ -1315,6 +1390,7 @@ class Scheduler:
 
             try:
                 from croniter import croniter
+
                 # Validate cron expression
                 if not croniter.is_valid(cron_expression):
                     raise ValueError(f"Invalid cron expression: {cron_expression}")
@@ -1332,11 +1408,16 @@ class Scheduler:
 
     def list_events(self):
         """List all scheduled events."""
-        return {name: {
-            "interval" if not event.is_cron else "cron": event.interval if not event.is_cron else event.cron_expression,
-            "next_time": datetime.fromtimestamp(event.next_time).isoformat(),
-            "running": event.running
-        } for name, event in self._events.items()}
+        return {
+            name: {
+                "interval" if not event.is_cron else "cron": (
+                    event.interval if not event.is_cron else event.cron_expression
+                ),
+                "next_time": datetime.fromtimestamp(event.next_time).isoformat(),
+                "running": event.running,
+            }
+            for name, event in self._events.items()
+        }
 
     def _rebuild_queue(self):
         """Rebuild the event queue."""
@@ -1401,7 +1482,9 @@ class Signal:
 
     def fire(self, sender, **kwargs):
         """Fire the signal, calling all connected handlers."""
-        for handler in self._handlers[:]:  # Copy to avoid issues if handlers are added/removed during iteration
+        for handler in self._handlers[
+            :
+        ]:  # Copy to avoid issues if handlers are added/removed during iteration
             try:
                 gevent.spawn(handler, sender, **kwargs)
             except Exception as e:
@@ -1411,8 +1494,14 @@ class Signal:
 class Agent:
     """A gevent-based agent that connects to the VOLTTRON MessageBus."""
 
-    def __init__(self, identity: str, host: str = "127.0.0.1", port: int = 8000,
-                 config_path: str = None, **kwargs):
+    def __init__(
+        self,
+        identity: str,
+        host: str = "127.0.0.1",
+        port: int = 8000,
+        config_path: str = None,
+        **kwargs,
+    ):
         self._logger = logging.getLogger("Agent")
         self.identity = identity
         self._host = host
@@ -1424,7 +1513,7 @@ class Agent:
         self.received_messages = []
         self._listener_greenlet = None
         self.rpc_responses = {}  # Maps message IDs to AsyncResults
-        self._stop_event = gevent.event.Event() # type: ignore
+        self._stop_event = gevent.event.Event()  # type: ignore
 
         # Create subsystems
         self.core = Core(self)
@@ -1448,13 +1537,13 @@ class Agent:
             on_message=self.__on_ws_message__,
             on_error=self.__on_ws_error__,
             on_close=self.__on_ws_close__,
-            on_open=self.__on_ws_open__
+            on_open=self.__on_ws_open__,
         )
 
         # Start the WebSocket connection in a separate greenlet
         self._listener_greenlet = gevent.spawn(
             self.websocket.run_forever,
-            sslopt={"cert_reqs": ssl.CERT_NONE}  # Allow self-signed certs if needed
+            sslopt={"cert_reqs": ssl.CERT_NONE},  # Allow self-signed certs if needed
         )
 
         # Wait for the connection to be established
@@ -1468,13 +1557,13 @@ class Agent:
         print(f"Agent {self.identity} connected")
 
         # Fire the onconnected event with self as sender
-        self.core.fire_event('onconnected', sender=self)
+        self.core.fire_event("onconnected", sender=self)
 
         # After onconnected but before onstart, load configurations
         self._load_configs()
 
         # Fire the onstart event with self as sender
-        self.core.fire_event('onstart', sender=self)
+        self.core.fire_event("onstart", sender=self)
 
         # Start periodic tasks
         self.core.start_periodic_tasks()
@@ -1491,7 +1580,7 @@ class Agent:
                 self._load_config_from_path()
 
             # Fire the onconfigure event
-            self.core.fire_event('onconfigure', sender=self, configs=configs)
+            self.core.fire_event("onconfigure", sender=self, configs=configs)
 
         except Exception as e:
             print(f"Error loading configurations: {e}")
@@ -1511,15 +1600,17 @@ class Agent:
 
         try:
             self._logger.debug(f"Loading configuration from file: {self.config_path}")
-            with open(self.config_path, 'r') as f:
+            with open(self.config_path, "r") as f:
                 import yaml
+
                 config_data = yaml.safe_load(f)
                 print("After loaind configuration from path")
 
-                if self.config_path.endswith('.json'):
+                if self.config_path.endswith(".json"):
                     config_data = json.load(f)
-                elif self.config_path.endswith(('.yml', '.yaml')):
+                elif self.config_path.endswith((".yml", ".yaml")):
                     import yaml
+
                     config_data = yaml.safe_load(f)
                 else:
                     print(f"Unsupported config file format: {self.config_path}")
@@ -1539,7 +1630,7 @@ class Agent:
         """Disconnect from the message bus."""
         if self.websocket and self.connected:
             # Fire the onstop event with self as sender
-            self.core.fire_event('onstop', sender=self)
+            self.core.fire_event("onstop", sender=self)
 
             self.websocket.close()
             # Wait for the close to complete
@@ -1550,7 +1641,7 @@ class Agent:
             print(f"Agent {self.identity} disconnected")
 
             # Fire the ondisconnected event with self as sender
-            self.core.fire_event('ondisconnected', sender=self)
+            self.core.fire_event("ondisconnected", sender=self)
 
     def __on_ws_open__(self, ws):
         """Callback when WebSocket connection is opened."""
@@ -1596,7 +1687,9 @@ class Agent:
                 msg_id = data.get("msg_id")
 
                 # Process the RPC request - returns an AsyncResult
-                async_result = self.vip.rpc.handle_request(sender, method_name, args, kwargs, msg_id)
+                async_result = self.vip.rpc.handle_request(
+                    sender, method_name, args, kwargs, msg_id
+                )
 
                 # Wait for the result and send the response
                 def send_response():
@@ -1605,20 +1698,16 @@ class Agent:
                         result = async_result.get(timeout=10)
                         # Send successful response
                         print(f"DEBUG: Agent {self.identity} sending RPC response: {result}")
-                        self.websocket.send(json.dumps({
-                            "type": "rpc_response",
-                            "msg_id": msg_id,
-                            "result": result
-                        }))
+                        self.websocket.send(
+                            json.dumps({"type": "rpc_response", "msg_id": msg_id, "result": result})
+                        )
                     except Exception as e:
                         # Send error response
                         error = str(e)
                         print(f"DEBUG: Agent {self.identity} sending RPC error response: {error}")
-                        self.websocket.send(json.dumps({
-                            "type": "rpc_error",
-                            "msg_id": msg_id,
-                            "error": error
-                        }))
+                        self.websocket.send(
+                            json.dumps({"type": "rpc_error", "msg_id": msg_id, "error": error})
+                        )
 
                 # Spawn a greenlet to process the response asynchronously
                 gevent.spawn(send_response)
@@ -1627,7 +1716,9 @@ class Agent:
                 # Handle RPC response
                 msg_id = data.get("msg_id")
                 result = data.get("result")
-                print(f"DEBUG: Agent {self.identity} received RPC response for msg_id {msg_id}: {result}")
+                print(
+                    f"DEBUG: Agent {self.identity} received RPC response for msg_id {msg_id}: {result}"
+                )
                 if msg_id in self.rpc_responses:
                     # Get the AsyncResult for this message ID and set its result
                     async_result = self.rpc_responses.pop(msg_id)
@@ -1639,7 +1730,9 @@ class Agent:
                 # Handle RPC error
                 msg_id = data.get("msg_id")
                 error = data.get("error", "Unknown RPC error")
-                print(f"DEBUG: Agent {self.identity} received RPC error for msg_id {msg_id}: {error}")
+                print(
+                    f"DEBUG: Agent {self.identity} received RPC error for msg_id {msg_id}: {error}"
+                )
                 if msg_id in self.rpc_responses:
                     # Get the AsyncResult for this message ID and set the exception
                     async_result = self.rpc_responses.pop(msg_id)
@@ -1670,11 +1763,14 @@ class Agent:
                     if msg_id in self.rpc_responses and args:
                         # Get the AsyncResult and set the exception
                         async_result = self.rpc_responses.pop(msg_id)
-                        async_result.set_exception(Exception(args[0]))  # Assuming first arg is error message
+                        async_result.set_exception(
+                            Exception(args[0])
+                        )  # Assuming first arg is error message
 
         except Exception as e:
             print(f"Error processing message in agent {self.identity}: {e}")
             import traceback
+
             traceback.print_exc()
 
     def _handle_vip_rpc_request(self, message):
@@ -1699,17 +1795,11 @@ class Agent:
                     result = async_result.get(timeout=10)
                     # Send successful response via VIP
                     self.vip.send_message(
-                        peer=peer,
-                        subsystem="rpc_response",
-                        args=[result, msg_id]
+                        peer=peer, subsystem="rpc_response", args=[result, msg_id]
                     )
                 except Exception as e:
                     # Send error response via VIP
-                    self.vip.send_message(
-                        peer=peer,
-                        subsystem="rpc_error",
-                        args=[str(e), msg_id]
-                    )
+                    self.vip.send_message(peer=peer, subsystem="rpc_error", args=[str(e), msg_id])
 
             # Spawn a greenlet to process the response asynchronously
             gevent.spawn(send_vip_response)
@@ -1750,6 +1840,7 @@ class Agent:
         except Exception as e:
             print(f"Error running agent {self.identity}: {e}")
             import traceback
+
             traceback.print_exc()
             return 1  # Error
         finally:
@@ -1765,7 +1856,9 @@ class Agent:
         """Signal the agent to stop."""
         self._stop_event.set()
 
+
 # src/aems/client/agent.py - Updated run_agent function
+
 
 def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     """
@@ -1785,13 +1878,16 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     import json
     import yaml
 
+    identity = identity or os.environ.get("AGENT_VIP_IDENTITY", None)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", help="Agent configuration file", default=config_path)
     parser.add_argument("--identity", help="Agent identity", default=identity)
     parser.add_argument("--host", help="Message bus host", default="127.0.0.1")
     parser.add_argument("--port", help="Message bus port", type=int, default=8000)
-    parser.add_argument("--volttron-home", help="VOLTTRON_HOME directory",
-                       default=os.environ.get("VOLTTRON_HOME"))
+    parser.add_argument(
+        "--volttron-home", help="VOLTTRON_HOME directory", default=os.environ.get("VOLTTRON_HOME")
+    )
 
     args = parser.parse_args()
 
@@ -1807,14 +1903,16 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     # Load the configuration file if it exists
     if config_path and os.path.exists(config_path):
         try:
-            with open(config_path, 'r') as f:
+            with open(config_path, "r") as f:
                 try:
                     agent_config = yaml.safe_load(f)
                 except ImportError:
                     try:
                         agent_config = json.load(f)
                     except json.JSONDecodeError:
-                        print(f"Error decoding JSON from {config_path}. Ensure it is a valid JSON file.")
+                        print(
+                            f"Error decoding JSON from {config_path}. Ensure it is a valid JSON file."
+                        )
 
                     print(f"Unsupported config file format: {config_path}")
         except Exception as e:
@@ -1825,17 +1923,13 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     agent_identity = args.identity or identity or agent_class.__name__.lower()
 
     agent = agent_class(
-        identity=agent_identity,
-        host=args.host,
-        port=args.port,
-        config_path=config_path,
-        **kwargs
+        identity=agent_identity, host=args.host, port=args.port, config_path=config_path, **kwargs
     )
 
     # Set initial configuration if loaded from file
     if agent_config:
         # Store the config in the agent's config store
-        if hasattr(agent, 'config') and hasattr(agent.config, 'set'):
+        if hasattr(agent, "config") and hasattr(agent.config, "set"):
             try:
                 agent.config.set("config", agent_config).get(timeout=5)
                 print(f"Loaded configuration from {config_path}")

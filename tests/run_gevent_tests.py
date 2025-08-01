@@ -3,11 +3,12 @@
 import sys
 import gevent
 from gevent_message_bus_test_clients import (
-    run_publisher_subscriber_test, 
-    run_vip_message_test, 
+    run_publisher_subscriber_test,
+    run_vip_message_test,
     run_rpc_test,
-    run_multi_hop_rpc_test
+    run_multi_hop_rpc_test,
 )
+
 
 def main():
     # Check if an argument was provided
@@ -33,15 +34,16 @@ def main():
         print("Running all tests")
         print("\n=== Running Publisher-Subscriber Test ===")
         run_publisher_subscriber_test()
-        
+
         print("\n=== Running VIP Message Test ===")
         run_vip_message_test()
-        
+
         print("\n=== Running RPC Test ===")
         run_rpc_test()
-        
+
         print("\n=== Running Multi-Hop RPC Test ===")
         run_multi_hop_rpc_test()
+
 
 if __name__ == "__main__":
     main()

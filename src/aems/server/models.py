@@ -7,6 +7,7 @@ from typing import List, Optional
 
 class JSONSerializable:
     """Base class for JSON serializable objects."""
+
     def __json__(self):
         return self.__dict__
 
@@ -14,32 +15,35 @@ class JSONSerializable:
 @dataclass(frozen=True, kw_only=True)
 class Credentials(JSONSerializable):
     """Credentials for authentication."""
+
     identity: str
 
     @staticmethod
-    def create(*, identity: str) -> 'Credentials':
+    def create(*, identity: str) -> "Credentials":
         return Credentials(identity=identity)
 
 
 class Message:
     """Message object for VIP communication."""
+
     def __init__(self, **kwargs):
         self.__dict__ = kwargs
 
     def __repr__(self):
-        attrs = ", ".join("%r: %r" % (
-            name,
-            [x for x in value] if isinstance(value, (list, tuple)) else value,
-        ) for name, value in self.__dict__.items())
+        attrs = ", ".join(
+            "%r: %r"
+            % (
+                name,
+                [x for x in value] if isinstance(value, (list, tuple)) else value,
+            )
+            for name, value in self.__dict__.items()
+        )
         return "%s(**{%s})" % (self.__class__.__name__, attrs)
 
     @staticmethod
-    def create_message(*,
-                       peer: str,
-                       user: str,
-                       subsystem: str,
-                       msg_id: str,
-                       args: list = None) -> 'Message':
+    def create_message(
+        *, peer: str, user: str, subsystem: str, msg_id: str, args: list = None
+    ) -> "Message":
         if args is None:
             args = []
         return Message(peer=peer, subsystem=subsystem, msg_id=msg_id, user=user, args=args)
@@ -47,6 +51,7 @@ class Message:
 
 class MessageBusStopHandler(ABC):
     """Handler for message bus shutdown events."""
+
     @abstractmethod
     def message_bus_shutdown(self):
         """Handle message bus shutdown."""
@@ -55,6 +60,7 @@ class MessageBusStopHandler(ABC):
 
 class MessageBus(ABC):
     """Abstract base class for message bus implementations."""
+
     # This should be set so it is called for the main
     # program clean up when either the `stop` method is
     # called.
