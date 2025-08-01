@@ -900,7 +900,7 @@ class Config:
                 # Call all callbacks with the merged config
                 for callback in self._config_callbacks[config_name]:
                     try:
-                        callback(config_name, merged_config)
+                        callback(config_name, "UPDATE", merged_config)
                     except Exception as e:
                         print(f"Error in config update callback: {e}")
             except Exception as e:
