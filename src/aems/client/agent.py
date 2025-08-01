@@ -672,21 +672,33 @@ class Config:
     def get(self, config_name: str) -> dict:
         """
         Get a configuration from the config store.
-        First checks server configs, falls back to default configs.
+        Merges default config with server config, with server values taking precedence.
         """
-        # If we have a server version, return that
-        if config_name in self._server_configs:
-            async_result = AsyncResult()
-            async_result.set(self._server_configs[config_name])
-            return async_result.value
-
-        # If we have a default version, return that
+        # Start with default config as the base
+        merged_config = {}
         if config_name in self._default_configs:
+            default_config = self._default_configs[config_name]
+            if isinstance(default_config, dict):
+                merged_config = default_config.copy()
+            else:
+                # If default is not a dict, use it as is
+                merged_config = default_config
+
+        # Check if we have a cached server version
+        if config_name in self._server_configs:
+            server_config = self._server_configs[config_name]
+            if isinstance(merged_config, dict) and isinstance(server_config, dict):
+                # Merge dictionaries - server config overrides defaults
+                merged_config.update(server_config)
+            else:
+                # If either is not a dict, server config completely overrides
+                merged_config = server_config
+            
             async_result = AsyncResult()
-            async_result.set(self._default_configs[config_name])
+            async_result.set(merged_config)
             return async_result.value
 
-        # Otherwise, try to get from the server
+        # Try to get from the server (don't return early just because we have defaults)
         async_result = AsyncResult()
 
         # Prepare request
@@ -699,18 +711,29 @@ class Config:
                     response = client.get(request_url)
                     if response.status_code == 200:
                         data = response.json()
-                        self._server_configs[config_name] = data["data"]  # Cache the result
-                        async_result.set(data["data"])
+                        server_config = data["data"]
+                        self._server_configs[config_name] = server_config  # Cache the result
+                        
+                        # Merge with defaults if both are dicts
+                        final_config = merged_config
+                        if isinstance(merged_config, dict) and isinstance(server_config, dict):
+                            final_config = merged_config.copy()
+                            final_config.update(server_config)
+                        elif server_config is not None:
+                            # Server config overrides if it's not None
+                            final_config = server_config
+                        
+                        async_result.set(final_config)
                     else:
-                        async_result.set_exception(
-                            Exception(f"Failed to get config: {response.text}")
-                        )
-            except Exception as e:
-                async_result.set_exception(e)
+                        # If server request fails, return defaults if available
+                        async_result.set(merged_config if merged_config else {})
+            except Exception:
+                # If server request fails, return defaults if available
+                async_result.set(merged_config if merged_config else {})
 
         result = gevent.spawn(fetch_config).get(timeout=5)
         if result is None:
-            return {}
+            return merged_config if merged_config else {}
 
         return result
 
@@ -727,6 +750,8 @@ class Config:
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
                     response = client.put(request_url, json=config_data)
                     if response.status_code == 200:
+                        # Update local cache when store succeeds
+                        self._server_configs[config_name] = config_data
                         async_result.set(True)
                     else:
                         async_result.set_exception(
@@ -849,15 +874,21 @@ class Config:
     def handle_update(self, config_name):
         """Handle a configuration update notification from the server."""
         if config_name in self._config_callbacks:
-            # Get the updated config
+            # Clear server cache for this config to force a fresh fetch
+            if config_name in self._server_configs:
+                del self._server_configs[config_name]
+            
+            # Get the updated merged config
             try:
-                config_data = self.get(config_name).get()
-                self._server_configs[config_name] = config_data
-
-                # Call all callbacks
+                merged_config = self.get(config_name)
+                
+                # Get just the server part for caching
+                # (The get() method will have already cached the server config)
+                
+                # Call all callbacks with the merged config
                 for callback in self._config_callbacks[config_name]:
                     try:
-                        callback(config_name, config_data)
+                        callback(config_name, merged_config)
                     except Exception as e:
                         print(f"Error in config update callback: {e}")
             except Exception as e:
@@ -1624,7 +1655,8 @@ class Agent:
                 # from the server during the onconfigure phase
         except Exception as e:
             print(f"Error loading configuration from {self.config_path}: {e}")
-            self.health.set_status(Status.WARNING, f"Config load error: {e}")
+            # TODO: Implement proper health status tracking
+            # self.health.set_status(Status.WARNING, f"Config load error: {e}")
 
     def disconnect(self):
         """Disconnect from the message bus."""

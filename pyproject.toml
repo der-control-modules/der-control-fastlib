@@ -45,6 +45,7 @@ dev = [
     "flake8>=7.0.0",
     "flake8-pyproject>=1.2.0",
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
     "build>=1.0.0",
     "tomli>=1.2.0; python_version<'3.11'",
@@ -140,5 +141,19 @@ max-locals = 20
 max-branches = 15
 
 [tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --tb=short"
 testpaths = ["tests"]
 python_files = "test_*.py"
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
