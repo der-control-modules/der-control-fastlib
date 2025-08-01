@@ -14,20 +14,20 @@ class TestAgentConfig:
         """Set up test agents with the running message bus."""
         # Store the message bus reference
         self.message_bus = message_bus
-        
+
         # Create agents with the correct port
         self.agent = Agent("config_test_agent", port=8888)
         self.config_agent = Agent("config_manager", port=8888)
-        
+
         # Connect both agents
         self.agent.connect()
         self.config_agent.connect()
-        
+
         # Wait for connections
         gevent.sleep(1)
-        
+
         yield
-        
+
         # Cleanup
         if hasattr(self, 'agent'):
             self.agent.disconnect()
@@ -43,12 +43,12 @@ class TestAgentConfig:
             "max_retries": 3,
             "devices": ["default_device"]
         }
-        
+
         self.agent.vip.config.set_default("test_config", default_config)
-        
+
         # Get config - should return defaults
         result = self.agent.vip.config.get("test_config")
-        
+
         assert result == default_config, "Should return default config when no server config exists"
 
     def test_config_server_only(self):
@@ -59,17 +59,17 @@ class TestAgentConfig:
             "retry_count": 5,
             "endpoints": ["server1", "server2"]
         }
-        
+
         # Store via agent (same agent that will retrieve it)
         store_result = self.agent.vip.config.set("test_server_config", server_config)
         store_result.get(timeout=5)  # Wait for completion
-        
+
         # Wait for config to be processed
         gevent.sleep(1)
-        
+
         # Get config from same agent - should return server config
         result = self.agent.vip.config.get("test_server_config")
-        
+
         assert result == server_config, "Should return server config when no defaults exist"
 
     def test_config_merging_server_overrides_defaults(self):
@@ -82,25 +82,25 @@ class TestAgentConfig:
             "devices": ["default_device"],
             "timeout": 30
         }
-        
+
         self.agent.vip.config.set_default("merged_config", default_config)
-        
+
         # Store partial server configuration that overrides some defaults
         server_config = {
             "interval": 120,  # Override default
             "max_retries": 5,  # Override default
             "new_setting": "server_value"  # New setting not in defaults
         }
-        
+
         store_result = self.agent.vip.config.set("merged_config", server_config)
         store_result.get(timeout=5)  # Wait for completion
-        
+
         # Wait for config to be processed
         gevent.sleep(1)
-        
+
         # Get merged config
         result = self.agent.vip.config.get("merged_config")
-        
+
         # Expected merged result
         expected = {
             "interval": 120,  # From server (overridden)
@@ -110,7 +110,7 @@ class TestAgentConfig:
             "timeout": 30,  # From defaults (unchanged)
             "new_setting": "server_value"  # From server (new)
         }
-        
+
         assert result == expected, f"Config should be merged. Expected: {expected}, Got: {result}"
 
     def test_config_merging_preserves_defaults(self):
@@ -128,9 +128,9 @@ class TestAgentConfig:
             },
             "features": ["feature1", "feature2"]
         }
-        
+
         self.agent.vip.config.set_default("preserve_config", default_config)
-        
+
         # Store server config that only overrides database settings
         server_config = {
             "database": {
@@ -139,15 +139,15 @@ class TestAgentConfig:
                 "name": "prod_db"
             }
         }
-        
+
         store_result = self.agent.vip.config.set("preserve_config", server_config)
         store_result.get(timeout=5)
-        
+
         gevent.sleep(1)
-        
+
         # Get merged config
         result = self.agent.vip.config.get("preserve_config")
-        
+
         # Expected: server database config + default logging + default features
         expected = {
             "database": {
@@ -161,20 +161,20 @@ class TestAgentConfig:
             },
             "features": ["feature1", "feature2"]
         }
-        
+
         assert result == expected, f"Should preserve defaults. Expected: {expected}, Got: {result}"
 
     def test_config_non_dict_values(self):
         """Test that non-dict values are handled correctly in merging."""
         # Test with non-dict default
         self.agent.vip.config.set_default("simple_config", "default_value")
-        
+
         # Store non-dict server config
         store_result = self.agent.vip.config.set("simple_config", "server_value")
         store_result.get(timeout=5)
-        
+
         gevent.sleep(1)
-        
+
         # Get config - server should override completely for non-dict values
         result = self.agent.vip.config.get("simple_config")
         assert result == "server_value", "Server value should override default for non-dict values"
@@ -184,19 +184,19 @@ class TestAgentConfig:
         # Set dict default
         default_config = {"key1": "value1", "key2": "value2"}
         self.agent.vip.config.set_default("mixed_config", default_config)
-        
+
         # Store non-dict server config
         store_result = self.agent.vip.config.set("mixed_config", "override_string")
         store_result.get(timeout=5)
-        
+
         gevent.sleep(1)
-        
+
         # Get config - server should completely override
         result = self.agent.vip.config.get("mixed_config")
         assert result == "override_string", "Non-dict server value should completely override dict default"
-        
+
         gevent.sleep(1)
-        
+
         # Verify it's gone
         try:
             self.config_agent.vip.config.get("delete_test").get(timeout=5)
@@ -212,16 +212,16 @@ class TestAgentConfig:
             "config2": {"data": "test2"},
             "config3": {"data": "test3"}
         }
-        
+
         for name, config in configs.items():
             self.config_agent.vip.config.store(name, config).get(timeout=5)
-        
+
         gevent.sleep(1)
-        
+
         # List configurations
         list_result = self.config_agent.vip.config.list()
         config_list = list_result.get(timeout=5)
-        
+
         # Verify all configs are listed
         for config_name in configs.keys():
             assert config_name in config_list, f"Config '{config_name}' should be in list: {config_list}"
@@ -236,10 +236,10 @@ class TestAgentConfig:
             "array": [1, 2, 3],
             "object": {"nested": "value"}
         }
-        
+
         store_result = self.config_agent.vip.config.store("valid_config", valid_config)
         assert store_result.get(timeout=5) is True, "Valid config should be stored"
-        
+
         # Verify retrieval maintains data types
         retrieved = self.config_agent.vip.config.get("valid_config").get(timeout=5)
         assert retrieved == valid_config, f"Data types should be preserved: {retrieved} != {valid_config}"
@@ -254,17 +254,17 @@ class TestAgentConfig:
         # Each agent should have its own config namespace
         agent1_config = {"agent": "agent1", "value": 100}
         agent2_config = {"agent": "agent2", "value": 200}
-        
+
         # Store configs for different agents
         self.agent.vip.config.store("shared_name", agent1_config).get(timeout=5)
         self.config_agent.vip.config.store("shared_name", agent2_config).get(timeout=5)
-        
+
         gevent.sleep(1)
-        
+
         # Verify each agent gets its own config
         agent1_retrieved = self.agent.vip.config.get("shared_name").get(timeout=5)
         agent2_retrieved = self.config_agent.vip.config.get("shared_name").get(timeout=5)
-        
+
         assert agent1_retrieved == agent1_config, f"Agent1 should get its own config: {agent1_retrieved}"
         assert agent2_retrieved == agent2_config, f"Agent2 should get its own config: {agent2_retrieved}"
         assert agent1_retrieved != agent2_retrieved, "Configs should be different between agents"
@@ -273,17 +273,17 @@ class TestAgentConfig:
         """Test configuration watch/notification functionality."""
         # This would require implementing a watch mechanism
         # For now, we'll test that configs can be monitored for changes
-        
+
         # Store initial config
         initial_config = {"monitor": "me", "version": 1}
         self.agent.vip.config.store("watched_config", initial_config).get(timeout=5)
         gevent.sleep(1)
-        
+
         # Update the config
         updated_config = {"monitor": "me", "version": 2}
         self.agent.vip.config.store("watched_config", updated_config).get(timeout=5)
         gevent.sleep(1)
-        
+
         # Verify the update took effect
         final_config = self.agent.vip.config.get("watched_config").get(timeout=5)
         assert final_config["version"] == 2, f"Config should be updated to version 2: {final_config}"
@@ -296,7 +296,7 @@ class TestAgentConfig:
             assert False, "Should raise exception for non-existent config"
         except Exception:
             pass  # Expected behavior
-        
+
         # Test deleting non-existent config
         try:
             result = self.config_agent.vip.config.delete("nonexistent_config")

@@ -20,22 +20,22 @@ def event_loop():
 def message_bus():
     """Create and start a message bus for testing."""
     bus = FastAPIMessageBus(host="127.0.0.1", port=8888)
-    
+
     try:
         # Start the server
         bus.start()
-        
+
         # Give the server time to start
         time.sleep(2)
-        
+
         # Verify server is running
         if not bus.is_running():
             raise RuntimeError("Failed to start message bus server for testing")
-        
+
         print("Message bus server started for testing")
-        
+
         yield bus
-        
+
     finally:
         # Cleanup
         if bus.is_running():

@@ -18,10 +18,10 @@ class TestVersionEndpoints:
     def test_version_endpoint(self, client):
         """Test the /version endpoint returns correct information."""
         response = client.get("/version")
-        
+
         assert response.status_code == 200
         data = response.json()
-        
+
         assert "version" in data
         assert "service" in data
         assert "status" in data
@@ -33,10 +33,10 @@ class TestVersionEndpoints:
     def test_health_endpoint(self, client):
         """Test the /health endpoint returns correct information."""
         response = client.get("/health")
-        
+
         assert response.status_code == 200
         data = response.json()
-        
+
         assert "status" in data
         assert "version" in data
         assert "active_connections" in data

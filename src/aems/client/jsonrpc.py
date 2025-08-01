@@ -82,7 +82,7 @@ class RemoteError(Exception):
 
 def exception_from_json(code, message, data=None):
     """Return an exception suitable for raising in a caller.
-    
+
     This follows the volttron-core pattern for converting JSON-RPC errors
     into appropriate Python exceptions.
     """
@@ -95,10 +95,10 @@ def exception_from_json(code, message, data=None):
 
 def create_error_from_response(error_data):
     """Create an exception from an RPC error response.
-    
+
     Args:
         error_data: Can be a string (simple error message) or dict (JSON-RPC error)
-        
+
     Returns:
         Exception: Appropriate exception type for the error
     """
