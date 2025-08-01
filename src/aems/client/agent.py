@@ -607,9 +607,10 @@ class Core:
         return self._agent.identity
 
     def start(self):
-        """Start the agent."""
-        # Fire the onstart event
-        self.fire_event("onstart", self)
+        """Start the agent core services."""
+        # Note: onstart event is fired by Agent.connect() during connection lifecycle
+        # This method is kept for backwards compatibility but no longer fires onstart
+        pass
 
     def _register_decorated_methods(self, agent):
         """Find and register methods decorated with @Core.receiver."""
@@ -702,7 +703,7 @@ class Config:
             else:
                 # If either is not a dict, server config completely overrides
                 merged_config = server_config
-            
+
             async_result = AsyncResult()
             async_result.set(merged_config)
             return async_result.value
@@ -722,7 +723,7 @@ class Config:
                         data = response.json()
                         server_config = data["data"]
                         self._server_configs[config_name] = server_config  # Cache the result
-                        
+
                         # Merge with defaults if both are dicts
                         final_config = merged_config
                         if isinstance(merged_config, dict) and isinstance(server_config, dict):
@@ -731,7 +732,7 @@ class Config:
                         elif server_config is not None:
                             # Server config overrides if it's not None
                             final_config = server_config
-                        
+
                         async_result.set(final_config)
                     else:
                         # If server request fails, return defaults if available
@@ -886,14 +887,14 @@ class Config:
             # Clear server cache for this config to force a fresh fetch
             if config_name in self._server_configs:
                 del self._server_configs[config_name]
-            
+
             # Get the updated merged config
             try:
                 merged_config = self.get(config_name)
-                
+
                 # Get just the server part for caching
                 # (The get() method will have already cached the server config)
-                
+
                 # Call all callbacks with the merged config
                 for callback in self._config_callbacks[config_name]:
                     try:
