@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on any version tag (v1.0.0, v1.0.0-alpha.1, etc.)
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  verify-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      is-prerelease: ${{ steps.check-prerelease.outputs.is-prerelease }}
+      version: ${{ steps.get-version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for proper tag verification
+
+      - name: Get version from tag
+        id: get-version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Check if pre-release
+        id: check-prerelease
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          if [[ $VERSION == *"alpha"* || $VERSION == *"beta"* || $VERSION == *"rc"* ]]; then
+            echo "is-prerelease=true" >> $GITHUB_OUTPUT
+            echo "This is a pre-release: $VERSION"
+          else
+            echo "is-prerelease=false" >> $GITHUB_OUTPUT
+            echo "This is a release: $VERSION"
+          fi
+
+      - name: Verify tag matches expected branch
+        run: |
+          TAG_COMMIT=$(git rev-list -n 1 $GITHUB_REF)
+          echo "Tag commit: $TAG_COMMIT"
+
+          # For pre-releases, verify against develop branch
+          if [[ "${{ steps.check-prerelease.outputs.is-prerelease }}" == "true" ]]; then
+            BRANCH_COMMIT=$(git rev-parse origin/develop 2>/dev/null || git rev-parse origin/main)
+            EXPECTED_BRANCH="develop (or main if no develop)"
+          else
+            # For releases, verify against main branch
+            BRANCH_COMMIT=$(git rev-parse origin/main)
+            EXPECTED_BRANCH="main"
+          fi
+
+          echo "Branch commit: $BRANCH_COMMIT"
+          echo "Expected branch: $EXPECTED_BRANCH"
+
+          if [ "$TAG_COMMIT" != "$BRANCH_COMMIT" ]; then
+            echo "⚠️ Warning: Tag doesn't match expected branch head"
+            echo "This may indicate the tag was created from an unexpected commit"
+          else
+            echo "✅ Tag matches expected branch head"
+          fi
+
+  build-and-test:
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run quality checks
+        run: |
+          python dev.py check
+
+      - name: Build package
+        run: |
+          python dev.py build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: dist-files
+          path: dist/
+
+  create-release:
+    needs: [verify-tag, build-and-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: dist-files
+          path: dist/
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          VERSION=${{ needs.verify-tag.outputs.version }}
+
+          # Get previous tag for changelog
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "## Changes since $PREV_TAG" > release_notes.md
+            echo "" >> release_notes.md
+            git log $PREV_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges >> release_notes.md
+          else
+            echo "## Initial Release" > release_notes.md
+            echo "" >> release_notes.md
+            echo "First release of aems-lib-fastapi" >> release_notes.md
+          fi
+
+          echo "" >> release_notes.md
+          echo "## Installation" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "\`\`\`bash" >> release_notes.md
+          echo "pip install aems-lib-fastapi==$VERSION" >> release_notes.md
+          echo "\`\`\`" >> release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: "Release v${{ needs.verify-tag.outputs.version }}"
+          body_path: release_notes.md
+          files: dist/*
+          prerelease: ${{ needs.verify-tag.outputs.is-prerelease == 'true' }}
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify-test-servers:
+    needs: [verify-tag, create-release]
+    runs-on: ubuntu-latest
+    if: needs.verify-tag.outputs.is-prerelease == 'true'  # Only for pre-releases
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Notify test servers
+        env:
+          TEST_SERVER_URL: ${{ secrets.TEST_SERVER_WEBHOOK_URL }}
+          TEST_SERVER_TOKEN: ${{ secrets.TEST_SERVER_TOKEN }}
+        run: |
+          if [ -n "$TEST_SERVER_URL" ]; then
+            echo "🔄 Notifying test servers of new pre-release..."
+            python dev.py trigger-update "$TEST_SERVER_URL" "$TEST_SERVER_TOKEN" || echo "⚠️ Failed to notify test server"
+          else
+            echo "ℹ️ No test server webhook configured"
+          fi
+
+  publish-to-pypi:
+    needs: [verify-tag, create-release]
+    runs-on: ubuntu-latest
+    if: needs.verify-tag.outputs.is-prerelease == 'false'  # Only for final releases
+    environment: pypi  # Require manual approval for PyPI releases
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: dist-files
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

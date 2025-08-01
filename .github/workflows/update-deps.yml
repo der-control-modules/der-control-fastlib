@@ -1,0 +1,61 @@
+name: Update Dependencies
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'  # Every Monday at 2 AM
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  update-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install current dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Update dependencies
+        run: |
+          python dev.py update
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.changes.outputs.changes == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update development dependencies"
+          title: "🔧 Update development dependencies"
+          body: |
+            ## Automated Dependency Update
+
+            This PR updates development dependencies to their latest compatible versions.
+
+            ### Changes
+            - Updated development dependencies via `./dev.py update`
+
+            ### Testing
+            - [ ] CI checks pass
+            - [ ] Manual testing of development environment
+
+            **Note**: This is an automated PR. Please review the changes carefully before merging.
+          branch: chore/update-deps
+          delete-branch: true
