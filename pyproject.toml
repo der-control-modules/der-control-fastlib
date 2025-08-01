@@ -40,10 +40,14 @@ dynamic = ["version"]
 [project.optional-dependencies]
 # Dependencies for development
 dev = [
-    "black>=23.3.0",
-    "pylint>=2.17.2",
-    "pytest>=7.3.1",
+    "black>=24.0.0",
+    "pylint>=3.0.0",
+    "flake8>=7.0.0",
+    "flake8-pyproject>=1.2.0",
+    "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
+    "build>=1.0.0",
+    "tomli>=1.2.0; python_version<'3.11'",
 ]
 # # Dependencies for documentation
 # docs = [
@@ -83,9 +87,57 @@ where = ["src"]
 [tool.black]
 line-length = 100
 target-version = ["py310", "py311", "py312"]
+skip-string-normalization = false
+
+[tool.flake8]
+max-line-length = 100
+# Ignore codes that conflict with Black formatter
+extend-ignore = [
+    "E203",  # whitespace before ':'
+    "W503",  # line break before binary operator
+    "E501",  # line too long (handled by Black)
+    "W504",  # line break after binary operator
+    "E231",  # missing whitespace after ','
+    "E226",  # missing whitespace around arithmetic operator
+    "E241",  # multiple spaces after ','
+    "E242",  # multiple spaces after operator
+    "W291",  # trailing whitespace (handled by Black)
+    "W293",  # blank line contains whitespace (handled by Black)
+]
+# Enable specific checks that complement Pylint
+select = [
+    "F",     # Pyflakes errors
+    "E9",    # Runtime errors
+    "W6",    # Warnings
+]
 
 [tool.pylint.format]
 max-line-length = 100
+
+[tool.pylint.messages_control]
+disable = [
+    "trailing-whitespace",
+    "line-too-long",           # Handled by Black
+    "missing-final-newline",   # Handled by Black
+    "multiple-statements",     # Can conflict with Black's formatting
+    "too-many-arguments",      # Style preference
+    "too-few-public-methods",  # Style preference
+]
+
+# Enable useful checks that complement flake8
+enable = [
+    "useless-suppression",
+]
+
+[tool.pylint.basic]
+# Allow single-character variable names in specific contexts
+good-names = ["i", "j", "k", "ex", "Run", "_", "id", "ws"]
+
+[tool.pylint.design]
+# Reasonable limits that won't conflict with practical code
+max-args = 10
+max-locals = 20
+max-branches = 15
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
