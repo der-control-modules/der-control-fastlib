@@ -618,15 +618,17 @@ class Core:
             attr = getattr(agent, attr_name)
             if callable(attr) and hasattr(attr, "event_name"):
                 event_name = getattr(attr, "event_name")
-                if event_name in self._handlers:
-                    self._handlers[event_name].append(attr)
+                # Register with the signal to avoid double firing through _handlers
+                if event_name in self._signals:
+                    self._signals[event_name].connect(attr)
 
     def fire_event(self, event_name, sender=None, **kwargs):
         """Fire an event by calling all registered handlers."""
         if event_name in self._signals:
-            # Fire the signal
+            # Fire the signal - this calls @Core.receiver decorated methods
             self._signals[event_name].fire(sender, **kwargs)
 
+        # Also call manually registered handlers (for backwards compatibility)
         if event_name in self._handlers:
             for handler in self._handlers[event_name]:
                 try:
