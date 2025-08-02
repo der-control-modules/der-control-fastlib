@@ -11,24 +11,24 @@ def test_version_endpoint():
     # Create test client
     server = FastAPIMessageBus()
     client = TestClient(server.app)
-    
+
     # Test version endpoint
     response = client.get("/version")
     assert response.status_code == 200
-    
+
     data = response.json()
     assert "version" in data
-    assert "service" in data  
+    assert "service" in data
     assert "status" in data
     assert data["service"] == "aems-server"
     assert data["status"] == "running"
-    
+
     print(f"✅ Version endpoint test passed: {data}")
-    
+
     # Test health endpoint
     response = client.get("/health")
     assert response.status_code == 200
-    
+
     data = response.json()
     assert "status" in data
     assert "version" in data
@@ -36,7 +36,7 @@ def test_version_endpoint():
     assert "service" in data
     assert data["status"] == "healthy"
     assert data["service"] == "aems-server"
-    
+
     print(f"✅ Health endpoint test passed: {data}")
 
 

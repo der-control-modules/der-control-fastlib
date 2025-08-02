@@ -22,10 +22,12 @@ from aems.client import dualmethod
 # Use volttron-core JSON-RPC utilities for compatibility
 try:
     from volttron.utils.jsonrpc import exception_from_json, Error, RemoteError, MethodNotFound
+
     VOLTTRON_JSONRPC_AVAILABLE = True
 except ImportError:
     # Fallback to our custom implementation
     from .jsonrpc import exception_from_json, Error, RemoteError, MethodNotFound
+
     VOLTTRON_JSONRPC_AVAILABLE = False
 
 # Patch standard library to work with gevent
@@ -607,9 +609,10 @@ class Core:
         return self._agent.identity
 
     def start(self):
-        """Start the agent."""
-        # Fire the onstart event
-        self.fire_event("onstart", self)
+        """Start the agent core services."""
+        # Note: onstart event is fired by Agent.connect() during connection lifecycle
+        # This method is kept for backwards compatibility but no longer fires onstart
+        pass
 
     def _register_decorated_methods(self, agent):
         """Find and register methods decorated with @Core.receiver."""
@@ -617,15 +620,17 @@ class Core:
             attr = getattr(agent, attr_name)
             if callable(attr) and hasattr(attr, "event_name"):
                 event_name = getattr(attr, "event_name")
-                if event_name in self._handlers:
-                    self._handlers[event_name].append(attr)
+                # Register with the signal to avoid double firing through _handlers
+                if event_name in self._signals:
+                    self._signals[event_name].connect(attr)
 
     def fire_event(self, event_name, sender=None, **kwargs):
         """Fire an event by calling all registered handlers."""
         if event_name in self._signals:
-            # Fire the signal
+            # Fire the signal - this calls @Core.receiver decorated methods
             self._signals[event_name].fire(sender, **kwargs)
 
+        # Also call manually registered handlers (for backwards compatibility)
         if event_name in self._handlers:
             for handler in self._handlers[event_name]:
                 try:
@@ -681,6 +686,8 @@ class Config:
     def get(self, config_name: str) -> dict:
         """
         Get a configuration from the config store.
+        Returns locally cached data if available.
+        If no cache and no onconfigure handler, fetches from server on-demand.
         Merges default config with server config, with server values taking precedence.
         """
         # Start with default config as the base
@@ -702,49 +709,49 @@ class Config:
             else:
                 # If either is not a dict, server config completely overrides
                 merged_config = server_config
-            
+            return merged_config
+
+        # If no cache and no onconfigure handler, fetch from server on-demand
+        has_onconfigure_handler = (
+            hasattr(self._agent, "onconfigure") and len(self._agent.core.onconfigure._handlers) > 0
+        )
+
+        if not has_onconfigure_handler and self._connected:
+            # Fetch from server since cache wasn't populated on connection
             async_result = AsyncResult()
-            async_result.set(merged_config)
-            return async_result.value
+            request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
 
-        # Try to get from the server (don't return early just because we have defaults)
-        async_result = AsyncResult()
+            def fetch_config():
+                try:
+                    with httpx.Client() as client:
+                        response = client.get(request_url)
+                        if response.status_code == 200:
+                            data = response.json()
+                            server_config = data["data"]
+                            self._server_configs[config_name] = server_config  # Cache the result
 
-        # Prepare request
-        request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+                            # Merge with defaults if both are dicts
+                            final_config = merged_config
+                            if isinstance(merged_config, dict) and isinstance(server_config, dict):
+                                final_config = merged_config.copy()
+                                final_config.update(server_config)
+                            elif server_config is not None:
+                                # Server config overrides if it's not None
+                                final_config = server_config
 
-        # Use gevent to make the HTTP request asynchronously
-        def fetch_config():
-            try:
-                with httpx.Client() as client:
-                    response = client.get(request_url)
-                    if response.status_code == 200:
-                        data = response.json()
-                        server_config = data["data"]
-                        self._server_configs[config_name] = server_config  # Cache the result
-                        
-                        # Merge with defaults if both are dicts
-                        final_config = merged_config
-                        if isinstance(merged_config, dict) and isinstance(server_config, dict):
-                            final_config = merged_config.copy()
-                            final_config.update(server_config)
-                        elif server_config is not None:
-                            # Server config overrides if it's not None
-                            final_config = server_config
-                        
-                        async_result.set(final_config)
-                    else:
-                        # If server request fails, return defaults if available
-                        async_result.set(merged_config if merged_config else {})
-            except Exception:
-                # If server request fails, return defaults if available
-                async_result.set(merged_config if merged_config else {})
+                            async_result.set(final_config)
+                        else:
+                            # If server request fails, return defaults if available
+                            async_result.set(merged_config if merged_config else {})
+                except Exception:
+                    # If server request fails, return defaults if available
+                    async_result.set(merged_config if merged_config else {})
 
-        result = gevent.spawn(fetch_config).get(timeout=5)
-        if result is None:
-            return merged_config if merged_config else {}
+            gevent.spawn(fetch_config).get(timeout=5)
+            return async_result.get(timeout=5)
 
-        return result
+        # Return defaults or empty dict if no server config available
+        return merged_config
 
     def set(self, config_name: str, config_data: Any):
         """Set a configuration in the config store."""
@@ -886,18 +893,18 @@ class Config:
             # Clear server cache for this config to force a fresh fetch
             if config_name in self._server_configs:
                 del self._server_configs[config_name]
-            
+
             # Get the updated merged config
             try:
                 merged_config = self.get(config_name)
-                
+
                 # Get just the server part for caching
                 # (The get() method will have already cached the server config)
-                
+
                 # Call all callbacks with the merged config
                 for callback in self._config_callbacks[config_name]:
                     try:
-                        callback(config_name, merged_config)
+                        callback(config_name, "UPDATE", merged_config)
                     except Exception as e:
                         print(f"Error in config update callback: {e}")
             except Exception as e:
@@ -974,7 +981,50 @@ class Config:
         for subscription in self._pending_subscriptions:
             self._setup_subscription(subscription)
 
+            # Only fetch current config values if agent has onconfigure handler
+            has_onconfigure_handler = (
+                hasattr(self._agent, "onconfigure")
+                and len(self._agent.core.onconfigure._handlers) > 0
+            )
+            if has_onconfigure_handler:
+                self._fetch_config_for_subscription(subscription)
+
         self._pending_subscriptions = []
+
+    def _fetch_config_for_subscription(self, subscription):
+        """Fetch current config values from server for a subscription pattern."""
+        pattern = subscription["pattern"]
+
+        # If pattern is a specific config name, fetch it directly
+        if pattern and "*" not in pattern:
+            self._fetch_single_config(pattern)
+        else:
+            # For wildcard patterns, we'd need to list all configs and filter
+            # This is more complex, so for now we'll handle specific config names
+            print(f"Wildcard patterns not yet implemented for initial fetch: {pattern}")
+
+    def _fetch_single_config(self, config_name):
+        """Fetch a single config from the server and cache it."""
+
+        def fetch_config():
+            try:
+                request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+                with httpx.Client() as client:
+                    response = client.get(request_url)
+                    if response.status_code == 200:
+                        data = response.json()
+                        server_config = data["data"]
+                        self._server_configs[config_name] = server_config
+                        print(f"Cached config for {config_name}: {server_config}")
+                    else:
+                        print(
+                            f"No server config found for {config_name} (status: {response.status_code})"
+                        )
+            except Exception as e:
+                print(f"Failed to fetch config {config_name}: {e}")
+
+        # Run the fetch asynchronously
+        gevent.spawn(fetch_config)
 
     def _setup_subscription(self, subscription):
         """Set up a pattern-based subscription with the server."""
@@ -1000,9 +1050,20 @@ class Config:
                     elif config_name in self._server_configs:
                         del self._server_configs[config_name]
 
-                # Call the callback
+                # Get the merged config (defaults + server)
+                merged_config = config_value  # Start with server value
+                if config_name in self._default_configs and action != "DELETE":
+                    default_config = self._default_configs[config_name]
+                    if isinstance(default_config, dict) and isinstance(config_value, dict):
+                        # Merge dictionaries - server config overrides defaults
+                        merged_config = default_config.copy()
+                        merged_config.update(config_value)
+                    # For non-dict values, server completely overrides defaults
+                    # so we keep merged_config = config_value
+
+                # Call the callback with the merged config
                 try:
-                    callback(config_name, action, config_value)
+                    callback(config_name, action, merged_config)
                 except Exception as e:
                     print(f"Error in config subscription callback: {e}")
 
@@ -1783,7 +1844,7 @@ class Agent:
                         exception = exception_from_json(
                             error.get("code", -32603),
                             error.get("message", "Internal Error"),
-                            error.get("data")
+                            error.get("data"),
                         )
                     else:
                         # Simple string error - use our fallback or basic Exception
@@ -1826,7 +1887,7 @@ class Agent:
                             exception = exception_from_json(
                                 error_data.get("code", -32603),
                                 error_data.get("message", "Internal Error"),
-                                error_data.get("data")
+                                error_data.get("data"),
                             )
                         else:
                             # Simple error - use fallback if RemoteError has issues

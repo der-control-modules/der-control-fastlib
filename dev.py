@@ -541,6 +541,24 @@ def test():
     return run_command("pytest", "Running tests")
 
 
+def security():
+    """Run security scans."""
+    print("🔒 Running security scans...")
+    
+    # Run pip-audit for dependency vulnerability scanning
+    pip_audit_ok = run_command("pip-audit", "Scanning dependencies with pip-audit")
+    
+    # Run bandit for code security analysis
+    bandit_ok = run_command("bandit -r src/ -f json -o bandit-report.json", "Running Bandit security analysis")
+    
+    if bandit_ok:
+        print("📄 Bandit report saved to bandit-report.json")
+        # Also run bandit with console output for immediate feedback
+        run_command("bandit -r src/", "Bandit security summary")
+    
+    return pip_audit_ok and bandit_ok
+
+
 def build():
     """Build wheel package."""
     print("🔨 Building wheel package...")
@@ -586,6 +604,7 @@ def show_help():
   format          Format code with Black
   lint            Run Pylint and flake8
   test            Run tests
+  security        Run security scans (pip-audit + bandit)
   build           Build wheel package
   check           Run format + lint + test
   version         Show current version or set new version
@@ -680,6 +699,7 @@ def main():
         'format': format_code,
         'lint': lint,
         'test': test,
+        'security': security,
         'build': build,
         'check': check,
         'sync-fork': sync_fork,
