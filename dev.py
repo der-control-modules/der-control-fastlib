@@ -544,18 +544,18 @@ def test():
 def security():
     """Run security scans."""
     print("🔒 Running security scans...")
-    
+
     # Run pip-audit for dependency vulnerability scanning
     pip_audit_ok = run_command("pip-audit", "Scanning dependencies with pip-audit")
-    
+
     # Run bandit for code security analysis
     bandit_ok = run_command("bandit -r src/ -f json -o bandit-report.json", "Running Bandit security analysis")
-    
+
     if bandit_ok:
         print("📄 Bandit report saved to bandit-report.json")
         # Also run bandit with console output for immediate feedback
         run_command("bandit -r src/", "Bandit security summary")
-    
+
     return pip_audit_ok and bandit_ok
 
 
