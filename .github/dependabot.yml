@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Enable version updates for Python/pip
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "VOLTTRON/aems-lib-fastapi-maintainers"
+    assignees:
+      - "VOLTTRON/aems-lib-fastapi-maintainers"
+
+  # Enable security updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
