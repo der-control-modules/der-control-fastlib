@@ -1,6 +1,7 @@
 """
 Test agent configuration functionality using pytest - simplified for debugging
 """
+
 import pytest
 import gevent
 from aems.client.agent import Agent
@@ -29,9 +30,9 @@ class TestAgentConfigSimple:
         yield
 
         # Cleanup
-        if hasattr(self, 'agent'):
+        if hasattr(self, "agent"):
             self.agent.disconnect()
-        if hasattr(self, 'config_agent'):
+        if hasattr(self, "config_agent"):
             self.config_agent.disconnect()
 
     def test_config_defaults_only(self):
@@ -41,7 +42,7 @@ class TestAgentConfigSimple:
             "interval": 60,
             "enabled": True,
             "max_retries": 3,
-            "devices": ["default_device"]
+            "devices": ["default_device"],
         }
 
         self.agent.vip.config.set_default("test_config", default_config)
@@ -54,11 +55,7 @@ class TestAgentConfigSimple:
     def test_debug_server_config_set(self):
         """Debug test to see what happens when we try to set server config."""
         # Store configuration on server using set method
-        server_config = {
-            "timeout": 120,
-            "retry_count": 5,
-            "endpoints": ["server1", "server2"]
-        }
+        server_config = {"timeout": 120, "retry_count": 5, "endpoints": ["server1", "server2"]}
 
         print(f"Attempting to set server config: {server_config}")
 
@@ -83,7 +80,9 @@ class TestAgentConfigSimple:
             print(f"Get result type: {type(result)}")
 
             # Should return the server config since no defaults are set
-            assert result == server_config, f"Should return server config. Expected: {server_config}, Got: {result}"
+            assert (
+                result == server_config
+            ), f"Should return server config. Expected: {server_config}, Got: {result}"
         except Exception as e:
             print(f"Get error: {e}")
             assert False, f"Get should not fail: {e}"

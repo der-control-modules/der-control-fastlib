@@ -34,12 +34,12 @@ def get_package_version():
                 capture_output=True,
                 text=True,
                 cwd=os.path.dirname(__file__),
-                check=False
+                check=False,
             )
             if result.returncode == 0 and result.stdout.strip():
                 # Get the most recent tag and strip 'v' prefix
-                latest_tag = result.stdout.strip().split('\n')[0]
-                return latest_tag.lstrip('v')
+                latest_tag = result.stdout.strip().split("\n")[0]
+                return latest_tag.lstrip("v")
             return "unknown-dev"
         except (subprocess.SubprocessError, OSError):
             return "unknown"

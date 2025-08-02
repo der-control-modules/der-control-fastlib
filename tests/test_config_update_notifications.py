@@ -15,11 +15,9 @@ class ConfigUpdateTestAgent(Agent):
     def config_update_callback(self, config_name, action, config_value):
         """Callback for configuration updates."""
         print(f"UPDATE RECEIVED: {config_name} ({action})")
-        self.update_notifications.append({
-            'config_name': config_name,
-            'action': action,
-            'received_at': gevent.time.time()
-        })
+        self.update_notifications.append(
+            {"config_name": config_name, "action": action, "received_at": gevent.time.time()}
+        )
 
 
 def test_config_update_notification_sent(message_bus):
@@ -37,7 +35,7 @@ def test_config_update_notification_sent(message_bus):
         agent.config.subscribe(
             callback=agent.config_update_callback,
             pattern="notification_test_config",
-            actions=["UPDATE", "NEW"]
+            actions=["UPDATE", "NEW"],
         )
         gevent.sleep(0.5)
 
@@ -58,17 +56,21 @@ def test_config_update_notification_sent(message_bus):
         assert len(agent.update_notifications) > 0, "No UPDATE notifications received"
 
         # Verify that at least one notification was for our config
-        our_notifications = [n for n in agent.update_notifications if n['config_name'] == 'notification_test_config']
-        assert len(our_notifications) > 0, "No notifications received for 'notification_test_config'"
+        our_notifications = [
+            n for n in agent.update_notifications if n["config_name"] == "notification_test_config"
+        ]
+        assert (
+            len(our_notifications) > 0
+        ), "No notifications received for 'notification_test_config'"
 
         # Verify that at least one was an UPDATE action
-        update_notifications = [n for n in our_notifications if n['action'] == 'UPDATE']
+        update_notifications = [n for n in our_notifications if n["action"] == "UPDATE"]
         assert len(update_notifications) > 0, "No UPDATE action notifications received"
 
         print("✅ SUCCESS: UPDATE notification was sent and received correctly!")
 
     finally:
-        if hasattr(agent, 'connected') and agent.connected:
+        if hasattr(agent, "connected") and agent.connected:
             agent.disconnect()
 
 
@@ -89,14 +91,10 @@ def test_config_update_notification_multiple_subscribers(message_bus):
         print("2. Both agents subscribing to configs with the same name...")
         # Each agent subscribes to their own config with the same name
         agent1.config.subscribe(
-            callback=agent1.config_update_callback,
-            pattern="shared_name_config",
-            actions=["UPDATE"]
+            callback=agent1.config_update_callback, pattern="shared_name_config", actions=["UPDATE"]
         )
         agent2.config.subscribe(
-            callback=agent2.config_update_callback,
-            pattern="shared_name_config",
-            actions=["UPDATE"]
+            callback=agent2.config_update_callback, pattern="shared_name_config", actions=["UPDATE"]
         )
         gevent.sleep(0.5)
 
@@ -119,17 +117,25 @@ def test_config_update_notification_multiple_subscribers(message_bus):
         print(f"Agent2 notifications: {len(agent2.update_notifications)}")
 
         # Each agent should have received exactly one notification for their own config
-        agent1_notifications = [n for n in agent1.update_notifications if n['config_name'] == 'shared_name_config']
-        agent2_notifications = [n for n in agent2.update_notifications if n['config_name'] == 'shared_name_config']
+        agent1_notifications = [
+            n for n in agent1.update_notifications if n["config_name"] == "shared_name_config"
+        ]
+        agent2_notifications = [
+            n for n in agent2.update_notifications if n["config_name"] == "shared_name_config"
+        ]
 
-        assert len(agent1_notifications) == 1, f"Agent1 should receive exactly 1 notification, got {len(agent1_notifications)}"
-        assert len(agent2_notifications) == 1, f"Agent2 should receive exactly 1 notification, got {len(agent2_notifications)}"
+        assert (
+            len(agent1_notifications) == 1
+        ), f"Agent1 should receive exactly 1 notification, got {len(agent1_notifications)}"
+        assert (
+            len(agent2_notifications) == 1
+        ), f"Agent2 should receive exactly 1 notification, got {len(agent2_notifications)}"
 
         print("✅ SUCCESS: Config store notifications are properly isolated per agent!")
 
     finally:
         for agent in [agent1, agent2]:
-            if hasattr(agent, 'connected') and agent.connected:
+            if hasattr(agent, "connected") and agent.connected:
                 agent.disconnect()
 
 
@@ -149,27 +155,28 @@ def test_config_update_via_rest_api_isolation(message_bus):
 
         print("2. Both agents subscribing to config with same name...")
         agent1.config.subscribe(
-            callback=agent1.config_update_callback,
-            pattern="api_test_config",
-            actions=["UPDATE"]
+            callback=agent1.config_update_callback, pattern="api_test_config", actions=["UPDATE"]
         )
         agent2.config.subscribe(
-            callback=agent2.config_update_callback,
-            pattern="api_test_config",
-            actions=["UPDATE"]
+            callback=agent2.config_update_callback, pattern="api_test_config", actions=["UPDATE"]
         )
         gevent.sleep(0.5)
 
         print("3. Updating agent1's config via REST API...")
         # Update agent1's config via REST API - only agent1 should be notified
         import requests
-        config_data = {"updated_via": "rest_api", "target": "agent1", "timestamp": gevent.time.time()}
+
+        config_data = {
+            "updated_via": "rest_api",
+            "target": "agent1",
+            "timestamp": gevent.time.time(),
+        }
 
         try:
             response = requests.put(
                 "http://127.0.0.1:8888/config-store/rest_agent1/api_test_config",
                 json=config_data,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json"},
             )
             print(f"REST API response: {response.status_code}")
         except Exception as e:
@@ -181,13 +188,17 @@ def test_config_update_via_rest_api_isolation(message_bus):
         gevent.sleep(2)
 
         print("5. Updating agent2's config via REST API...")
-        config_data2 = {"updated_via": "rest_api", "target": "agent2", "timestamp": gevent.time.time()}
+        config_data2 = {
+            "updated_via": "rest_api",
+            "target": "agent2",
+            "timestamp": gevent.time.time(),
+        }
 
         try:
             response = requests.put(
                 "http://127.0.0.1:8888/config-store/rest_agent2/api_test_config",
                 json=config_data2,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json"},
             )
             print(f"REST API response: {response.status_code}")
         except Exception as e:
@@ -201,17 +212,25 @@ def test_config_update_via_rest_api_isolation(message_bus):
         print(f"Agent2 notifications: {len(agent2.update_notifications)}")
 
         # Each agent should have received exactly one notification
-        agent1_api_notifications = [n for n in agent1.update_notifications if n['config_name'] == 'api_test_config']
-        agent2_api_notifications = [n for n in agent2.update_notifications if n['config_name'] == 'api_test_config']
+        agent1_api_notifications = [
+            n for n in agent1.update_notifications if n["config_name"] == "api_test_config"
+        ]
+        agent2_api_notifications = [
+            n for n in agent2.update_notifications if n["config_name"] == "api_test_config"
+        ]
 
-        assert len(agent1_api_notifications) == 1, f"Agent1 should receive exactly 1 notification, got {len(agent1_api_notifications)}"
-        assert len(agent2_api_notifications) == 1, f"Agent2 should receive exactly 1 notification, got {len(agent2_api_notifications)}"
+        assert (
+            len(agent1_api_notifications) == 1
+        ), f"Agent1 should receive exactly 1 notification, got {len(agent1_api_notifications)}"
+        assert (
+            len(agent2_api_notifications) == 1
+        ), f"Agent2 should receive exactly 1 notification, got {len(agent2_api_notifications)}"
 
         print("✅ SUCCESS: REST API config updates are properly isolated per agent!")
 
     finally:
         for agent in [agent1, agent2]:
-            if hasattr(agent, 'connected') and agent.connected:
+            if hasattr(agent, "connected") and agent.connected:
                 agent.disconnect()
 
 

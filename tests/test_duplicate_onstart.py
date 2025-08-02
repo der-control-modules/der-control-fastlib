@@ -12,7 +12,7 @@ class DuplicateTestAgent(Agent):
         super().__init__(*args, **kwargs)
         self.onstart_count = 0
 
-    @Core.receiver('onstart')
+    @Core.receiver("onstart")
     def _onstart(self, sender=None, **kwargs):
         self.onstart_count += 1
         print(f"ONSTART called! Count: {self.onstart_count}")
@@ -27,18 +27,18 @@ def test_duplicate_onstart_issue(message_bus):
     try:
         print("1. Connecting agent...")
         agent.connect()
-        
+
         # Wait for events to be processed
         gevent.sleep(2)
-        
+
         print(f"Final onstart count: {agent.onstart_count}")
-        
+
         # Check that onstart was called exactly once
         assert agent.onstart_count == 1, f"Expected onstart=1, got {agent.onstart_count}"
         print("✓ onstart was called exactly once!")
 
     finally:
-        if hasattr(agent, 'connected') and agent.connected:
+        if hasattr(agent, "connected") and agent.connected:
             agent.disconnect()
 
 

@@ -12,7 +12,7 @@ class MockNormalFrameworkConnector(Agent):
         super().__init__(*args, **kwargs)
         self.heartbeat_setup_count = 0
 
-    @Core.receiver('onstart')
+    @Core.receiver("onstart")
     def _onstart(self, sender=None, **kwargs):
         """Simulate the original NormalFrameworkConnector onstart."""
         print("Starting Normal Framework Connector")
@@ -36,11 +36,13 @@ def test_normal_framework_connector_onstart(message_bus):
         print(f"Heartbeat setup count: {agent.heartbeat_setup_count}")
 
         # Check that heartbeat setup was called exactly once
-        assert agent.heartbeat_setup_count == 1, f"Expected heartbeat_setup_count=1, got {agent.heartbeat_setup_count}"
+        assert (
+            agent.heartbeat_setup_count == 1
+        ), f"Expected heartbeat_setup_count=1, got {agent.heartbeat_setup_count}"
         print("✓ Heartbeat setup was called exactly once!")
 
     finally:
-        if hasattr(agent, 'connected') and agent.connected:
+        if hasattr(agent, "connected") and agent.connected:
             agent.disconnect()
 
 

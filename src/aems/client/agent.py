@@ -22,10 +22,12 @@ from aems.client import dualmethod
 # Use volttron-core JSON-RPC utilities for compatibility
 try:
     from volttron.utils.jsonrpc import exception_from_json, Error, RemoteError, MethodNotFound
+
     VOLTTRON_JSONRPC_AVAILABLE = True
 except ImportError:
     # Fallback to our custom implementation
     from .jsonrpc import exception_from_json, Error, RemoteError, MethodNotFound
+
     VOLTTRON_JSONRPC_AVAILABLE = False
 
 # Patch standard library to work with gevent
@@ -710,8 +712,10 @@ class Config:
             return merged_config
 
         # If no cache and no onconfigure handler, fetch from server on-demand
-        has_onconfigure_handler = hasattr(self._agent, 'onconfigure') and len(self._agent.core.onconfigure._handlers) > 0
-        
+        has_onconfigure_handler = (
+            hasattr(self._agent, "onconfigure") and len(self._agent.core.onconfigure._handlers) > 0
+        )
+
         if not has_onconfigure_handler and self._connected:
             # Fetch from server since cache wasn't populated on connection
             async_result = AsyncResult()
@@ -976,9 +980,12 @@ class Config:
         # Set up all pending subscriptions with the server
         for subscription in self._pending_subscriptions:
             self._setup_subscription(subscription)
-            
+
             # Only fetch current config values if agent has onconfigure handler
-            has_onconfigure_handler = hasattr(self._agent, 'onconfigure') and len(self._agent.core.onconfigure._handlers) > 0
+            has_onconfigure_handler = (
+                hasattr(self._agent, "onconfigure")
+                and len(self._agent.core.onconfigure._handlers) > 0
+            )
             if has_onconfigure_handler:
                 self._fetch_config_for_subscription(subscription)
 
@@ -987,9 +994,9 @@ class Config:
     def _fetch_config_for_subscription(self, subscription):
         """Fetch current config values from server for a subscription pattern."""
         pattern = subscription["pattern"]
-        
+
         # If pattern is a specific config name, fetch it directly
-        if pattern and '*' not in pattern:
+        if pattern and "*" not in pattern:
             self._fetch_single_config(pattern)
         else:
             # For wildcard patterns, we'd need to list all configs and filter
@@ -998,6 +1005,7 @@ class Config:
 
     def _fetch_single_config(self, config_name):
         """Fetch a single config from the server and cache it."""
+
         def fetch_config():
             try:
                 request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
@@ -1009,7 +1017,9 @@ class Config:
                         self._server_configs[config_name] = server_config
                         print(f"Cached config for {config_name}: {server_config}")
                     else:
-                        print(f"No server config found for {config_name} (status: {response.status_code})")
+                        print(
+                            f"No server config found for {config_name} (status: {response.status_code})"
+                        )
             except Exception as e:
                 print(f"Failed to fetch config {config_name}: {e}")
 
@@ -1834,7 +1844,7 @@ class Agent:
                         exception = exception_from_json(
                             error.get("code", -32603),
                             error.get("message", "Internal Error"),
-                            error.get("data")
+                            error.get("data"),
                         )
                     else:
                         # Simple string error - use our fallback or basic Exception
@@ -1877,7 +1887,7 @@ class Agent:
                             exception = exception_from_json(
                                 error_data.get("code", -32603),
                                 error_data.get("message", "Internal Error"),
-                                error_data.get("data")
+                                error_data.get("data"),
                             )
                         else:
                             # Simple error - use fallback if RemoteError has issues

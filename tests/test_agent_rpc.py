@@ -1,6 +1,7 @@
 """
 Test agent RPC (Remote Procedure Call) functionality using pytest
 """
+
 import pytest
 import gevent
 from aems.client.agent import Agent
@@ -29,13 +30,14 @@ class TestAgentRPC:
         yield
 
         # Cleanup
-        if hasattr(self, 'server_agent'):
+        if hasattr(self, "server_agent"):
             self.server_agent.disconnect()
-        if hasattr(self, 'client_agent'):
+        if hasattr(self, "client_agent"):
             self.client_agent.disconnect()
 
     def test_basic_rpc_call(self):
         """Test basic RPC call functionality."""
+
         # Register an RPC method on the server
         def echo_method(message):
             return f"Echo: {message}"
@@ -51,6 +53,7 @@ class TestAgentRPC:
 
     def test_rpc_with_multiple_parameters(self):
         """Test RPC call with multiple parameters."""
+
         # Register method that takes multiple parameters
         def add_numbers(a, b, c=0):
             return a + b + c
@@ -70,6 +73,7 @@ class TestAgentRPC:
 
     def test_rpc_error_handling(self):
         """Test RPC error handling."""
+
         # Register method that can raise an exception
         def divide_numbers(a, b):
             if b == 0:
@@ -102,7 +106,9 @@ class TestAgentRPC:
             assert False, "Should have raised an exception for non-existent method"
         except Exception as e:
             # Should get some kind of method not found error
-            assert "method" in str(e).lower() or "not found" in str(e).lower(), f"Expected method error, got {e}"
+            assert (
+                "method" in str(e).lower() or "not found" in str(e).lower()
+            ), f"Expected method error, got {e}"
 
     def test_rpc_to_nonexistent_agent(self):
         """Test RPC call to a non-existent agent."""
@@ -113,10 +119,13 @@ class TestAgentRPC:
             assert False, "Should have raised an exception for non-existent agent"
         except Exception as e:
             # Should get some kind of agent not found or timeout error
-            assert any(word in str(e).lower() for word in ["timeout", "not found", "unreachable"]), f"Expected agent error, got {e}"
+            assert any(
+                word in str(e).lower() for word in ["timeout", "not found", "unreachable"]
+            ), f"Expected agent error, got {e}"
 
     def test_rpc_with_complex_data(self):
         """Test RPC with complex data structures."""
+
         # Register method that handles complex data
         def process_data(data):
             if isinstance(data, dict):
@@ -145,6 +154,7 @@ class TestAgentRPC:
 
     def test_bidirectional_rpc(self):
         """Test bidirectional RPC calls (both agents can call each other)."""
+
         # Register methods on both agents
         def server_method(value):
             return f"Server processed: {value}"

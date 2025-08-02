@@ -1,6 +1,7 @@
 """
 Test agent publish/subscribe functionality using pytest
 """
+
 import pytest
 import gevent
 from aems.client.agent import Agent
@@ -31,13 +32,13 @@ class TestAgentPubSub:
         yield
 
         # Cleanup
-        if hasattr(self, 'publisher'):
+        if hasattr(self, "publisher"):
             self.publisher.disconnect()
-        if hasattr(self, 'subscriber1'):
+        if hasattr(self, "subscriber1"):
             self.subscriber1.disconnect()
-        if hasattr(self, 'subscriber2'):
+        if hasattr(self, "subscriber2"):
             self.subscriber2.disconnect()
-        if hasattr(self, 'subscriber2'):
+        if hasattr(self, "subscriber2"):
             self.subscriber2.core.stop().get()
 
     def test_basic_publish_subscribe(self):
@@ -60,10 +61,14 @@ class TestAgentPubSub:
         pub_result1 = self.publisher.vip.pubsub.publish("", "test/topic1", "Hello from topic1")
         assert pub_result1.get() is True, "Publish 1 should succeed"
 
-        pub_result2 = self.publisher.vip.pubsub.publish("", "test/special/topic2", "Hello from special topic2")
+        pub_result2 = self.publisher.vip.pubsub.publish(
+            "", "test/special/topic2", "Hello from special topic2"
+        )
         assert pub_result2.get() is True, "Publish 2 should succeed"
 
-        pub_result3 = self.publisher.vip.pubsub.publish("", "other/topic3", "Hello from other topic3")
+        pub_result3 = self.publisher.vip.pubsub.publish(
+            "", "other/topic3", "Hello from other topic3"
+        )
         assert pub_result3.get() is True, "Publish 3 should succeed"
 
         # Wait for message processing
@@ -74,10 +79,14 @@ class TestAgentPubSub:
         sub2_messages = self.subscriber2.get_received_messages()
 
         # Subscriber1 should receive messages from "test/" prefix
-        assert len(sub1_messages) >= 2, f"Subscriber1 should receive at least 2 messages, got {len(sub1_messages)}"
+        assert (
+            len(sub1_messages) >= 2
+        ), f"Subscriber1 should receive at least 2 messages, got {len(sub1_messages)}"
 
         # Subscriber2 should receive messages from "test/special/" prefix only
-        assert len(sub2_messages) >= 1, f"Subscriber2 should receive at least 1 message, got {len(sub2_messages)}"
+        assert (
+            len(sub2_messages) >= 1
+        ), f"Subscriber2 should receive at least 1 message, got {len(sub2_messages)}"
 
     def test_regex_subscription(self):
         """Test regex pattern subscription."""
@@ -104,7 +113,9 @@ class TestAgentPubSub:
 
         # Should receive messages that match the pattern
         pubsub_messages = [msg for msg in messages if msg.get("type") == "pubsub"]
-        assert len(pubsub_messages) >= 2, f"Should receive at least 2 matching messages, got {len(pubsub_messages)}"
+        assert (
+            len(pubsub_messages) >= 2
+        ), f"Should receive at least 2 matching messages, got {len(pubsub_messages)}"
 
     def test_multiple_subscriptions(self):
         """Test multiple subscriptions on the same agent."""
@@ -134,7 +145,9 @@ class TestAgentPubSub:
         pubsub_messages = [msg for msg in messages if msg.get("type") == "pubsub"]
 
         # Should receive messages from both subscribed topics
-        assert len(pubsub_messages) >= 2, f"Should receive at least 2 messages, got {len(pubsub_messages)}"
+        assert (
+            len(pubsub_messages) >= 2
+        ), f"Should receive at least 2 messages, got {len(pubsub_messages)}"
 
         # Verify topics
         topics = [msg.get("topic", "") for msg in pubsub_messages]
@@ -157,7 +170,7 @@ class TestAgentPubSub:
             "float": 3.14,
             "boolean": True,
             "list": [1, 2, 3],
-            "dict": {"nested": "value"}
+            "dict": {"nested": "value"},
         }
 
         self.publisher.vip.pubsub.publish("", "data/test", test_data).get()
@@ -170,4 +183,6 @@ class TestAgentPubSub:
         assert len(pubsub_messages) >= 1, "Should receive the test message"
 
         received_data = pubsub_messages[0].get("message", {})
-        assert received_data == test_data, f"Message content should be preserved: expected {test_data}, got {received_data}"
+        assert (
+            received_data == test_data
+        ), f"Message content should be preserved: expected {test_data}, got {received_data}"

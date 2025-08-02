@@ -15,11 +15,9 @@ class ConfigIsolationTestAgent(Agent):
 
     def on_config_update(self, config_name, action, config_value):
         """Handle configuration updates."""
-        self.notifications.append({
-            'config_name': config_name,
-            'action': action,
-            'agent_identity': self.identity
-        })
+        self.notifications.append(
+            {"config_name": config_name, "action": action, "agent_identity": self.identity}
+        )
         print(f"[{self.identity}] Received {action} for '{config_name}'")
 
 
@@ -48,12 +46,12 @@ def test_config_store_isolation_summary(message_bus):
         agent_a.config.subscribe(
             callback=agent_a.on_config_update,
             pattern="shared_config_name",
-            actions=["UPDATE", "NEW"]
+            actions=["UPDATE", "NEW"],
         )
         agent_b.config.subscribe(
             callback=agent_b.on_config_update,
             pattern="shared_config_name",
-            actions=["UPDATE", "NEW"]
+            actions=["UPDATE", "NEW"],
         )
         gevent.sleep(0.5)
 
@@ -66,7 +64,7 @@ def test_config_store_isolation_summary(message_bus):
         response = requests.put(
             "http://127.0.0.1:8888/config-store/agent_b/shared_config_name",
             json=config_data,
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
         )
         print(f"REST API response: {response.status_code}")
         gevent.sleep(2)
@@ -76,12 +74,16 @@ def test_config_store_isolation_summary(message_bus):
         print(f"Agent B notifications: {len(agent_b.notifications)}")
 
         # Each agent should have received exactly one notification for their own config
-        assert len(agent_a.notifications) == 1, f"Agent A should have 1 notification, got {len(agent_a.notifications)}"
-        assert len(agent_b.notifications) == 1, f"Agent B should have 1 notification, got {len(agent_b.notifications)}"
+        assert (
+            len(agent_a.notifications) == 1
+        ), f"Agent A should have 1 notification, got {len(agent_a.notifications)}"
+        assert (
+            len(agent_b.notifications) == 1
+        ), f"Agent B should have 1 notification, got {len(agent_b.notifications)}"
 
         # Verify the notifications are for the correct agent
-        assert agent_a.notifications[0]['agent_identity'] == 'agent_a'
-        assert agent_b.notifications[0]['agent_identity'] == 'agent_b'
+        assert agent_a.notifications[0]["agent_identity"] == "agent_a"
+        assert agent_b.notifications[0]["agent_identity"] == "agent_b"
 
         print("\n✅ SUCCESS: Config store is properly isolated per agent!")
         print("   - Each agent only receives notifications for its own configs")
@@ -90,7 +92,7 @@ def test_config_store_isolation_summary(message_bus):
 
     finally:
         for agent in [agent_a, agent_b]:
-            if hasattr(agent, 'connected') and agent.connected:
+            if hasattr(agent, "connected") and agent.connected:
                 agent.disconnect()
 
 

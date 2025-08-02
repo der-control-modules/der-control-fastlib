@@ -39,6 +39,7 @@ class Error(Exception):
 
 class MethodNotFound(Error):
     """Raised when remote method is not implemented."""
+
     pass
 
 
