@@ -60,9 +60,9 @@ jobs:
           pip install -e .[dev]
           pip install safety bandit
 
-      - name: Run safety check
+      - name: Run safety scan
         run: |
-          safety check
+          safety scan
 
       - name: Run bandit security check
         run: |
