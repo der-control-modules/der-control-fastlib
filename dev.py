@@ -1,7 +1,24 @@
 #!/usr/bin/env python3
 """
-Simple development helper script - Poetry-like commands for pip
-Usage: python dev.py <command>
+Development Helper Script for ANY python Library
+
+This script provides a set of command-line utilities for managing the AEMS library
+development lifecycle. It aims to provide Poetry-like functionality while using pip
+under the hood, making the development workflow more streamlined.
+
+Features include:
+- Package installation (dev and production modes)
+- Code formatting, linting and testing
+- Version management with semantic versioning support
+- Git workflow helpers (fork syncing, PR preparation)
+- Security scanning
+- Build tools
+
+Usage:
+    python dev.py <command> [arguments]
+    ./dev.py <command> [arguments]
+
+Run `dev.py help` for a full list of available commands.
 """
 
 import subprocess
@@ -10,18 +27,38 @@ import re
 import urllib.request
 import urllib.parse
 import json
+import os
+from pathlib import Path
 
+# Import tomllib (Python 3.11+) or tomli as a fallback for older Python versions
 try:
-    import tomllib  # Python 3.11+
+    import tomllib  # Standard library in Python 3.11+
 except ImportError:
     try:
-        import tomli as tomllib  # Fallback for older Python versions
+        import tomli as tomllib  # Fallback for Python 3.10 and older
     except ImportError:
-        tomllib = None
+        tomllib = None  # Fallback to hardcoded defaults when no TOML parser is available
 
 
 def trigger_update(server_url=None, token=None):
-    """Trigger an update on a test server via webhook."""
+    """
+    Trigger an update on a test server via webhook.
+
+    This function sends a webhook request to a specified server URL with
+    payload information about the current version. It can be used to trigger
+    automatic deployments or updates on test environments.
+
+    Args:
+        server_url (str): The URL of the webhook endpoint to call
+        token (str, optional): Authentication token to include in the request
+
+    Returns:
+        bool: True if the update was successfully triggered, False otherwise
+
+    Examples:
+        >>> trigger_update("https://test-server.com/webhook")
+        >>> trigger_update("https://test-server.com/webhook", "secret-token")
+    """
     if not server_url:
         print("❌ Error: No server URL provided")
         print("Usage: ./dev.py trigger-update <server_url> [token]")
@@ -87,7 +124,15 @@ def trigger_update(server_url=None, token=None):
 
 
 def get_current_version():
-    """Get the current version from git tags."""
+    """
+    Get the current version from git tags.
+
+    Retrieves the most recent version tag from git and returns it in a format
+    suitable for semantic versioning. If no tags are found, defaults to '0.0.0'.
+
+    Returns:
+        str: The current version string without the 'v' prefix
+    """
     # Get all tags sorted by version
     result = subprocess.run(
         "git tag -l --sort=-version:refname",
@@ -106,7 +151,27 @@ def get_current_version():
 
 
 def parse_version(version_str):
-    """Parse a version string into major, minor, patch components with optional pre-release."""
+    """
+    Parse a version string into its semantic versioning components.
+
+    Breaks down a version string into major, minor, patch components
+    and optional pre-release information (type and number).
+
+    Args:
+        version_str (str): Version string to parse (e.g., '1.2.3', '1.2.3-alpha.1')
+
+    Returns:
+        tuple: (major, minor, patch, prerelease_type, prerelease_num)
+
+    Raises:
+        ValueError: If the version string format is invalid
+
+    Examples:
+        >>> parse_version('1.2.3')
+        (1, 2, 3, None, None)
+        >>> parse_version('1.2.3-alpha.1')
+        (1, 2, 3, 'alpha', 1)
+    """
     # Match semantic version with optional pre-release (alpha, beta, rc)
     match = re.match(r'^v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.?(\d+))?', version_str)
     if not match:
@@ -120,7 +185,36 @@ def parse_version(version_str):
 
 
 def increment_version(version_str, bump_type):
-    """Increment version based on bump type (major, minor, patch, alpha, beta, rc)."""
+    """
+    Increment version based on bump type according to Semantic Versioning rules.
+
+    Takes a current version string and a bump type, and returns a new version
+    string that has been incremented according to SemVer rules. Handles major,
+    minor, and patch level increments as well as pre-release versions (alpha,
+    beta, release candidate).
+
+    Args:
+        version_str (str): Current version string
+        bump_type (str): Type of version bump to perform:
+                        'major', 'minor', 'patch', 'alpha', 'beta',
+                        'rc', or 'release'
+
+    Returns:
+        str: New version string after applying the bump
+
+    Raises:
+        ValueError: If the bump type is invalid or if trying to promote
+                    a release version with 'release' bump type
+
+    Versioning Rules:
+        - major: Increments the major version, resets minor and patch to 0
+        - minor: Increments the minor version, resets patch to 0
+        - patch: Increments the patch version only
+        - alpha: Creates or increments an alpha pre-release
+        - beta: Creates, increments, or promotes to beta pre-release
+        - rc: Creates, increments, or promotes to release candidate
+        - release: Promotes a pre-release to a final release
+    """
     major, minor, patch, pre_type, pre_num = parse_version(version_str)
 
     if bump_type == "major":
@@ -167,7 +261,30 @@ def increment_version(version_str, bump_type):
 
 
 def version(version_arg=None):
-    """Manage package versioning with git tags."""
+    """
+    Manage package versioning with git tags.
+
+    This function either displays the current version or creates a new git tag
+    with an updated version. It supports semantic versioning increments (major,
+    minor, patch) and pre-release types (alpha, beta, rc).
+
+    Args:
+        version_arg (str, optional):
+            - None: Show current version
+            - "major", "minor", "patch": Increment specific version component
+            - "alpha", "beta", "rc": Create or increment pre-release version
+            - "release": Promote pre-release to final release
+            - Any other string: Treated as an explicit version number
+
+    Returns:
+        bool: True if the operation was successful, False otherwise
+
+    Examples:
+        >>> version()               # Display current version
+        >>> version("minor")        # Bump minor version (1.0.0 -> 1.1.0)
+        >>> version("beta")         # Create beta (1.0.0 -> 1.0.1-beta.1)
+        >>> version("1.5.0-rc.2")   # Set specific version
+    """
     if version_arg is None:
         # Show current version
         current = get_current_version()
@@ -230,7 +347,16 @@ def version(version_arg=None):
 
 
 def get_dev_dependencies():
-    """Get list of dev dependencies from pyproject.toml."""
+    """
+    Get list of development dependencies from pyproject.toml.
+
+    Reads the pyproject.toml file to extract the development dependencies.
+    If tomllib/tomli is not available or the file cannot be read, falls
+    back to a hardcoded list of common development dependencies.
+
+    Returns:
+        list: A list of development dependency package names (without version specifiers)
+    """
     if tomllib is None:
         print("⚠️ Warning: tomllib/tomli not available, using fallback dependency list")
         return ["black", "pylint", "flake8", "flake8-pyproject", "pytest", "pytest-cov", "build"]
@@ -256,24 +382,66 @@ def get_dev_dependencies():
 
 
 def run_command(cmd, description=None):
-    """Run a shell command and handle errors."""
+    """
+    Run a shell command and handle errors.
+
+    Executes a shell command, optionally with a description, and handles
+    any errors or output. Captures both stdout and stderr.
+
+    Args:
+        cmd (str): The shell command to execute
+        description (str, optional): A description of what the command does
+
+    Returns:
+        bool: True if the command executed successfully (returncode 0), False otherwise
+
+    Notes:
+        - Stdout is printed if available
+        - Error messages with stderr are printed if the command fails
+    """
     if description:
         print(f"🔄 {description}...")
 
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    # Run the command without capturing output to show it directly
+    process = subprocess.Popen(
+        cmd,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
 
-    if result.returncode != 0:
-        print(f"❌ Error: {result.stderr}")
+    stdout, stderr = process.communicate()
+
+    if process.returncode != 0:
+        print("❌ Error: ")
+        if stderr:
+            print(stderr)
         return False
 
-    if result.stdout:
-        print(result.stdout)
+    if stdout:
+        print(stdout)
 
-    return True
+    return process.returncode == 0
 
 
 def setup_upstream(upstream_url=None):
-    """Set up upstream remote for fork workflow."""
+    """
+    Set up upstream remote for fork workflow.
+
+    Configures or updates the 'upstream' git remote to point to the original
+    repository. This is a common setup for fork-based workflows where you want
+    to keep your fork in sync with the original repository.
+
+    Args:
+        upstream_url (str): The URL of the original repository to set as upstream
+
+    Returns:
+        bool: True if the upstream was configured successfully, False otherwise
+
+    Examples:
+        >>> setup_upstream("https://github.com/VOLTTRON/aems-lib-fastapi.git")
+    """
     if not upstream_url:
         print("❌ Error: No upstream URL provided")
         print("Usage: ./dev.py setup-upstream <upstream_url>")
@@ -304,7 +472,21 @@ def setup_upstream(upstream_url=None):
 
 
 def sync_fork():
-    """Sync fork with upstream repository."""
+    """
+    Sync fork with upstream repository.
+
+    Keeps your fork up-to-date with the original repository by fetching
+    changes from upstream and merging them into your local branches.
+    Automatically handles syncing both main and develop branches if they exist.
+
+    Returns:
+        bool: True if the sync was successful, False otherwise
+
+    Notes:
+        - Requires upstream remote to be configured first
+        - Syncs main branch and develop branch (if it exists)
+        - Returns to the original branch after syncing
+    """
     print("🔄 Syncing fork with upstream...")
 
     # Check if upstream remote exists
@@ -376,7 +558,23 @@ def sync_fork():
 
 
 def create_pr_branch(branch_name=None):
-    """Create a new branch for pull request from up-to-date develop."""
+    """
+    Create a new branch for pull request from up-to-date develop branch.
+    
+    Creates a new branch from the develop branch (or main if develop doesn't exist)
+    for developing a new feature or fix. Automatically syncs with upstream first
+    to ensure the branch is created from the latest code.
+    
+    Args:
+        branch_name (str): Name for the new branch (e.g., 'feature/new-feature')
+        
+    Returns:
+        bool: True if the branch was created successfully, False otherwise
+        
+    Examples:
+        >>> create_pr_branch("feature/add-new-api")
+        >>> create_pr_branch("fix/issue-123")
+    """
     if not branch_name:
         print("❌ Error: No branch name provided")
         print("Usage: ./dev.py create-pr-branch <branch_name>")
@@ -415,7 +613,22 @@ def create_pr_branch(branch_name=None):
 
 
 def prepare_pr():
-    """Prepare current branch for pull request."""
+    """
+    Prepare current branch for pull request.
+    
+    Runs quality checks, ensures there are commits on the branch,
+    and pushes the branch to the remote repository if needed.
+    This helps ensure the branch is ready for a pull request.
+    
+    Returns:
+        bool: True if the branch is ready for PR, False otherwise
+        
+    Notes:
+        - Won't allow preparing main or develop branches
+        - Runs quality checks (format, lint, test)
+        - Verifies there are commits on the branch
+        - Pushes the branch to remote if needed
+    """
     print("🔄 Preparing branch for pull request...")
 
     # Get current branch
@@ -486,14 +699,31 @@ def prepare_pr():
 
 
 def install():
-    """Install the package in development mode with dev dependencies."""
+    """
+    Install the package in development mode with dev dependencies.
+    
+    Installs the package using pip's editable mode (-e) with development
+    dependencies included. This is equivalent to `pip install -e .[dev]`.
+    
+    Returns:
+        bool: True if installation was successful, False otherwise
+    """
     return run_command(
         "pip install -e .[dev]", "Installing development dependencies"
     )
 
 
 def install_prod():
-    """Install only production dependencies and remove dev tools."""
+    """
+    Install only production dependencies and remove dev tools.
+    
+    Removes all development dependencies and installs only the production
+    dependencies. This is useful for testing a clean production environment
+    or preparing for deployment.
+    
+    Returns:
+        bool: True if installation was successful, False otherwise
+    """
     print("🔄 Installing production dependencies and cleaning dev tools...")
 
     # Get dev packages dynamically from pyproject.toml
@@ -509,7 +739,15 @@ def install_prod():
 
 
 def update():
-    """Update all development dependencies to latest compatible versions."""
+    """
+    Update all development dependencies to latest compatible versions.
+    
+    Iterates through the development dependencies and updates each one
+    to the latest version compatible with the specified constraints.
+    
+    Returns:
+        bool: True if all updates were successful, False otherwise
+    """
     print("🔄 Updating dependencies...")
 
     # Get current dev dependencies dynamically from pyproject.toml
@@ -524,25 +762,74 @@ def update():
 
 
 def format_code():
-    """Format code with Black."""
+    """
+    Format code with Black.
+    
+    Runs the Black code formatter on the source and test directories to
+    ensure consistent code style across the project.
+    
+    Returns:
+        bool: True if formatting was successful, False otherwise
+    """
     return run_command("black src/ tests/", "Formatting code")
 
 
 def lint():
-    """Run linting checks."""
+    """
+    Run linting checks.
+    
+    Executes both Pylint and flake8 on the source code to identify
+    potential issues, bugs, and stylistic problems.
+    
+    Returns:
+        bool: True if all linting checks passed, False otherwise
+    """
     print("🔍 Running linting checks...")
-    pylint_ok = run_command("pylint src/", "Running Pylint")
-    flake8_ok = run_command("flake8 src/", "Running flake8")
-    return pylint_ok and flake8_ok
+    
+    print("🔄 Running Pylint...")
+    pylint_process = subprocess.run("pylint src/", shell=True, text=True)
+    pylint_ok = pylint_process.returncode == 0
+    
+    print("\n🔄 Running flake8...")
+    flake8_process = subprocess.run("flake8 src/", shell=True, text=True)
+    flake8_ok = flake8_process.returncode == 0
+    
+    if pylint_ok and flake8_ok:
+        print("✅ Linting passed!")
+        return True
+    else:
+        print("❌ Linting checks failed!")
+        return False
 
 
 def test():
-    """Run tests."""
+    """
+    Run tests.
+    
+    Executes the project's test suite using pytest to verify that 
+    the code functions correctly.
+    
+    Returns:
+        bool: True if all tests passed, False otherwise
+    """
     return run_command("pytest", "Running tests")
 
 
 def security():
-    """Run security scans."""
+    """
+    Run security scans.
+    
+    Performs security scanning on both the code and dependencies to
+    identify potential security vulnerabilities.
+    
+    Returns:
+        bool: True if all security checks passed, False otherwise
+        
+    Notes:
+        - Uses pip-audit to scan dependencies for vulnerabilities
+        - Uses bandit to scan the codebase for security issues
+        - Generates a JSON report in bandit-report.json
+    """
     print("🔒 Running security scans...")
 
     # Run pip-audit for dependency vulnerability scanning
@@ -557,10 +844,17 @@ def security():
         run_command("bandit -r src/", "Bandit security summary")
 
     return pip_audit_ok and bandit_ok
-
-
 def build():
-    """Build wheel package."""
+    """
+    Build wheel package.
+    
+    Creates a Python wheel package by cleaning previous builds and
+    running the build process. The resulting wheel is placed in the
+    dist/ directory.
+    
+    Returns:
+        bool: True if the build was successful, False otherwise
+    """
     print("🔨 Building wheel package...")
 
     # Clean previous builds
@@ -579,7 +873,16 @@ def build():
 
 
 def check():
-    """Run format, lint, and test."""
+    """
+    Run format, lint, and test.
+    
+    Comprehensive quality check that runs code formatting,
+    linting, and tests in sequence. This is useful before
+    committing code or preparing a pull request.
+    
+    Returns:
+        bool: True if all checks passed, False otherwise
+    """
     print("🧪 Running full check suite...")
     format_ok = format_code()
     lint_ok = lint()
@@ -594,7 +897,12 @@ def check():
 
 
 def show_help():
-    """Show available commands."""
+    """
+    Show available commands.
+    
+    Displays comprehensive help information about all available
+    commands, their purposes, and examples of how to use them.
+    """
     print("""
 🚀 Development Helper Commands:
 
@@ -656,6 +964,22 @@ Examples:
 
 
 def main():
+    """
+    Main entry point for the development helper script.
+    
+    Parses command line arguments and dispatches to the appropriate
+    function based on the command. Handles special cases for commands
+    that require additional arguments.
+    
+    Command dispatch logic:
+    1. No command or 'help': Show help information
+    2. Special case commands (version, trigger-update, etc.): Handle with args
+    3. Standard commands: Dispatch to corresponding function
+    
+    Exit codes:
+    - 0: Command executed successfully
+    - 1: Command failed or invalid command
+    """
     if len(sys.argv) < 2:
         show_help()
         return
@@ -692,6 +1016,7 @@ def main():
         success = create_pr_branch(branch_name)
         sys.exit(0 if success else 1)
 
+    # Map command names to their corresponding functions
     commands = {
         'install': install,
         'install-prod': install_prod,
