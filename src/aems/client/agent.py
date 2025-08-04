@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import heapq
 import json
 import logging
@@ -658,6 +659,8 @@ class ConfigCallback:
                 self.callback(config_name, action, value)
             except Exception as e:
                 print(f"Error in config callback for {config_name}: {e}")
+                import traceback
+                traceback.print_exc()
 
 
 class Config:
@@ -668,6 +671,9 @@ class Config:
     1. Configurations are stored on the server (centralized)
     2. Agents can push configs to the store and retrieve them
     3. Agents can watch for config changes
+
+    When updating or deleting configurations, the system can optionally trigger callbacks
+    to subscribers immediately, instead of waiting for a server notification.
     """
 
     def __init__(self, agent: Agent):
@@ -675,86 +681,82 @@ class Config:
         self._config_callbacks: dict[str, list[ConfigCallback]] = {}
         self._default_configs = {}
         self._pending_subscriptions = []
-        self._server_configs = {}
         self._connected = False
         self._watched_configs = set()
         self._new_default_configs_sent = False
+        self._config_cache = {}  # Comprehensive cache of all config entries (default + server)
         # Connect to relevant agent signals
         self._agent.core.onconnected.connect(self._on_connection_established)
-        self._agent.core.onconfigure.connect(self._on_configure)
+        self._agent.core.onconfigure.connect(self._on_update_from_server)  # Renamed method
+
+    def _has_server_config(self, config_name: str) -> bool:
+        """
+        Determine if a configuration exists on the server (not just default).
+        Returns True if the configuration exists in the cache but not in defaults,
+        or if it exists in both but has been modified from the default.
+        """
+        # If it's in the cache but not in defaults, it must be from server
+        if config_name in self._config_cache and config_name not in self._default_configs:
+            return True
+
+        # If it's in both, check if they're different
+        if config_name in self._config_cache and config_name in self._default_configs:
+            default_value = self._default_configs[config_name]
+            cached_value = self._config_cache[config_name]
+
+            # If both are dictionaries, they might have been merged
+            if isinstance(default_value, dict) and isinstance(cached_value, dict):
+                # Check if cache has keys not in default
+                for key in cached_value:
+                    if key not in default_value or cached_value[key] != default_value[key]:
+                        return True
+                return False
+            else:
+                # For non-dict values, simply compare them
+                return default_value != cached_value
+
+        return False
 
     def get(self, config_name: str) -> dict:
         """
         Get a configuration from the config store.
-        Returns locally cached data if available.
-        If no cache and no onconfigure handler, fetches from server on-demand.
+        Returns a deep copy of locally cached data if available.
         Merges default config with server config, with server values taking precedence.
+        Always returns a deep copy to prevent inadvertent modifications to cached data.
+        Raises KeyError if the config is not found in the cache.
         """
-        # Start with default config as the base
+        # Check if we have the config in our comprehensive cache
+        if config_name in self._config_cache:
+            # Return a deep copy to prevent modification of cached data
+            return copy.deepcopy(self._config_cache[config_name])
+
+        # If not in cache, build it from default and server configs
         merged_config = {}
         if config_name in self._default_configs:
             default_config = self._default_configs[config_name]
             if isinstance(default_config, dict):
-                merged_config = default_config.copy()
+                # Use deepcopy to ensure we don't modify the original
+                merged_config = copy.deepcopy(default_config)
             else:
-                # If default is not a dict, use it as is
+                # If default is not a dict, use it as is (primitive values are immutable)
                 merged_config = default_config
 
-        # Check if we have a cached server version
-        if config_name in self._server_configs:
-            server_config = self._server_configs[config_name]
-            if isinstance(merged_config, dict) and isinstance(server_config, dict):
-                # Merge dictionaries - server config overrides defaults
-                merged_config.update(server_config)
-            else:
-                # If either is not a dict, server config completely overrides
-                merged_config = server_config
-            return merged_config
+            # Since there's no server config, use only the default
+            self._config_cache[config_name] = merged_config
+            return copy.deepcopy(merged_config)
 
-        # If no cache and no onconfigure handler, fetch from server on-demand
-        has_onconfigure_handler = (
-            hasattr(self._agent, "onconfigure") and len(self._agent.core.onconfigure._handlers) > 0
-        )
+        # If we get here, there's no default and no cached server config
+        raise KeyError(f"Configuration '{config_name}' not found in cache")
 
-        if not has_onconfigure_handler and self._connected:
-            # Fetch from server since cache wasn't populated on connection
-            async_result = AsyncResult()
-            request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+    def set(self, config_name: str, config_data: Any, send_update: bool = True):
+        """
+        Set a configuration in the config store.
 
-            def fetch_config():
-                try:
-                    with httpx.Client() as client:
-                        response = client.get(request_url)
-                        if response.status_code == 200:
-                            data = response.json()
-                            server_config = data["data"]
-                            self._server_configs[config_name] = server_config  # Cache the result
-
-                            # Merge with defaults if both are dicts
-                            final_config = merged_config
-                            if isinstance(merged_config, dict) and isinstance(server_config, dict):
-                                final_config = merged_config.copy()
-                                final_config.update(server_config)
-                            elif server_config is not None:
-                                # Server config overrides if it's not None
-                                final_config = server_config
-
-                            async_result.set(final_config)
-                        else:
-                            # If server request fails, return defaults if available
-                            async_result.set(merged_config if merged_config else {})
-                except Exception:
-                    # If server request fails, return defaults if available
-                    async_result.set(merged_config if merged_config else {})
-
-            gevent.spawn(fetch_config).get(timeout=5)
-            return async_result.get(timeout=5)
-
-        # Return defaults or empty dict if no server config available
-        return merged_config
-
-    def set(self, config_name: str, config_data: Any):
-        """Set a configuration in the config store."""
+        Args:
+            config_name: Name of the configuration
+            config_data: Configuration data to store
+            send_update: Whether to call subscribed callbacks (default: True)
+        """
         async_result = AsyncResult()
 
         # Prepare request
@@ -766,8 +768,28 @@ class Config:
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
                     response = client.put(request_url, json=config_data)
                     if response.status_code == 200:
-                        # Update local cache when store succeeds
-                        self._server_configs[config_name] = config_data
+                        # Update comprehensive cache
+                        merged_config = {}
+                        if config_name in self._default_configs:
+                            default_config = self._default_configs[config_name]
+                            if isinstance(default_config, dict) and isinstance(config_data, dict):
+                                merged_config = copy.deepcopy(default_config)
+                                merged_config.update(copy.deepcopy(config_data))
+                            else:
+                                merged_config = copy.deepcopy(config_data)
+                        else:
+                            merged_config = copy.deepcopy(config_data)
+
+                        self._config_cache[config_name] = merged_config
+
+                        # Trigger callbacks if requested
+                        if send_update and config_name in self._config_callbacks:
+                            for callback in self._config_callbacks[config_name]:
+                                try:
+                                    callback(config_name, "UPDATE", merged_config)
+                                except Exception as e:
+                                    print(f"Error in config update callback: {e}")
+
                         async_result.set(True)
                     else:
                         async_result.set_exception(
@@ -779,8 +801,14 @@ class Config:
         gevent.spawn(store_config)
         return async_result
 
-    def delete(self, config_name: str):
-        """Delete a configuration from the config store."""
+    def delete(self, config_name: str, send_update: bool = True):
+        """
+        Delete a configuration from the config store.
+
+        Args:
+            config_name: Name of the configuration to delete
+            send_update: Whether to call subscribed callbacks (default: True)
+        """
         async_result = AsyncResult()
 
         # Prepare request
@@ -792,6 +820,22 @@ class Config:
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
                     response = client.delete(request_url)
                     if response.status_code == 200:
+                        # Remove from comprehensive cache or update it to use only default values
+                        if config_name in self._default_configs:
+                            # Update to use default values only
+                            self._config_cache[config_name] = self._default_configs[config_name]
+                        elif config_name in self._config_cache:
+                            # No default, so remove completely
+                            del self._config_cache[config_name]
+
+                        # Trigger callbacks if requested
+                        if send_update and config_name in self._config_callbacks:
+                            for callback in self._config_callbacks[config_name]:
+                                try:
+                                    callback(config_name, "DELETE", None)
+                                except Exception as e:
+                                    print(f"Error in config delete callback: {e}")
+
                         async_result.set(True)
                     else:
                         async_result.set_exception(
@@ -804,31 +848,20 @@ class Config:
         return async_result
 
     def list(self):
-        """List all configurations for this agent."""
+        """
+        List all configurations for this agent.
+        Returns the keys from our comprehensive cache which contains both server configs and defaults.
+        """
+        # Combine keys from both server configs and default configs
+        config_names = set(list(self._config_cache.keys()))
+
+        # Convert to list and sort for consistent output
+        config_list = sorted(list(config_names))
+
+        # Create and set the result immediately
         async_result = AsyncResult()
+        async_result.set(config_list)
 
-        # Prepare request
-        request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/list?agent_id={self._agent.identity}"
-
-        # Use gevent to make the HTTP request asynchronously
-        def list_configs():
-            try:
-                with httpx.Client() as client:  # Synchronous client for gevent compatibility
-                    response = client.get(request_url)
-                    if response.status_code == 200:
-                        data = response.json()
-                        if self._agent.identity in data["data"]:
-                            async_result.set(data["data"][self._agent.identity])
-                        else:
-                            async_result.set([])  # No configs for this agent
-                    else:
-                        async_result.set_exception(
-                            Exception(f"Failed to list configs: {response.text}")
-                        )
-            except Exception as e:
-                async_result.set_exception(e)
-
-        gevent.spawn(list_configs)
         return async_result
 
     def subscribe(self, callback, actions=None, pattern=None, config_name=None):
@@ -855,21 +888,14 @@ class Config:
                 self._config_callbacks[pattern].append(ConfigCallback(callback, actions))
                 print(f"Registered callback for config: {pattern}")
 
-            # If we already have this config (default or server), notify immediately
-            if pattern in self._default_configs:
-                value = self._default_configs[pattern]
+            # If we already have this config, notify immediately
+            if pattern in self._config_cache:
+                value = self._config_cache[pattern]
                 try:
                     callback(pattern, value)
-                    print(f"Called callback with existing default config: {pattern}")
+                    print(f"Called callback with existing config: {pattern}")
                 except Exception as e:
-                    print(f"Error calling callback for default {pattern}: {e}")
-            elif pattern in self._server_configs:
-                value = self._server_configs[pattern]
-                try:
-                    callback(pattern, value)
-                    print(f"Called callback with existing server config: {pattern}")
-                except Exception as e:
-                    print(f"Error calling callback for server config {pattern}: {e}")
+                    print(f"Error calling callback for config {pattern}: {e}")
 
             # Return some identifier for this subscription
             return f"{pattern}:{len(self._config_callbacks[pattern])}"
@@ -890,25 +916,40 @@ class Config:
     def handle_update(self, config_name):
         """Handle a configuration update notification from the server."""
         if config_name in self._config_callbacks:
-            # Clear server cache for this config to force a fresh fetch
-            if config_name in self._server_configs:
-                del self._server_configs[config_name]
-
-            # Get the updated merged config
+            # Fetch the updated config directly from the server
             try:
-                merged_config = self.get(config_name)
+                request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+                with httpx.Client() as client:
+                    response = client.get(request_url)
+                    if response.status_code == 200:
+                        data = response.json()
+                        server_config = data["data"]
 
-                # Get just the server part for caching
-                # (The get() method will have already cached the server config)
+                        # Update the comprehensive cache
+                        if config_name in self._default_configs:
+                            default_config = self._default_configs[config_name]
+                            if isinstance(default_config, dict) and isinstance(server_config, dict):
+                                # Merge dictionaries - server config overrides defaults
+                                merged_config = copy.deepcopy(default_config)
+                                merged_config.update(copy.deepcopy(server_config))
+                                self._config_cache[config_name] = merged_config
+                            else:
+                                # If either is not a dict, server config completely overrides
+                                self._config_cache[config_name] = copy.deepcopy(server_config)
+                        else:
+                            # No default, use server config directly
+                            self._config_cache[config_name] = copy.deepcopy(server_config)
 
-                # Call all callbacks with the merged config
-                for callback in self._config_callbacks[config_name]:
-                    try:
-                        callback(config_name, "UPDATE", merged_config)
-                    except Exception as e:
-                        print(f"Error in config update callback: {e}")
+                        # Call all callbacks with the merged config
+                        for callback in self._config_callbacks[config_name]:
+                            try:
+                                callback(config_name, "UPDATE", self._config_cache[config_name])
+                            except Exception as e:
+                                print(f"Error in config update callback: {e}")
+                    else:
+                        print(f"Failed to fetch updated config {config_name}: {response.status_code}")
             except Exception as e:
-                print(f"Error fetching updated config {config_name}: {e}")
+                print(f"Error handling config update for {config_name}: {e}")
 
     def set_default(self, name, value):
         """
@@ -918,20 +959,23 @@ class Config:
         print(f"Setting default config: {name}")
         self._default_configs[name] = value
 
-        # Notify any callbacks registered for this config name
-        # if name in self._config_callbacks:
-        #     for callback in self._config_callbacks[name]:
-        #         try:
-        #             callback(name, value)
-        #             print(f"Notified callback about default config: {name}")
-        #         except Exception as e:
-        #             print(f"Error in config callback for {name}: {e}")
+        # Update the comprehensive cache
+        if self._has_server_config(name):
+            # If we have a server config, preserve the existing merged config
+            # The server config takes precedence for overlapping keys
+            pass
+        else:
+            # No server config, use default directly
+            self._config_cache[name] = copy.deepcopy(value)
 
         return value
 
-    def _on_configure(self, sender, **kwargs):
-        """Called when the agent receives its configuration."""
-        print(f"Agent {self._agent.identity} received configuration")
+    def _on_update_from_server(self, sender, **kwargs):
+        """
+        Called when the agent receives configuration updates from the server.
+        This method handles synchronizing the local config cache with the server.
+        """
+        print(f"Agent {self._agent.identity} received configuration update from server")
         configs = kwargs.get("configs", [])
 
         if not self._new_default_configs_sent:
@@ -947,35 +991,54 @@ class Config:
 
             self._new_default_configs_sent = True
 
-        # for cfg in self._default_configs.values():
-        #     if cfg.name in self._config_callbacks:
-        #         for callback in self._config_callbacks[cfg.name]:
-        #             callback(cfg.name, "NEW", cfg.value)
-
         # Process configs from server if available
         for cfg in configs:
-
             config_name = cfg.get("name")
 
-            # Get the config from server
-            config_data = self.get(config_name)
-            # .get(timeout=5)
-            self._server_configs[config_name] = config_data
+            # Fetch the config directly from the server instead of using get()
+            try:
+                request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+                with httpx.Client() as client:
+                    response = client.get(request_url)
+                    if response.status_code == 200:
+                        data = response.json()
+                        config_data = data["data"]
 
-            # Notify callbacks
-            if config_name in self._config_callbacks:
-                for callback in self._config_callbacks[config_name]:
-                    try:
-                        print(f"Calling callback for config: {config_name}")
+                        # Update our comprehensive cache
+                        if config_name in self._default_configs:
+                            default_config = self._default_configs[config_name]
+                            if isinstance(default_config, dict) and isinstance(config_data, dict):
+                                # Merge dictionaries - server config overrides defaults
+                                merged_config = copy.deepcopy(default_config)
+                                merged_config.update(copy.deepcopy(config_data))
+                                self._config_cache[config_name] = merged_config
+                            else:
+                                # If either is not a dict, server config completely overrides
+                                self._config_cache[config_name] = copy.deepcopy(config_data)
+                        else:
+                            # No default, use server config directly
+                            self._config_cache[config_name] = copy.deepcopy(config_data)
 
-                        callback(config_name, "NEW", config_data)
-                    except Exception as e:
-                        print(f"Error in config callback for {config_name}: {e}")
+                        # Notify callbacks
+                        if config_name in self._config_callbacks:
+                            for callback in self._config_callbacks[config_name]:
+                                try:
+                                    print(f"Calling callback for config: {config_name}")
+                                    callback(config_name, "UPDATE", self._config_cache[config_name])
+                                except Exception as e:
+                                    print(f"Error in config callback for {config_name}: {e}")
+                    else:
+                        print(f"Failed to fetch config {config_name}: {response.status_code}")
+            except Exception as e:
+                print(f"Error processing config update for {config_name}: {e}")
 
     def _on_connection_established(self, sender, **kwargs):
         """Called when connection to the server is established."""
         print(f"Agent {self._agent.identity} connected to server")
         self._connected = True
+
+        # Fetch all configurations for this agent's identity from the server
+        self._fetch_all_server_configs()
 
         # Set up all pending subscriptions with the server
         for subscription in self._pending_subscriptions:
@@ -990,6 +1053,38 @@ class Config:
                 self._fetch_config_for_subscription(subscription)
 
         self._pending_subscriptions = []
+
+    def _fetch_all_server_configs(self):
+        """Fetch all configurations for this agent from the server and cache them."""
+        def fetch_configs():
+            try:
+                request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/list?agent_id={self._agent.identity}"
+                with httpx.Client() as client:
+                    response = client.get(request_url)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if self._agent.identity in data["data"]:
+                            config_entries = data["data"][self._agent.identity]
+                            print(f"Found {len(config_entries)} configs for agent {self._agent.identity}")
+
+                            # Fetch each individual configuration
+                            for config_entry in config_entries:
+                                # Extract just the name from the config entry
+                                if isinstance(config_entry, dict) and "name" in config_entry:
+                                    config_name = config_entry["name"]
+                                    self._fetch_single_config(config_name)
+                                else:
+                                    # Fallback if for some reason we got a string instead of a dict
+                                    self._fetch_single_config(config_entry)
+                        else:
+                            print(f"No configs found for agent {self._agent.identity}")
+                    else:
+                        print(f"Failed to list configs: {response.status_code} - {response.text}")
+            except Exception as e:
+                print(f"Error fetching all configs: {e}")
+
+        # Run asynchronously
+        gevent.spawn(fetch_configs)
 
     def _fetch_config_for_subscription(self, subscription):
         """Fetch current config values from server for a subscription pattern."""
@@ -1014,7 +1109,22 @@ class Config:
                     if response.status_code == 200:
                         data = response.json()
                         server_config = data["data"]
-                        self._server_configs[config_name] = server_config
+
+                        # Update the comprehensive cache
+                        if config_name in self._default_configs:
+                            default_config = self._default_configs[config_name]
+                            if isinstance(default_config, dict) and isinstance(server_config, dict):
+                                # Merge dictionaries - server config overrides defaults
+                                merged_config = copy.deepcopy(default_config)
+                                merged_config.update(copy.deepcopy(server_config))
+                                self._config_cache[config_name] = merged_config
+                            else:
+                                # If either is not a dict, server config completely overrides
+                                self._config_cache[config_name] = copy.deepcopy(server_config)
+                        else:
+                            # No default, use server config directly
+                            self._config_cache[config_name] = copy.deepcopy(server_config)
+
                         print(f"Cached config for {config_name}: {server_config}")
                     else:
                         print(
@@ -1043,23 +1153,32 @@ class Config:
                 config_name = message.get("name")
                 config_value = message.get("value")
 
-                # Update our server config cache
-                if config_name and config_value is not None:
-                    if action != "DELETE":
-                        self._server_configs[config_name] = config_value
-                    elif config_name in self._server_configs:
-                        del self._server_configs[config_name]
+                # Handle different actions
+                if action == "DELETE":
+                    # For DELETE, remove from config cache if not a default
+                    if config_name in self._config_cache and config_name not in self._default_configs:
+                        del self._config_cache[config_name]
+                    elif config_name in self._config_cache and config_name in self._default_configs:
+                        # Reset to default value
+                        self._config_cache[config_name] = copy.deepcopy(self._default_configs[config_name])
+                else:
+                    # For NEW or UPDATE, update the cache with server value
+                    if config_name in self._default_configs and config_value is not None:
+                        default_config = self._default_configs[config_name]
+                        if isinstance(default_config, dict) and isinstance(config_value, dict):
+                            # Merge dictionaries - server config overrides defaults
+                            merged_config = copy.deepcopy(default_config)
+                            merged_config.update(copy.deepcopy(config_value))
+                            self._config_cache[config_name] = merged_config
+                        else:
+                            # For non-dict values, server completely overrides defaults
+                            self._config_cache[config_name] = copy.deepcopy(config_value)
+                    elif config_value is not None:
+                        # No default, use server value directly
+                        self._config_cache[config_name] = copy.deepcopy(config_value)
 
-                # Get the merged config (defaults + server)
-                merged_config = config_value  # Start with server value
-                if config_name in self._default_configs and action != "DELETE":
-                    default_config = self._default_configs[config_name]
-                    if isinstance(default_config, dict) and isinstance(config_value, dict):
-                        # Merge dictionaries - server config overrides defaults
-                        merged_config = default_config.copy()
-                        merged_config.update(config_value)
-                    # For non-dict values, server completely overrides defaults
-                    # so we keep merged_config = config_value
+                # Use the value from our cache for the callback
+                merged_config = self._config_cache.get(config_name, config_value)
 
                 # Call the callback with the merged config
                 try:
