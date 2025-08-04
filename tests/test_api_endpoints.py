@@ -117,7 +117,7 @@ class TestApiEndpoints:
 
         # Add an agent with configs
         agent = Agent(identity="config_agent", port=8888)
-        
+
         # Connect the agent
         agent.connect()
 
@@ -159,7 +159,7 @@ class TestFrameworkConnector:
 
         # Add an agent
         agent = Agent(identity="connector_test", port=8888)
-        
+
         # Connect the agent
         agent.connect()
 
@@ -195,7 +195,7 @@ class TestFrameworkConnector:
         class ReceiverAgent(Agent):
             def __init__(self, identity, **kwargs):
                 super().__init__(identity, **kwargs)
-                
+
             def on_message(self, peer, sender, bus, topic, headers, message):
                 received_messages.append(message)
 
@@ -210,7 +210,7 @@ class TestFrameworkConnector:
         # Connect the agents
         sender_agent.connect()
         receiver_agent.connect()
-        
+
         # Set up subscription after connecting
         receiver_agent.vip.pubsub.subscribe("test/topic", receiver_agent.on_message)
 

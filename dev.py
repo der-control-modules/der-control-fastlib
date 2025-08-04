@@ -824,18 +824,18 @@ def coverage():
         bool: True if all tests passed, False otherwise
     """
     print("🔄 Running tests with coverage and visual progress...")
-    
+
     # Run pytest directly (without capture_output) to show real-time progress
     # The -v flag makes pytest output each test name as it runs
     result = subprocess.run(
         ["python", "-m", "pytest", "-v", "--cov=src", "--cov-report=term", "--cov-report=html"],
         text=True
     )
-    
+
     if result.returncode != 0:
         print("❌ Error in test execution!")
         return False
-        
+
     print("✅ Coverage tests completed successfully!")
     return True
 

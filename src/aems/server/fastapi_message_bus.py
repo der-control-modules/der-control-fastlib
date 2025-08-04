@@ -6,6 +6,8 @@ import threading
 from contextlib import asynccontextmanager
 from typing import Optional
 import subprocess
+import jwt
+import datetime
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
@@ -320,6 +322,68 @@ class FastAPIMessageBus(MessageBus):
                 "active_connections": len(self.manager.active_connections),
                 "service": "aems-server",
             }
+
+        @self.app.post("/authenticate")
+        async def authenticate(request: Request):
+            """Authenticate a user with username and password."""
+            try:
+                auth_data = await request.json()
+
+                # Validate required fields
+                if "username" not in auth_data or "password" not in auth_data:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Missing required fields: username and password"
+                    )
+
+                username = auth_data["username"]
+                password = auth_data["password"]
+
+                # TODO: Implement actual authentication logic here
+                # For now, this is a placeholder that accepts any non-empty credentials
+                if username and password:
+                    # JWT configuration
+                    secret_key = os.environ.get("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+                    algorithm = "HS256"
+
+                    # Current time
+                    now = datetime.datetime.utcnow()
+
+                    # Generate access token (expires in 1 hour)
+                    access_token_payload = {
+                        "sub": username,  # subject (user identifier)
+                        "iat": now,  # issued at
+                        "exp": now + datetime.timedelta(hours=1),  # expires
+                        "type": "access"
+                    }
+                    access_token = jwt.encode(access_token_payload, secret_key, algorithm=algorithm)
+
+                    # Generate refresh token (expires in 7 days)
+                    refresh_token_payload = {
+                        "sub": username,
+                        "iat": now,
+                        "exp": now + datetime.timedelta(days=7),
+                        "type": "refresh"
+                    }
+                    refresh_token = jwt.encode(refresh_token_payload, secret_key, algorithm=algorithm)
+
+                    return {
+                        "status": "success",
+                        "message": "Authentication successful",
+                        "username": username,
+                        "token": access_token,
+                        "refresh_token": refresh_token
+                    }
+                else:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Invalid credentials"
+                    )
+
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Authentication error: {str(e)}")
 
     def start(self):
         """Start the message bus."""

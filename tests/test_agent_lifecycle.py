@@ -189,7 +189,7 @@ class TestAgentLifecycle:
 
         # Connect the agent (should trigger onstart)
         agent.connect()
-        
+
         # Give it a moment to process the event
         gevent.sleep(1)
 
@@ -197,7 +197,7 @@ class TestAgentLifecycle:
         # These should be ignored by our handler due to the prevention logic
         agent.core.fire_event("onstart", sender=agent)
         agent.core.fire_event("onstart", sender=agent)
-        
+
         # Give it a moment to process the events
         gevent.sleep(1)
 
@@ -207,7 +207,7 @@ class TestAgentLifecycle:
         # Clean up
         agent.disconnect()
         message_bus.stop()
-        
+
     def test_manual_start_stop(self, message_bus):
         """Test manually starting and stopping an agent."""
         message_bus.start()
