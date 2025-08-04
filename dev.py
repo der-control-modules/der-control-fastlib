@@ -560,17 +560,17 @@ def sync_fork():
 def create_pr_branch(branch_name=None):
     """
     Create a new branch for pull request from up-to-date develop branch.
-    
+
     Creates a new branch from the develop branch (or main if develop doesn't exist)
     for developing a new feature or fix. Automatically syncs with upstream first
     to ensure the branch is created from the latest code.
-    
+
     Args:
         branch_name (str): Name for the new branch (e.g., 'feature/new-feature')
-        
+
     Returns:
         bool: True if the branch was created successfully, False otherwise
-        
+
     Examples:
         >>> create_pr_branch("feature/add-new-api")
         >>> create_pr_branch("fix/issue-123")
@@ -615,14 +615,14 @@ def create_pr_branch(branch_name=None):
 def prepare_pr():
     """
     Prepare current branch for pull request.
-    
+
     Runs quality checks, ensures there are commits on the branch,
     and pushes the branch to the remote repository if needed.
     This helps ensure the branch is ready for a pull request.
-    
+
     Returns:
         bool: True if the branch is ready for PR, False otherwise
-        
+
     Notes:
         - Won't allow preparing main or develop branches
         - Runs quality checks (format, lint, test)
@@ -701,10 +701,10 @@ def prepare_pr():
 def install():
     """
     Install the package in development mode with dev dependencies.
-    
+
     Installs the package using pip's editable mode (-e) with development
     dependencies included. This is equivalent to `pip install -e .[dev]`.
-    
+
     Returns:
         bool: True if installation was successful, False otherwise
     """
@@ -716,11 +716,11 @@ def install():
 def install_prod():
     """
     Install only production dependencies and remove dev tools.
-    
+
     Removes all development dependencies and installs only the production
     dependencies. This is useful for testing a clean production environment
     or preparing for deployment.
-    
+
     Returns:
         bool: True if installation was successful, False otherwise
     """
@@ -741,10 +741,10 @@ def install_prod():
 def update():
     """
     Update all development dependencies to latest compatible versions.
-    
+
     Iterates through the development dependencies and updates each one
     to the latest version compatible with the specified constraints.
-    
+
     Returns:
         bool: True if all updates were successful, False otherwise
     """
@@ -764,10 +764,10 @@ def update():
 def format_code():
     """
     Format code with Black.
-    
+
     Runs the Black code formatter on the source and test directories to
     ensure consistent code style across the project.
-    
+
     Returns:
         bool: True if formatting was successful, False otherwise
     """
@@ -777,23 +777,23 @@ def format_code():
 def lint():
     """
     Run linting checks.
-    
+
     Executes both Pylint and flake8 on the source code to identify
     potential issues, bugs, and stylistic problems.
-    
+
     Returns:
         bool: True if all linting checks passed, False otherwise
     """
     print("🔍 Running linting checks...")
-    
+
     print("🔄 Running Pylint...")
     pylint_process = subprocess.run("pylint src/", shell=True, text=True)
     pylint_ok = pylint_process.returncode == 0
-    
+
     print("\n🔄 Running flake8...")
     flake8_process = subprocess.run("flake8 src/", shell=True, text=True)
     flake8_ok = flake8_process.returncode == 0
-    
+
     if pylint_ok and flake8_ok:
         print("✅ Linting passed!")
         return True
@@ -805,10 +805,10 @@ def lint():
 def test():
     """
     Run tests.
-    
-    Executes the project's test suite using pytest to verify that 
+
+    Executes the project's test suite using pytest to verify that
     the code functions correctly.
-    
+
     Returns:
         bool: True if all tests passed, False otherwise
     """
@@ -818,13 +818,13 @@ def test():
 def security():
     """
     Run security scans.
-    
+
     Performs security scanning on both the code and dependencies to
     identify potential security vulnerabilities.
-    
+
     Returns:
         bool: True if all security checks passed, False otherwise
-        
+
     Notes:
         - Uses pip-audit to scan dependencies for vulnerabilities
         - Uses bandit to scan the codebase for security issues
@@ -847,11 +847,11 @@ def security():
 def build():
     """
     Build wheel package.
-    
+
     Creates a Python wheel package by cleaning previous builds and
     running the build process. The resulting wheel is placed in the
     dist/ directory.
-    
+
     Returns:
         bool: True if the build was successful, False otherwise
     """
@@ -875,11 +875,11 @@ def build():
 def check():
     """
     Run format, lint, and test.
-    
+
     Comprehensive quality check that runs code formatting,
     linting, and tests in sequence. This is useful before
     committing code or preparing a pull request.
-    
+
     Returns:
         bool: True if all checks passed, False otherwise
     """
@@ -899,7 +899,7 @@ def check():
 def show_help():
     """
     Show available commands.
-    
+
     Displays comprehensive help information about all available
     commands, their purposes, and examples of how to use them.
     """
@@ -966,16 +966,16 @@ Examples:
 def main():
     """
     Main entry point for the development helper script.
-    
+
     Parses command line arguments and dispatches to the appropriate
     function based on the command. Handles special cases for commands
     that require additional arguments.
-    
+
     Command dispatch logic:
     1. No command or 'help': Show help information
     2. Special case commands (version, trigger-update, etc.): Handle with args
     3. Standard commands: Dispatch to corresponding function
-    
+
     Exit codes:
     - 0: Command executed successfully
     - 1: Command failed or invalid command
