@@ -42,7 +42,8 @@ def test_config_update_notification_sent(message_bus):
         print("3. Storing configuration (should trigger UPDATE notification)...")
         # Store a config - this should trigger the UPDATE notification
         test_config = {"test": "data", "timestamp": gevent.time.time()}
-        agent.config.set("notification_test_config", test_config)
+        # Use send_update=False to avoid duplicate notifications (one from set, one from server)
+        agent.config.set("notification_test_config", test_config, send_update=False)
 
         print("4. Waiting for UPDATE notification...")
         gevent.sleep(2)  # Wait for the notification to be processed
@@ -100,14 +101,16 @@ def test_config_update_notification_multiple_subscribers(message_bus):
 
         print("3. Agent1 storing its own config (should only notify agent1)...")
         # Agent1 stores its own config - only agent1 should be notified
-        agent1.config.set("shared_name_config", {"updated_by": "agent1", "data": "agent1_data"})
+        # Use send_update=False to avoid duplicate notifications (one from set, one from server)
+        agent1.config.set("shared_name_config", {"updated_by": "agent1", "data": "agent1_data"}, send_update=False)
 
         print("4. Waiting for notifications...")
         gevent.sleep(2)
 
         print("5. Agent2 storing its own config (should only notify agent2)...")
         # Agent2 stores its own config - only agent2 should be notified
-        agent2.config.set("shared_name_config", {"updated_by": "agent2", "data": "agent2_data"})
+        # Use send_update=False to avoid duplicate notifications
+        agent2.config.set("shared_name_config", {"updated_by": "agent2", "data": "agent2_data"}, send_update=False)
 
         print("6. Waiting for notifications...")
         gevent.sleep(2)

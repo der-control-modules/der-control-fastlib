@@ -353,8 +353,20 @@ class FastAPIMessageBus(MessageBus):
 
     def _run_server(self):
         """Run the uvicorn server."""
-        self.server.run()
-        self.running = False
+        try:
+            # Since we're in a separate thread, we need to create our own event loop
+            # This avoids conflicts with any existing event loop in the main thread
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                new_loop.run_until_complete(self.server.serve())
+            finally:
+                new_loop.close()
+        except Exception as e:
+            print(f"Error running server: {e}")
+            raise
+        finally:
+            self.running = False
 
     def stop(self):
         """Stop the message bus."""

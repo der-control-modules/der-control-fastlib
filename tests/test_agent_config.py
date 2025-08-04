@@ -31,9 +31,9 @@ class TestAgentConfig:
         gevent.sleep(1)
 
         # Clear any cached configs from previous tests
-        self.agent.vip.config._server_configs.clear()
+        self.agent.vip.config._config_cache.clear()
         self.agent.vip.config._default_configs.clear()
-        self.config_agent.vip.config._server_configs.clear()
+        self.config_agent.vip.config._config_cache.clear()
         self.config_agent.vip.config._default_configs.clear()
 
         # Clear server-side configs for this agent to ensure clean test state
@@ -44,12 +44,12 @@ class TestAgentConfig:
         # Cleanup
         if hasattr(self, "agent"):
             # Clear config caches before disconnecting
-            self.agent.vip.config._server_configs.clear()
+            self.agent.vip.config._config_cache.clear()
             self.agent.vip.config._default_configs.clear()
             self.agent.disconnect()
         if hasattr(self, "config_agent"):
             # Clear config caches before disconnecting
-            self.config_agent.vip.config._server_configs.clear()
+            self.config_agent.vip.config._config_cache.clear()
             self.config_agent.vip.config._default_configs.clear()
             self.config_agent.disconnect()
 
@@ -253,14 +253,9 @@ class TestAgentConfig:
         list_result = self.config_agent.vip.config.list()
         config_list = list_result.get(timeout=5)
 
-        # Extract config names from the list
-        config_names = [config["name"] for config in config_list]
-
-        # Verify all configs are listed
+        # Verify all configs are listed (config_list is now just a list of config names)
         for config_name in configs.keys():
-            assert (
-                config_name in config_names
-            ), f"Config '{config_name}' should be in list: {config_names}"
+            assert config_name in config_list, f"Config '{config_name}' should be in list: {config_list}"
 
     def test_config_validation(self):
         """Test configuration validation."""
