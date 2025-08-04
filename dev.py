@@ -402,8 +402,8 @@ def run_command(cmd, description=None):
     if description:
         print(f"🔄 {description}...")
 
-    # Run the command without capturing output to show it directly
-    process = subprocess.Popen(
+    # Run the command and capture output
+    process = subprocess.run(
         cmd,
         shell=True,
         stdout=subprocess.PIPE,
@@ -411,16 +411,14 @@ def run_command(cmd, description=None):
         text=True
     )
 
-    stdout, stderr = process.communicate()
-
     if process.returncode != 0:
-        print("❌ Error: ")
-        if stderr:
-            print(stderr)
+        print("❌ Error:")
+        if process.stderr:
+            print(process.stderr)
         return False
 
-    if stdout:
-        print(stdout)
+    if process.stdout:
+        print(process.stdout)
 
     return process.returncode == 0
 
@@ -815,6 +813,33 @@ def test():
     return run_command("pytest", "Running tests")
 
 
+def coverage():
+    """
+    Run tests with coverage reporting.
+
+    Executes the project's test suite using pytest with the coverage plugin
+    to measure code coverage and generate a detailed report with visual progress.
+
+    Returns:
+        bool: True if all tests passed, False otherwise
+    """
+    print("🔄 Running tests with coverage and visual progress...")
+    
+    # Run pytest directly (without capture_output) to show real-time progress
+    # The -v flag makes pytest output each test name as it runs
+    result = subprocess.run(
+        ["python", "-m", "pytest", "-v", "--cov=src", "--cov-report=term", "--cov-report=html"],
+        text=True
+    )
+    
+    if result.returncode != 0:
+        print("❌ Error in test execution!")
+        return False
+        
+    print("✅ Coverage tests completed successfully!")
+    return True
+
+
 def security():
     """
     Run security scans.
@@ -912,6 +937,7 @@ def show_help():
   format          Format code with Black
   lint            Run Pylint and flake8
   test            Run tests
+  coverage        Run tests with coverage reporting and visual progress
   security        Run security scans (pip-audit + bandit)
   build           Build wheel package
   check           Run format + lint + test
@@ -1024,6 +1050,7 @@ def main():
         'format': format_code,
         'lint': lint,
         'test': test,
+        'coverage': coverage,
         'security': security,
         'build': build,
         'check': check,
