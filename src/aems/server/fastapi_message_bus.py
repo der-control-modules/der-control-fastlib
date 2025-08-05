@@ -333,9 +333,9 @@ class FastAPIMessageBus(MessageBus):
             try:
                 auth_data = None
                 content_type = request.headers.get("content-type", "").lower()
-                
+
                 _log.debug(f"Content-Type: {content_type}")
-                
+
                 # Handle different content types
                 if "application/x-www-form-urlencoded" in content_type:
                     # This is the case for requests.post with data parameter
@@ -373,9 +373,9 @@ class FastAPIMessageBus(MessageBus):
                         status_code=400,
                         detail="No data received in request"
                     )
-                
+
                 _log.debug(f"Final auth data: {auth_data}")
-                
+
                 # Validate required fields
                 if "username" not in auth_data or "password" not in auth_data:
                     raise HTTPException(
@@ -700,10 +700,10 @@ def _main():
 
     if is_debugger_attached():
         print("Debugger detected - using direct uvicorn.run() for better debugging support")
-        
+
         # Create the FastAPI app directly for uvicorn.run()
         server = FastAPIMessageBus(host=args.host, port=args.port, config_store_dir=config_dir, reload=args.reload)
-        
+
         # Use uvicorn.run() directly for debugging
         uvicorn.run(
             server.app,

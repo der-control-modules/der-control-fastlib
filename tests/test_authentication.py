@@ -14,35 +14,35 @@ class TestAuthentication:
     def test_authenticate_form_data_success(self, message_bus):
         """Test successful authentication with form data."""
         base_url = f'http://{message_bus.host}:{message_bus.port}'
-        
+
         # Test with form data (as used in the user's example)
         form_data = {'username': 'admin', 'password': 'admin'}
-        
+
         response = httpx.post(
             f'{base_url}/authenticate',
             data=form_data,
             timeout=10.0
         )
-        
+
         assert response.status_code == 200
         data = response.json()
-        
+
         # Check response structure
         assert 'status' in data
         assert 'message' in data
         assert 'username' in data
         assert 'access_token' in data
         assert 'refresh_token' in data
-        
+
         # Check response values
         assert data['status'] == 'success'
         assert data['message'] == 'Authentication successful'
         assert data['username'] == 'admin'
-        
+
         # Verify tokens are present and non-empty
         assert data['access_token']
         assert data['refresh_token']
-        
+
         # Verify tokens are valid JWT format (should have 3 parts separated by dots)
         assert len(data['access_token'].split('.')) == 3
         assert len(data['refresh_token'].split('.')) == 3
@@ -50,31 +50,31 @@ class TestAuthentication:
     def test_authenticate_json_data_success(self, message_bus):
         """Test successful authentication with JSON data."""
         base_url = f'http://{message_bus.host}:{message_bus.port}'
-        
+
         # Test with JSON data
         auth_data = {'username': 'testuser', 'password': 'testpass'}
-        
+
         response = httpx.post(f'{base_url}/authenticate', json=auth_data, timeout=10.0)
-        
+
         assert response.status_code == 200
         data = response.json()
-        
+
         # Check response structure
         assert 'status' in data
         assert 'message' in data
         assert 'username' in data
         assert 'access_token' in data
         assert 'refresh_token' in data
-        
+
         # Check response values
         assert data['status'] == 'success'
         assert data['message'] == 'Authentication successful'
         assert data['username'] == 'testuser'
-        
+
         # Verify tokens are present and non-empty
         assert data['access_token']
         assert data['refresh_token']
-        
+
         # Verify tokens are valid JWT format (should have 3 parts separated by dots)
         assert len(data['access_token'].split('.')) == 3
         assert len(data['refresh_token'].split('.')) == 3
@@ -128,12 +128,12 @@ class TestAuthentication:
     def test_authenticate_missing_username_json(self, message_bus):
         """Test authentication with missing username in JSON data."""
         base_url = f'http://{message_bus.host}:{message_bus.port}'
-        
+
         # Missing username
         auth_data = {'password': 'testpass'}
-        
+
         response = httpx.post(f'{base_url}/authenticate', json=auth_data, timeout=10.0)
-        
+
         assert response.status_code == 400
         data = response.json()
         assert 'Missing required fields' in data['detail']
@@ -141,12 +141,12 @@ class TestAuthentication:
     def test_authenticate_missing_username_form(self, message_bus):
         """Test authentication with missing username in form data."""
         base_url = f'http://{message_bus.host}:{message_bus.port}'
-        
+
         # Missing username
         form_data = {'password': 'testpass'}
-        
+
         response = httpx.post(f'{base_url}/authenticate', data=form_data, timeout=10.0)
-        
+
         assert response.status_code == 400
         data = response.json()
         assert 'Missing required fields' in data['detail']
@@ -154,12 +154,12 @@ class TestAuthentication:
     def test_authenticate_missing_password_json(self, message_bus):
         """Test authentication with missing password in JSON data."""
         base_url = f'http://{message_bus.host}:{message_bus.port}'
-        
+
         # Missing password
         auth_data = {'username': 'testuser'}
-        
+
         response = httpx.post(f'{base_url}/authenticate', json=auth_data, timeout=10.0)
-        
+
         assert response.status_code == 400
         data = response.json()
         assert 'Missing required fields' in data['detail']
@@ -167,12 +167,12 @@ class TestAuthentication:
     def test_authenticate_missing_password_form(self, message_bus):
         """Test authentication with missing password in form data."""
         base_url = f'http://{message_bus.host}:{message_bus.port}'
-        
+
         # Missing password
         form_data = {'username': 'testuser'}
-        
+
         response = httpx.post(f'{base_url}/authenticate', data=form_data, timeout=10.0)
-        
+
         assert response.status_code == 400
         data = response.json()
         assert 'Missing required fields' in data['detail']
@@ -196,12 +196,12 @@ class TestAuthentication:
     def test_authenticate_empty_credentials_json(self, message_bus):
         """Test authentication with empty credentials in JSON data."""
         base_url = f'http://{message_bus.host}:{message_bus.port}'
-        
+
         # Empty credentials
         auth_data = {'username': '', 'password': ''}
-        
+
         response = httpx.post(f'{base_url}/authenticate', json=auth_data, timeout=10.0)
-        
+
         assert response.status_code == 401
         data = response.json()
         assert 'Invalid credentials' in data['detail']
@@ -209,12 +209,12 @@ class TestAuthentication:
     def test_authenticate_empty_credentials_form(self, message_bus):
         """Test authentication with empty credentials in form data."""
         base_url = f'http://{message_bus.host}:{message_bus.port}'
-        
+
         # Empty credentials
         form_data = {'username': '', 'password': ''}
-        
+
         response = httpx.post(f'{base_url}/authenticate', data=form_data, timeout=10.0)
-        
+
         assert response.status_code == 401
         data = response.json()
         assert 'Invalid credentials' in data['detail']
@@ -275,22 +275,22 @@ class TestAuthentication:
     def test_authenticate_user_example(self, message_bus):
         """Test authentication exactly as in the user's example."""
         base_url = f'http://{message_bus.host}:{message_bus.port}'
-        
+
         # Test exactly as the user's example using httpx.post with data parameter
         response = httpx.post(
             f'{base_url}/authenticate',
             data={'username': 'admin', 'password': 'admin'},
             timeout=10.0
         )
-        
+
         assert response.status_code == 200
         data = response.json()
-        
+
         # Should be able to extract access_token like in user's example
         access_token = data['access_token']  # This should work exactly as user expects
         assert access_token
         assert len(access_token.split('.')) == 3  # Valid JWT format
-        
+
         # Verify full response structure
         assert data['status'] == 'success'
         assert data['username'] == 'admin'
