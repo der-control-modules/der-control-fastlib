@@ -1,6 +1,7 @@
 # fastapi_message_bus.py
 
 import asyncio
+import logging
 import os
 import threading
 from contextlib import asynccontextmanager
@@ -22,6 +23,9 @@ from aems.server.models import MessageBus, Message
 from aems.server.connection_manager import ConnectionManager
 from aems.server.config_store import ConfigStore
 
+logging.basicConfig(level=logging.DEBUG)
+_log = logging.getLogger(__name__)
+_log.setLevel(logging.DEBUG)
 
 def get_package_version():
     """Get the current package version."""
@@ -327,8 +331,51 @@ class FastAPIMessageBus(MessageBus):
         async def authenticate(request: Request):
             """Authenticate a user with username and password."""
             try:
-                auth_data = await request.json()
+                auth_data = None
+                content_type = request.headers.get("content-type", "").lower()
+                
+                _log.debug(f"Content-Type: {content_type}")
+                
+                # Handle different content types
+                if "application/x-www-form-urlencoded" in content_type:
+                    # This is the case for requests.post with data parameter
+                    form_data = await request.form()
+                    auth_data = dict(form_data)
+                    _log.debug(f"Parsed form data: {auth_data}")
+                elif "application/json" in content_type:
+                    # This is for JSON requests
+                    auth_data = await request.json()
+                    _log.debug(f"Parsed JSON data: {auth_data}")
+                else:
+                    # Try to determine the format by attempting to parse
+                    try:
+                        # First try form data (most common for requests.post with data=)
+                        form_data = await request.form()
+                        if form_data:
+                            auth_data = dict(form_data)
+                            _log.debug(f"Fallback parsed form data: {auth_data}")
+                        else:
+                            # If form data is empty, try JSON
+                            body = await request.body()
+                            if body:
+                                import json
+                                auth_data = json.loads(body.decode())
+                                _log.debug(f"Fallback parsed JSON data: {auth_data}")
+                    except Exception as parse_error:
+                        _log.error(f"Failed to parse request data: {parse_error}")
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Unable to parse request data: {str(parse_error)}"
+                        )
 
+                if not auth_data:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No data received in request"
+                    )
+                
+                _log.debug(f"Final auth data: {auth_data}")
+                
                 # Validate required fields
                 if "username" not in auth_data or "password" not in auth_data:
                     raise HTTPException(
@@ -371,7 +418,7 @@ class FastAPIMessageBus(MessageBus):
                         "status": "success",
                         "message": "Authentication successful",
                         "username": username,
-                        "token": access_token,
+                        "access_token": access_token,
                         "refresh_token": refresh_token
                     }
                 else:
@@ -381,9 +428,112 @@ class FastAPIMessageBus(MessageBus):
                     )
 
             except ValueError as e:
-                raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Invalid request data: {str(e)}")
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Authentication error: {str(e)}")
+
+        @self.app.post("/gs")
+        async def rpc_endpoint(request: Request):
+            """Handle JSON-RPC 2.0 requests and route them to connected agents."""
+            try:
+                rpc_data = await request.json()
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
+
+            # Validate JSON-RPC 2.0 format
+            if "jsonrpc" not in rpc_data or rpc_data["jsonrpc"] != "2.0":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid JSON-RPC format. Must include 'jsonrpc': '2.0'"
+                )
+
+            if "id" not in rpc_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing required field: 'id' (agent identifier)"
+                )
+
+            if "method" not in rpc_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing required field: 'method'"
+                )
+
+            agent_id = rpc_data["id"]
+            method = rpc_data["method"]
+            params = rpc_data.get("params", {})
+
+            # Extract authentication and data from params
+            authentication = params.get("authentication")
+            data = params.get("data", {})
+
+            # Check if the target agent is connected
+            if agent_id not in self.manager.active_connections:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Agent '{agent_id}' is not connected"
+                )
+
+            # Generate a unique message ID for this RPC call
+            import uuid
+            import asyncio
+            msg_id = str(uuid.uuid4())
+
+            try:
+                # Register a future for the RPC response
+                future = self.manager.register_rpc_response_future(msg_id)
+
+                # Create and send the RPC message directly
+                rpc_message = {
+                    "type": "rpc",
+                    "method": method,
+                    "args": [data] if data else [],
+                    "kwargs": {"authentication": authentication} if authentication else {},
+                    "msg_id": msg_id,
+                }
+
+                print(f"DEBUG: Sending HTTP RPC request to {agent_id}: {method}")
+                await self.manager.send_message(agent_id, rpc_message)
+
+                # Wait for the response (with timeout)
+                try:
+                    result = await asyncio.wait_for(
+                        future,
+                        timeout=30.0  # 30 second timeout
+                    )
+
+                    # Return JSON-RPC 2.0 success response
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": rpc_data.get("id"),
+                        "result": result
+                    }
+
+                except asyncio.TimeoutError:
+                    # Clean up the future
+                    self.manager.clear_rpc_response(msg_id)
+                    # Return JSON-RPC 2.0 error response for timeout
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": rpc_data.get("id"),
+                        "error": {
+                            "code": -32603,
+                            "message": "Internal error: RPC call timed out"
+                        }
+                    }
+
+            except Exception as rpc_error:
+                # Clean up the future if it was created
+                self.manager.clear_rpc_response(msg_id)
+                # Return JSON-RPC 2.0 error response
+                return {
+                    "jsonrpc": "2.0",
+                    "id": rpc_data.get("id"),
+                    "error": {
+                        "code": -32603,
+                        "message": f"Internal error: {str(rpc_error)}"
+                    }
+                }
 
     def start(self):
         """Start the message bus."""
@@ -505,6 +655,7 @@ def _main():
     """Main entry point for running the server from command line."""
     import argparse
     import os
+    import sys
 
     parser = argparse.ArgumentParser(description="AEMS Message Bus Server")
     parser.add_argument("--host", default="127.0.0.1", help="Host address to bind to")
@@ -533,18 +684,47 @@ def _main():
     if not config_dir and args.volttron_home:
         config_dir = os.path.join(args.volttron_home, "aems_config_store")
 
-    # Start the server
-    server = start_server(args.host, args.port, config_dir)
+    # Check if running under debugger
+    def is_debugger_attached():
+        """Check if a debugger is attached."""
+        # Check for common debugger indicators
+        if hasattr(sys, 'gettrace') and sys.gettrace() is not None:
+            return True
+        # Check for debugpy (VS Code debugger)
+        if 'debugpy' in sys.modules:
+            return True
+        # Check for pdb
+        if 'pdb' in sys.modules:
+            return True
+        return False
 
-    try:
-        # Keep the main thread alive
-        import time
+    if is_debugger_attached():
+        print("Debugger detected - using direct uvicorn.run() for better debugging support")
+        
+        # Create the FastAPI app directly for uvicorn.run()
+        server = FastAPIMessageBus(host=args.host, port=args.port, config_store_dir=config_dir, reload=args.reload)
+        
+        # Use uvicorn.run() directly for debugging
+        uvicorn.run(
+            server.app,
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+            log_level="debug"
+        )
+    else:
+        # Use the threaded approach for production
+        server = start_server(args.host, args.port, config_dir)
 
-        while server.is_running():
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("Stopping server...")
-        server.stop()
+        try:
+            # Keep the main thread alive
+            import time
+
+            while server.is_running():
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("Stopping server...")
+            server.stop()
 
 
 if __name__ == "__main__":
