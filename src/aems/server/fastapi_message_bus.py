@@ -1,6 +1,7 @@
 # fastapi_message_bus.py
 
 import asyncio
+import json
 import logging
 import os
 import threading
@@ -266,9 +267,9 @@ class FastAPIMessageBus(MessageBus):
         @self.app.put("/config-store/{agent_id}/{config_name}")
         async def store_config(agent_id: str, config_name: str, request: Request):
             """Store a configuration for an agent."""
-            try:
-                content_type = request.headers.get("Content-Type", "application/json")
+            content_type = request.headers.get("Content-Type", "application/json")
 
+            try:
                 if "json" in content_type:
                     # Process as JSON
                     config_data = await request.json()
@@ -282,18 +283,30 @@ class FastAPIMessageBus(MessageBus):
                     # Default to JSON
                     config_data = await request.json()
                     success = self.config_store.store(agent_id, config_name, config_data, "json")
+            except ValueError as json_error:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid JSON data: {str(json_error)}"
+                )
+            except UnicodeDecodeError as decode_error:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid text encoding: {str(decode_error)}"
+                )
 
-                if success:
-                    # Notify the agent of the config update if it's connected
-                    if agent_id in self.manager.active_connections:
+            if success:
+                # Notify the agent of the config update if it's connected
+                if agent_id in self.manager.active_connections:
+                    try:
                         await self.manager.send_message(
                             agent_id, {"type": "config_update", "config_name": config_name}
                         )
-                    return {"status": "success"}
-                else:
-                    raise HTTPException(status_code=500, detail="Failed to store configuration")
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid config data: {str(e)}")
+                    except ConnectionError:
+                        # Agent disconnected between check and notification - that's okay
+                        _log.warning(f"Agent {agent_id} disconnected during config update notification")
+                return {"status": "success"}
+            else:
+                raise HTTPException(status_code=500, detail="Failed to store configuration")
 
         @self.app.delete("/config-store/{agent_id}/{config_name}")
         async def delete_config(agent_id: str, config_name: str):
@@ -302,9 +315,13 @@ class FastAPIMessageBus(MessageBus):
             if success:
                 # Notify the agent of the config deletion if it's connected
                 if agent_id in self.manager.active_connections:
-                    await self.manager.send_message(
-                        agent_id, {"type": "config_delete", "config_name": config_name}
-                    )
+                    try:
+                        await self.manager.send_message(
+                            agent_id, {"type": "config_delete", "config_name": config_name}
+                        )
+                    except ConnectionError:
+                        # Agent disconnected between check and notification - that's okay
+                        _log.warning(f"Agent {agent_id} disconnected during config delete notification")
                 return {"status": "success"}
             else:
                 raise HTTPException(
@@ -330,65 +347,76 @@ class FastAPIMessageBus(MessageBus):
         @self.app.post("/authenticate")
         async def authenticate(request: Request):
             """Authenticate a user with username and password."""
-            try:
-                auth_data = None
-                content_type = request.headers.get("content-type", "").lower()
+            auth_data = None
+            content_type = request.headers.get("content-type", "").lower()
 
-                _log.debug(f"Content-Type: {content_type}")
+            _log.debug(f"Content-Type: {content_type}")
 
-                # Handle different content types
-                if "application/x-www-form-urlencoded" in content_type:
-                    # This is the case for requests.post with data parameter
+            # Handle different content types
+            if "application/x-www-form-urlencoded" in content_type:
+                # This is the case for requests.post with data parameter
+                try:
                     form_data = await request.form()
                     auth_data = dict(form_data)
                     _log.debug(f"Parsed form data: {auth_data}")
-                elif "application/json" in content_type:
-                    # This is for JSON requests
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid form data: {str(e)}"
+                    )
+            elif "application/json" in content_type:
+                # This is for JSON requests
+                try:
                     auth_data = await request.json()
                     _log.debug(f"Parsed JSON data: {auth_data}")
-                else:
-                    # Try to determine the format by attempting to parse
-                    try:
-                        # First try form data (most common for requests.post with data=)
-                        form_data = await request.form()
-                        if form_data:
-                            auth_data = dict(form_data)
-                            _log.debug(f"Fallback parsed form data: {auth_data}")
-                        else:
-                            # If form data is empty, try JSON
-                            body = await request.body()
-                            if body:
-                                import json
-                                auth_data = json.loads(body.decode())
-                                _log.debug(f"Fallback parsed JSON data: {auth_data}")
-                    except Exception as parse_error:
-                        _log.error(f"Failed to parse request data: {parse_error}")
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Unable to parse request data: {str(parse_error)}"
-                        )
-
-                if not auth_data:
+                except ValueError as e:
                     raise HTTPException(
                         status_code=400,
-                        detail="No data received in request"
+                        detail=f"Invalid JSON data: {str(e)}"
                     )
-
-                _log.debug(f"Final auth data: {auth_data}")
-
-                # Validate required fields
-                if "username" not in auth_data or "password" not in auth_data:
+            else:
+                # Try to determine the format by attempting to parse
+                try:
+                    # First try form data (most common for requests.post with data=)
+                    form_data = await request.form()
+                    if form_data:
+                        auth_data = dict(form_data)
+                        _log.debug(f"Fallback parsed form data: {auth_data}")
+                    else:
+                        # If form data is empty, try JSON
+                        body = await request.body()
+                        if body:
+                            auth_data = json.loads(body.decode())
+                            _log.debug(f"Fallback parsed JSON data: {auth_data}")
+                except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as parse_error:
+                    _log.error(f"Failed to parse request data: {parse_error}")
                     raise HTTPException(
                         status_code=400,
-                        detail="Missing required fields: username and password"
+                        detail=f"Unable to parse request data: {str(parse_error)}"
                     )
 
-                username = auth_data["username"]
-                password = auth_data["password"]
+            if not auth_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No data received in request"
+                )
 
-                # TODO: Implement actual authentication logic here
-                # For now, this is a placeholder that accepts any non-empty credentials
-                if username and password:
+            _log.debug(f"Final auth data: {auth_data}")
+
+            # Validate required fields
+            if "username" not in auth_data or "password" not in auth_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing required fields: username and password"
+                )
+
+            username = auth_data["username"]
+            password = auth_data["password"]
+
+            # TODO: Implement actual authentication logic here
+            # For now, this is a placeholder that accepts any non-empty credentials
+            if username and password:
+                try:
                     # JWT configuration
                     secret_key = os.environ.get("JWT_SECRET_KEY", "your-secret-key-change-in-production")
                     algorithm = "HS256"
@@ -421,20 +449,22 @@ class FastAPIMessageBus(MessageBus):
                         "access_token": access_token,
                         "refresh_token": refresh_token
                     }
-                else:
+                except (jwt.InvalidTokenError, jwt.PyJWTError) as jwt_error:
+                    _log.error(f"JWT encoding error: {jwt_error}")
                     raise HTTPException(
-                        status_code=401,
-                        detail="Invalid credentials"
+                        status_code=500,
+                        detail="Token generation failed"
                     )
-
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=f"Invalid request data: {str(e)}")
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Authentication error: {str(e)}")
+            else:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid credentials"
+                )
 
         @self.app.post("/gs")
         async def rpc_endpoint(request: Request):
             """Handle JSON-RPC 2.0 requests and route them to connected agents."""
+            # Parse JSON request
             try:
                 rpc_data = await request.json()
             except ValueError as e:
@@ -479,10 +509,10 @@ class FastAPIMessageBus(MessageBus):
             import asyncio
             msg_id = str(uuid.uuid4())
 
-            try:
-                # Register a future for the RPC response
-                future = self.manager.register_rpc_response_future(msg_id)
+            # Register a future for the RPC response
+            future = self.manager.register_rpc_response_future(msg_id)
 
+            try:
                 # Create and send the RPC message directly
                 rpc_message = {
                     "type": "rpc",
@@ -522,16 +552,40 @@ class FastAPIMessageBus(MessageBus):
                         }
                     }
 
-            except Exception as rpc_error:
-                # Clean up the future if it was created
+            except KeyError as key_error:
+                # Clean up the future
                 self.manager.clear_rpc_response(msg_id)
-                # Return JSON-RPC 2.0 error response
+                _log.error(f"Missing key in RPC processing: {key_error}")
+                return {
+                    "jsonrpc": "2.0",
+                    "id": rpc_data.get("id"),
+                    "error": {
+                        "code": -32602,
+                        "message": f"Invalid params: missing {str(key_error)}"
+                    }
+                }
+            except ConnectionError as conn_error:
+                # Clean up the future
+                self.manager.clear_rpc_response(msg_id)
+                _log.error(f"Connection error during RPC: {conn_error}")
                 return {
                     "jsonrpc": "2.0",
                     "id": rpc_data.get("id"),
                     "error": {
                         "code": -32603,
-                        "message": f"Internal error: {str(rpc_error)}"
+                        "message": "Internal error: Connection failed"
+                    }
+                }
+            except Exception as rpc_error:
+                # Clean up the future - this is our fallback for truly unexpected errors
+                self.manager.clear_rpc_response(msg_id)
+                _log.error(f"Unexpected error in RPC processing: {type(rpc_error).__name__}: {rpc_error}")
+                return {
+                    "jsonrpc": "2.0",
+                    "id": rpc_data.get("id"),
+                    "error": {
+                        "code": -32603,
+                        "message": "Internal error: Unexpected error occurred"
                     }
                 }
 
@@ -568,18 +622,25 @@ class FastAPIMessageBus(MessageBus):
     def _run_server(self):
         """Run the uvicorn server."""
         try:
+            print(f"DEBUG: Starting server thread for {self.host}:{self.port}")
             # Since we're in a separate thread, we need to create our own event loop
             # This avoids conflicts with any existing event loop in the main thread
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
             try:
+                print("DEBUG: About to start uvicorn server...")
                 new_loop.run_until_complete(self.server.serve())
+                print("DEBUG: Uvicorn server finished serving")
             finally:
+                print("DEBUG: Closing event loop")
                 new_loop.close()
         except Exception as e:
             print(f"Error running server: {e}")
+            import traceback
+            traceback.print_exc()
             raise
         finally:
+            print("DEBUG: Server thread ending, setting running=False")
             self.running = False
 
     def stop(self):
@@ -687,8 +748,17 @@ def _main():
     # Check if running under debugger
     def is_debugger_attached():
         """Check if a debugger is attached."""
+        # Skip debugger detection if we're in a test environment
+        if 'pytest' in sys.modules or 'unittest' in sys.modules:
+            return False
+
         # Check for common debugger indicators
         if hasattr(sys, 'gettrace') and sys.gettrace() is not None:
+            # Make sure it's not just pytest's trace function
+            tracer = sys.gettrace()
+            if tracer and hasattr(tracer, '__name__'):
+                if 'pytest' in tracer.__name__ or 'coverage' in tracer.__name__:
+                    return False
             return True
         # Check for debugpy (VS Code debugger)
         if 'debugpy' in sys.modules:
