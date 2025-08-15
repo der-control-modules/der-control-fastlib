@@ -2,7 +2,7 @@
 
 import asyncio
 import re
-from typing import Dict, List, Callable, Pattern, Any, Tuple
+from typing import Any, Callable, Dict, List, Pattern, Tuple
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState

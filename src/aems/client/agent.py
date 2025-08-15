@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import copy
 import heapq
 import json
@@ -9,12 +10,12 @@ import ssl
 import time
 import traceback
 import uuid
-import websocket
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, Callable, List
+from typing import Any, Callable, Dict, List, Optional
 
 import gevent
 import httpx
+import websocket
 from gevent import monkey
 from gevent.event import AsyncResult
 
@@ -22,17 +23,31 @@ from aems.client import dualmethod
 
 # Use volttron-core JSON-RPC utilities for compatibility
 try:
-    from volttron.utils.jsonrpc import exception_from_json, Error, RemoteError, MethodNotFound
+    from volttron.utils.jsonrpc import Error, MethodNotFound, RemoteError, exception_from_json
 
     VOLTTRON_JSONRPC_AVAILABLE = True
 except ImportError:
     # Fallback to our custom implementation
-    from .jsonrpc import exception_from_json, Error, RemoteError, MethodNotFound
+    from .jsonrpc import Error, MethodNotFound, RemoteError, exception_from_json
 
     VOLTTRON_JSONRPC_AVAILABLE = False
 
 # Patch standard library to work with gevent
 monkey.patch_all()
+
+SIZE_OUTPUT = 100
+
+
+def get_smaller_print(data, in_str_full_value: str | None = None):
+    if isinstance(data, str):
+        if in_str_full_value and in_str_full_value in data:
+            return data
+
+        return data[:SIZE_OUTPUT] + "..." if len(data) > SIZE_OUTPUT else data
+    else:
+        if isinstance(data, (dict, list)):
+            return get_smaller_print(json.dumps(data, default=str))
+    return data
 
 
 class RPC:
@@ -248,7 +263,9 @@ class PubSub:
             if topic == "config/config":
                 print(f"Agent {self._agent.identity} published to {topic}: default update sent")
             else:
-                print(f"Agent {self._agent.identity} published to {topic}: {message}")
+                print(
+                    f"Agent {self._agent.identity} published to {topic}: {get_smaller_print(message)}"
+                )
             async_result.set(True)  # Success
         except Exception as e:
             print(f"Error publishing message: {e}")
@@ -660,6 +677,7 @@ class ConfigCallback:
             except Exception as e:
                 print(f"Error in config callback for {config_name}: {e}")
                 import traceback
+
                 traceback.print_exc()
 
 
@@ -947,7 +965,9 @@ class Config:
                             except Exception as e:
                                 print(f"Error in config update callback: {e}")
                     else:
-                        print(f"Failed to fetch updated config {config_name}: {response.status_code}")
+                        print(
+                            f"Failed to fetch updated config {config_name}: {response.status_code}"
+                        )
             except Exception as e:
                 print(f"Error handling config update for {config_name}: {e}")
 
@@ -985,7 +1005,7 @@ class Config:
                     for callback in self._config_callbacks.get(name, []):
                         callback(name, "NEW", value)
                     # self._send_default_config(name, "NEW", value)
-                    print(f"Sent default config to server: {name} = {value}")
+                    print(f"Sent default config to server: {name} = {get_smaller_print(value)}")
                 except Exception as e:
                     print(f"Error sending default config {name}: {e}")
 
@@ -1056,6 +1076,7 @@ class Config:
 
     def _fetch_all_server_configs(self):
         """Fetch all configurations for this agent from the server and cache them."""
+
         def fetch_configs():
             try:
                 request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/list?agent_id={self._agent.identity}"
@@ -1065,7 +1086,9 @@ class Config:
                         data = response.json()
                         if self._agent.identity in data["data"]:
                             config_entries = data["data"][self._agent.identity]
-                            print(f"Found {len(config_entries)} configs for agent {self._agent.identity}")
+                            print(
+                                f"Found {len(config_entries)} configs for agent {self._agent.identity}"
+                            )
 
                             # Fetch each individual configuration
                             for config_entry in config_entries:
@@ -1125,7 +1148,9 @@ class Config:
                             # No default, use server config directly
                             self._config_cache[config_name] = copy.deepcopy(server_config)
 
-                        print(f"Cached config for {config_name}: {server_config}")
+                        print(
+                            f"Cached config for {config_name}: {get_smaller_print(server_config)}"
+                        )
                     else:
                         print(
                             f"No server config found for {config_name} (status: {response.status_code})"
@@ -1156,11 +1181,16 @@ class Config:
                 # Handle different actions
                 if action == "DELETE":
                     # For DELETE, remove from config cache if not a default
-                    if config_name in self._config_cache and config_name not in self._default_configs:
+                    if (
+                        config_name in self._config_cache
+                        and config_name not in self._default_configs
+                    ):
                         del self._config_cache[config_name]
                     elif config_name in self._config_cache and config_name in self._default_configs:
                         # Reset to default value
-                        self._config_cache[config_name] = copy.deepcopy(self._default_configs[config_name])
+                        self._config_cache[config_name] = copy.deepcopy(
+                            self._default_configs[config_name]
+                        )
                 else:
                     # For NEW or UPDATE, update the cache with server value
                     if config_name in self._default_configs and config_value is not None:
@@ -1529,8 +1559,11 @@ class Scheduler:
             if d == "*":
                 pass
             else:
-                result = eval(d)
-                if not isinstance(result, (int, float)):
+                try:
+                    result = ast.literal_eval(d)
+                    if not isinstance(result, (int, float)):
+                        invalid = True
+                except (ValueError, SyntaxError):
                     invalid = True
 
         if invalid:
@@ -1812,8 +1845,8 @@ class Agent:
         This follows the VOLTTRON pattern where local file configs are pushed to the
         platform's config store, and then agents retrieve them from there.
         """
-        import os
         import json
+        import os
 
         if not self.config_path or not os.path.exists(self.config_path):
             return
@@ -1872,9 +1905,20 @@ class Agent:
     def __on_ws_message__(self, ws, message):
         """Internal callback when a WebSocket message is received."""
         try:
+
+            small_msg = get_smaller_print(
+                message, '"type":"rpc","method":"set_temperature_setpoints"'
+            )
+            if '"type":"rpc","method":"set_temperature_setpoints"' in message:
+                print(f"DEBUG: Agent {self.identity} received set_temperature_setpoints RPC call")
+
             data = json.loads(message)
+            if "kwargs" in data and "authentication" in data["kwargs"]:
+                del data["kwargs"]["authentication"]
+
             self.received_messages.append(data)
-            print(f"Agent {self.identity} received data.")
+
+            print(f"Agent {self.identity} received data {small_msg}. ")
 
             # Handle different message types
             msg_type = data.get("type")
@@ -1898,9 +1942,11 @@ class Agent:
                             callback(config_name, None)
                         except Exception as e:
                             print(f"Error in config delete callback: {e}")
-            elif msg_type == "rpc_request":
+            elif msg_type in ("rpc_request", "rpc"):
                 # Handle RPC request
                 print(f"DEBUG: Agent {self.identity} received RPC request: {data}")
+                if "authentication" in data:
+                    print(f"data: {data}")
                 sender = data.get("sender")
                 method_name = data.get("method")
                 args = data.get("args", [])
@@ -2124,8 +2170,9 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
         Exit code (0 for success, non-zero for errors)
     """
     import argparse
-    import os
     import json
+    import os
+
     import yaml
 
     identity = identity or os.environ.get("AGENT_VIP_IDENTITY", None)

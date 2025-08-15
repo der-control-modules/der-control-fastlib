@@ -1,32 +1,36 @@
 # fastapi_message_bus.py
 
 import asyncio
+import datetime
 import json
 import logging
 import os
+import subprocess
 import threading
 from contextlib import asynccontextmanager
 from typing import Optional
-import subprocess
-import jwt
-import datetime
 
+import jwt
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 try:
-    from importlib.metadata import version, PackageNotFoundError
+    from importlib.metadata import PackageNotFoundError, version
 except ImportError:
     # Python < 3.8
     from importlib_metadata import version, PackageNotFoundError
 
-from aems.server.models import MessageBus, Message
-from aems.server.connection_manager import ConnectionManager
 from aems.server.config_store import ConfigStore
+from aems.server.connection_manager import ConnectionManager
+from aems.server.models import Message, MessageBus
 
 logging.basicConfig(level=logging.DEBUG)
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
+
+# Turn down watchdog logging to reduce noise
+logging.getLogger("watchdog.observers").setLevel(logging.INFO)
+
 
 def get_package_version():
     """Get the current package version."""
@@ -284,14 +288,10 @@ class FastAPIMessageBus(MessageBus):
                     config_data = await request.json()
                     success = self.config_store.store(agent_id, config_name, config_data, "json")
             except ValueError as json_error:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid JSON data: {str(json_error)}"
-                )
+                raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(json_error)}")
             except UnicodeDecodeError as decode_error:
                 raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid text encoding: {str(decode_error)}"
+                    status_code=400, detail=f"Invalid text encoding: {str(decode_error)}"
                 )
 
             if success:
@@ -303,7 +303,9 @@ class FastAPIMessageBus(MessageBus):
                         )
                     except ConnectionError:
                         # Agent disconnected between check and notification - that's okay
-                        _log.warning(f"Agent {agent_id} disconnected during config update notification")
+                        _log.warning(
+                            f"Agent {agent_id} disconnected during config update notification"
+                        )
                 return {"status": "success"}
             else:
                 raise HTTPException(status_code=500, detail="Failed to store configuration")
@@ -321,7 +323,9 @@ class FastAPIMessageBus(MessageBus):
                         )
                     except ConnectionError:
                         # Agent disconnected between check and notification - that's okay
-                        _log.warning(f"Agent {agent_id} disconnected during config delete notification")
+                        _log.warning(
+                            f"Agent {agent_id} disconnected during config delete notification"
+                        )
                 return {"status": "success"}
             else:
                 raise HTTPException(
@@ -360,20 +364,14 @@ class FastAPIMessageBus(MessageBus):
                     auth_data = dict(form_data)
                     _log.debug(f"Parsed form data: {auth_data}")
                 except ValueError as e:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid form data: {str(e)}"
-                    )
+                    raise HTTPException(status_code=400, detail=f"Invalid form data: {str(e)}")
             elif "application/json" in content_type:
                 # This is for JSON requests
                 try:
                     auth_data = await request.json()
                     _log.debug(f"Parsed JSON data: {auth_data}")
                 except ValueError as e:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid JSON data: {str(e)}"
-                    )
+                    raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
             else:
                 # Try to determine the format by attempting to parse
                 try:
@@ -391,23 +389,18 @@ class FastAPIMessageBus(MessageBus):
                 except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as parse_error:
                     _log.error(f"Failed to parse request data: {parse_error}")
                     raise HTTPException(
-                        status_code=400,
-                        detail=f"Unable to parse request data: {str(parse_error)}"
+                        status_code=400, detail=f"Unable to parse request data: {str(parse_error)}"
                     )
 
             if not auth_data:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No data received in request"
-                )
+                raise HTTPException(status_code=400, detail="No data received in request")
 
             _log.debug(f"Final auth data: {auth_data}")
 
             # Validate required fields
             if "username" not in auth_data or "password" not in auth_data:
                 raise HTTPException(
-                    status_code=400,
-                    detail="Missing required fields: username and password"
+                    status_code=400, detail="Missing required fields: username and password"
                 )
 
             username = auth_data["username"]
@@ -418,7 +411,9 @@ class FastAPIMessageBus(MessageBus):
             if username and password:
                 try:
                     # JWT configuration
-                    secret_key = os.environ.get("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+                    secret_key = os.environ.get(
+                        "JWT_SECRET_KEY", "your-secret-key-change-in-production"
+                    )
                     algorithm = "HS256"
 
                     # Current time
@@ -429,7 +424,7 @@ class FastAPIMessageBus(MessageBus):
                         "sub": username,  # subject (user identifier)
                         "iat": now,  # issued at
                         "exp": now + datetime.timedelta(hours=1),  # expires
-                        "type": "access"
+                        "type": "access",
                     }
                     access_token = jwt.encode(access_token_payload, secret_key, algorithm=algorithm)
 
@@ -438,28 +433,24 @@ class FastAPIMessageBus(MessageBus):
                         "sub": username,
                         "iat": now,
                         "exp": now + datetime.timedelta(days=7),
-                        "type": "refresh"
+                        "type": "refresh",
                     }
-                    refresh_token = jwt.encode(refresh_token_payload, secret_key, algorithm=algorithm)
+                    refresh_token = jwt.encode(
+                        refresh_token_payload, secret_key, algorithm=algorithm
+                    )
 
                     return {
                         "status": "success",
                         "message": "Authentication successful",
                         "username": username,
                         "access_token": access_token,
-                        "refresh_token": refresh_token
+                        "refresh_token": refresh_token,
                     }
                 except (jwt.InvalidTokenError, jwt.PyJWTError) as jwt_error:
                     _log.error(f"JWT encoding error: {jwt_error}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Token generation failed"
-                    )
+                    raise HTTPException(status_code=500, detail="Token generation failed")
             else:
-                raise HTTPException(
-                    status_code=401,
-                    detail="Invalid credentials"
-                )
+                raise HTTPException(status_code=401, detail="Invalid credentials")
 
         @self.app.post("/gs")
         async def rpc_endpoint(request: Request):
@@ -473,21 +464,16 @@ class FastAPIMessageBus(MessageBus):
             # Validate JSON-RPC 2.0 format
             if "jsonrpc" not in rpc_data or rpc_data["jsonrpc"] != "2.0":
                 raise HTTPException(
-                    status_code=400,
-                    detail="Invalid JSON-RPC format. Must include 'jsonrpc': '2.0'"
+                    status_code=400, detail="Invalid JSON-RPC format. Must include 'jsonrpc': '2.0'"
                 )
 
             if "id" not in rpc_data:
                 raise HTTPException(
-                    status_code=400,
-                    detail="Missing required field: 'id' (agent identifier)"
+                    status_code=400, detail="Missing required field: 'id' (agent identifier)"
                 )
 
             if "method" not in rpc_data:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Missing required field: 'method'"
-                )
+                raise HTTPException(status_code=400, detail="Missing required field: 'method'")
 
             agent_id = rpc_data["id"]
             method = rpc_data["method"]
@@ -499,14 +485,12 @@ class FastAPIMessageBus(MessageBus):
 
             # Check if the target agent is connected
             if agent_id not in self.manager.active_connections:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Agent '{agent_id}' is not connected"
-                )
+                raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' is not connected")
 
             # Generate a unique message ID for this RPC call
-            import uuid
             import asyncio
+            import uuid
+
             msg_id = str(uuid.uuid4())
 
             # Register a future for the RPC response
@@ -522,22 +506,15 @@ class FastAPIMessageBus(MessageBus):
                     "msg_id": msg_id,
                 }
 
-                print(f"DEBUG: Sending HTTP RPC request to {agent_id}: {method}")
+                print(f"DEBUG: Sending HTTP RPC request to {agent_id}: {method}\nparams: {params}")
                 await self.manager.send_message(agent_id, rpc_message)
 
                 # Wait for the response (with timeout)
                 try:
-                    result = await asyncio.wait_for(
-                        future,
-                        timeout=30.0  # 30 second timeout
-                    )
+                    result = await asyncio.wait_for(future, timeout=30.0)  # 30 second timeout
 
                     # Return JSON-RPC 2.0 success response
-                    return {
-                        "jsonrpc": "2.0",
-                        "id": rpc_data.get("id"),
-                        "result": result
-                    }
+                    return {"jsonrpc": "2.0", "id": rpc_data.get("id"), "result": result}
 
                 except asyncio.TimeoutError:
                     # Clean up the future
@@ -546,10 +523,7 @@ class FastAPIMessageBus(MessageBus):
                     return {
                         "jsonrpc": "2.0",
                         "id": rpc_data.get("id"),
-                        "error": {
-                            "code": -32603,
-                            "message": "Internal error: RPC call timed out"
-                        }
+                        "error": {"code": -32603, "message": "Internal error: RPC call timed out"},
                     }
 
             except KeyError as key_error:
@@ -561,8 +535,8 @@ class FastAPIMessageBus(MessageBus):
                     "id": rpc_data.get("id"),
                     "error": {
                         "code": -32602,
-                        "message": f"Invalid params: missing {str(key_error)}"
-                    }
+                        "message": f"Invalid params: missing {str(key_error)}",
+                    },
                 }
             except ConnectionError as conn_error:
                 # Clean up the future
@@ -571,22 +545,21 @@ class FastAPIMessageBus(MessageBus):
                 return {
                     "jsonrpc": "2.0",
                     "id": rpc_data.get("id"),
-                    "error": {
-                        "code": -32603,
-                        "message": "Internal error: Connection failed"
-                    }
+                    "error": {"code": -32603, "message": "Internal error: Connection failed"},
                 }
             except Exception as rpc_error:
                 # Clean up the future - this is our fallback for truly unexpected errors
                 self.manager.clear_rpc_response(msg_id)
-                _log.error(f"Unexpected error in RPC processing: {type(rpc_error).__name__}: {rpc_error}")
+                _log.error(
+                    f"Unexpected error in RPC processing: {type(rpc_error).__name__}: {rpc_error}"
+                )
                 return {
                     "jsonrpc": "2.0",
                     "id": rpc_data.get("id"),
                     "error": {
                         "code": -32603,
-                        "message": "Internal error: Unexpected error occurred"
-                    }
+                        "message": "Internal error: Unexpected error occurred",
+                    },
                 }
 
     def start(self):
@@ -637,6 +610,7 @@ class FastAPIMessageBus(MessageBus):
         except Exception as e:
             print(f"Error running server: {e}")
             import traceback
+
             traceback.print_exc()
             raise
         finally:
@@ -749,22 +723,22 @@ def _main():
     def is_debugger_attached():
         """Check if a debugger is attached."""
         # Skip debugger detection if we're in a test environment
-        if 'pytest' in sys.modules or 'unittest' in sys.modules:
+        if "pytest" in sys.modules or "unittest" in sys.modules:
             return False
 
         # Check for common debugger indicators
-        if hasattr(sys, 'gettrace') and sys.gettrace() is not None:
+        if hasattr(sys, "gettrace") and sys.gettrace() is not None:
             # Make sure it's not just pytest's trace function
             tracer = sys.gettrace()
-            if tracer and hasattr(tracer, '__name__'):
-                if 'pytest' in tracer.__name__ or 'coverage' in tracer.__name__:
+            if tracer and hasattr(tracer, "__name__"):
+                if "pytest" in tracer.__name__ or "coverage" in tracer.__name__:
                     return False
             return True
         # Check for debugpy (VS Code debugger)
-        if 'debugpy' in sys.modules:
+        if "debugpy" in sys.modules:
             return True
         # Check for pdb
-        if 'pdb' in sys.modules:
+        if "pdb" in sys.modules:
             return True
         return False
 
@@ -772,15 +746,13 @@ def _main():
         print("Debugger detected - using direct uvicorn.run() for better debugging support")
 
         # Create the FastAPI app directly for uvicorn.run()
-        server = FastAPIMessageBus(host=args.host, port=args.port, config_store_dir=config_dir, reload=args.reload)
+        server = FastAPIMessageBus(
+            host=args.host, port=args.port, config_store_dir=config_dir, reload=args.reload
+        )
 
         # Use uvicorn.run() directly for debugging
         uvicorn.run(
-            server.app,
-            host=args.host,
-            port=args.port,
-            reload=args.reload,
-            log_level="debug"
+            server.app, host=args.host, port=args.port, reload=args.reload, log_level="debug"
         )
     else:
         # Use the threaded approach for production
