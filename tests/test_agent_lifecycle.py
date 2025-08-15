@@ -19,23 +19,21 @@ from aems.client.agent import Agent, Core
 class TestAgentLifecycle:
     """Tests for agent lifecycle functionality."""
 
-    def test_agent_startup(self, message_bus):
+    def test_agent_startup(self, message_bus_manager_fixture):
         """Test that agent properly starts up."""
-        message_bus.start()
+        manager = message_bus_manager_fixture
+        manager.start_bus()
 
         # Create agent with on_start handler
         on_start_called = [False]
 
         class TestAgent(Agent):
-            @Core.receiver('onstart')
+            @Core.receiver("onstart")
             def on_start_handler(self, sender, **kwargs):
                 on_start_called[0] = True
 
-        # Create the agent with the correct port
-        agent = TestAgent(identity="test_agent", port=8888)
-
-        # Connect the agent to the message bus (which should trigger onstart)
-        agent.connect()
+        # Create and connect the agent using the new paradigm
+        agent = manager.create_connected_agent("test_agent", TestAgent)
 
         # Give it a moment to process the event
         gevent.sleep(1)
@@ -45,25 +43,22 @@ class TestAgentLifecycle:
 
         # Clean up
         agent.disconnect()
-        message_bus.stop()
 
-    def test_agent_shutdown(self, message_bus):
+    def test_agent_shutdown(self, message_bus_manager_fixture):
         """Test that agent properly shuts down."""
-        message_bus.start()
+        manager = message_bus_manager_fixture
+        manager.start_bus()
 
         # Create agent with on_stop handler
         on_stop_called = [False]
 
         class TestAgent(Agent):
-            @Core.receiver('onstop')
+            @Core.receiver("onstop")
             def on_stop_handler(self, sender, **kwargs):
                 on_stop_called[0] = True
 
-        # Create the agent with the correct port
-        agent = TestAgent(identity="test_agent", port=8888)
-
-        # Connect the agent to the message bus
-        agent.connect()
+        # Create and connect the agent using the new paradigm
+        agent = manager.create_connected_agent("test_agent", TestAgent)
 
         # Give it a moment to connect
         gevent.sleep(1)
@@ -77,30 +72,25 @@ class TestAgentLifecycle:
         # Verify on_stop was called
         assert on_stop_called[0] is True, "on_stop handler should have been called"
 
-        # Clean up
-        message_bus.stop()
-
-    def test_start_stop_order(self, message_bus):
+    def test_start_stop_order(self, message_bus_manager_fixture):
         """Test that on_start and on_stop are called in the correct order."""
-        message_bus.start()
+        manager = message_bus_manager_fixture
+        manager.start_bus()
 
         # Create agent with tracking for call order
         call_order = []
 
         class TrackingAgent(Agent):
-            @Core.receiver('onstart')
+            @Core.receiver("onstart")
             def on_start_handler(self, sender, **kwargs):
                 call_order.append("on_start")
 
-            @Core.receiver('onstop')
+            @Core.receiver("onstop")
             def on_stop_handler(self, sender, **kwargs):
                 call_order.append("on_stop")
 
-        # Create the agent with the correct port
-        agent = TrackingAgent(identity="tracking_agent", port=8888)
-
-        # Connect the agent to the message bus
-        agent.connect()
+        # Create and connect the agent using the new paradigm
+        agent = manager.create_connected_agent("tracking_agent", TrackingAgent)
 
         # Give it a moment to process the onstart event
         gevent.sleep(1)
@@ -114,41 +104,36 @@ class TestAgentLifecycle:
         # Verify correct call order
         assert call_order == ["on_start", "on_stop"]
 
-        # Clean up
-        message_bus.stop()
-
-    def test_multiple_agents_lifecycle(self, message_bus):
+    def test_multiple_agents_lifecycle(self, message_bus_manager_fixture):
         """Test lifecycle with multiple agents."""
-        message_bus.start()
+        manager = message_bus_manager_fixture
+        manager.start_bus()
 
         # Create tracking for each agent
         agent1_calls = []
         agent2_calls = []
 
         class Agent1(Agent):
-            @Core.receiver('onstart')
+            @Core.receiver("onstart")
             def on_start_handler(self, sender, **kwargs):
                 agent1_calls.append("start")
 
-            @Core.receiver('onstop')
+            @Core.receiver("onstop")
             def on_stop_handler(self, sender, **kwargs):
                 agent1_calls.append("stop")
 
         class Agent2(Agent):
-            @Core.receiver('onstart')
+            @Core.receiver("onstart")
             def on_start_handler(self, sender, **kwargs):
                 agent2_calls.append("start")
 
-            @Core.receiver('onstop')
+            @Core.receiver("onstop")
             def on_stop_handler(self, sender, **kwargs):
                 agent2_calls.append("stop")
 
-        # Create and connect agents
-        agent1 = Agent1(identity="agent1", port=8888)
-        agent2 = Agent2(identity="agent2", port=8888)
-
-        agent1.connect()
-        agent2.connect()
+        # Create and connect agents using the new paradigm
+        agent1 = manager.create_connected_agent("agent1", Agent1)
+        agent2 = manager.create_connected_agent("agent2", Agent2)
 
         # Give agents time to process onstart events
         gevent.sleep(1)
@@ -164,19 +149,17 @@ class TestAgentLifecycle:
         assert agent1_calls == ["start", "stop"]
         assert agent2_calls == ["start", "stop"]
 
-        # Clean up
-        message_bus.stop()
-
-    def test_duplicate_onstart_prevention(self, message_bus):
+    def test_duplicate_onstart_prevention(self, message_bus_manager_fixture):
         """Test that there's a clear way to implement onstart prevention."""
-        message_bus.start()
+        manager = message_bus_manager_fixture
+        manager.start_bus()
 
         # Create agent with tracking onstart and prevention logic
         onstart_count = [0]
         already_started = [False]
 
         class TestAgent(Agent):
-            @Core.receiver('onstart')
+            @Core.receiver("onstart")
             def on_start_handler(self, sender, **kwargs):
                 # This pattern can be used to prevent duplicate execution
                 if already_started[0]:
@@ -184,11 +167,8 @@ class TestAgentLifecycle:
                 already_started[0] = True
                 onstart_count[0] += 1
 
-        # Create the agent with the correct port
-        agent = TestAgent(identity="test_agent", port=8888)
-
-        # Connect the agent (should trigger onstart)
-        agent.connect()
+        # Create and connect the agent using the new paradigm
+        agent = manager.create_connected_agent("test_agent", TestAgent)
 
         # Give it a moment to process the event
         gevent.sleep(1)
@@ -206,27 +186,27 @@ class TestAgentLifecycle:
 
         # Clean up
         agent.disconnect()
-        message_bus.stop()
 
-    def test_manual_start_stop(self, message_bus):
+    def test_manual_start_stop(self, message_bus_manager_fixture):
         """Test manually starting and stopping an agent."""
-        message_bus.start()
+        manager = message_bus_manager_fixture
+        manager.start_bus()
 
         # Create agent with tracking handlers
         onstart_called = [False]
         onstop_called = [False]
 
         class TestAgent(Agent):
-            @Core.receiver('onstart')
+            @Core.receiver("onstart")
             def on_start_handler(self, sender, **kwargs):
                 onstart_called[0] = True
 
-            @Core.receiver('onstop')
+            @Core.receiver("onstop")
             def on_stop_handler(self, sender, **kwargs):
                 onstop_called[0] = True
 
-        # Create the agent with the correct port
-        agent = TestAgent(identity="test_agent", port=8888)
+        # Create the agent using the new paradigm
+        agent = manager.create_agent("test_agent", TestAgent)
 
         # Verify onstart has not been called yet
         assert onstart_called[0] is False
@@ -249,20 +229,19 @@ class TestAgentLifecycle:
         # Verify onstop was called
         assert onstop_called[0] is True
 
-        message_bus.stop()
-
-    def test_exception_in_onstart(self, message_bus):
+    def test_exception_in_onstart(self, message_bus_manager_fixture):
         """Test handling of exceptions in on_start."""
-        message_bus.start()
+        manager = message_bus_manager_fixture
+        manager.start_bus()
 
         # Create agent with failing on_start
         class FailingAgent(Agent):
-            @Core.receiver('onstart')
+            @Core.receiver("onstart")
             def on_start_handler(self, sender, **kwargs):
                 raise ValueError("Test exception in on_start")
 
-        # Create the agent with the correct port
-        agent = FailingAgent(identity="failing_agent", port=8888)
+        # Create the agent using the new paradigm
+        agent = manager.create_agent("failing_agent", FailingAgent)
 
         # Connect the agent and catch the exception
         # Note: The exception might not propagate directly from connect() because of how
@@ -277,27 +256,27 @@ class TestAgentLifecycle:
 
         # Clean up
         agent.disconnect()
-        message_bus.stop()
 
-    def test_restart_agent(self, message_bus):
+    def test_restart_agent(self, message_bus_manager_fixture):
         """Test that an agent can be restarted."""
-        message_bus.start()
+        manager = message_bus_manager_fixture
+        manager.start_bus()
 
         # Create agent with tracking handlers
         start_count = [0]
         stop_count = [0]
 
         class RestartableAgent(Agent):
-            @Core.receiver('onstart')
+            @Core.receiver("onstart")
             def on_start_handler(self, sender, **kwargs):
                 start_count[0] += 1
 
-            @Core.receiver('onstop')
+            @Core.receiver("onstop")
             def on_stop_handler(self, sender, **kwargs):
                 stop_count[0] += 1
 
-        # Create the agent with the correct port
-        agent = RestartableAgent(identity="restart_agent", port=8888)
+        # Create the agent using the new paradigm
+        agent = manager.create_agent("restart_agent", RestartableAgent)
 
         # Connect the agent
         agent.connect()
@@ -330,5 +309,4 @@ class TestAgentLifecycle:
         # Give it a moment to process the event
         gevent.sleep(1)
 
-        message_bus.stop()
         assert stop_count[0] == 2

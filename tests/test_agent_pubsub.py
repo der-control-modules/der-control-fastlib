@@ -2,29 +2,24 @@
 Test agent publish/subscribe functionality using pytest
 """
 
-import pytest
 import gevent
-from aems.client.agent import Agent
+import pytest
 
 
 class TestAgentPubSub:
     """Test agent publish/subscribe functionality."""
 
     @pytest.fixture(autouse=True)
-    def setup_agents(self, message_bus):
+    def setup_agents(self, message_bus_manager_fixture):
         """Set up test agents with the running message bus."""
-        # Store the message bus reference
-        self.message_bus = message_bus
+        # Store the message bus manager reference
+        self.manager = message_bus_manager_fixture
+        self.manager.start_bus()
 
-        # Create agents with the correct port
-        self.publisher = Agent("test_publisher", port=8888)
-        self.subscriber1 = Agent("test_subscriber1", port=8888)
-        self.subscriber2 = Agent("test_subscriber2", port=8888)
-
-        # Connect all agents
-        self.publisher.connect()
-        self.subscriber1.connect()
-        self.subscriber2.connect()
+        # Create agents using the new paradigm
+        self.publisher = self.manager.create_connected_agent("test_publisher")
+        self.subscriber1 = self.manager.create_connected_agent("test_subscriber1")
+        self.subscriber2 = self.manager.create_connected_agent("test_subscriber2")
 
         # Wait for connections
         gevent.sleep(1)
@@ -38,7 +33,6 @@ class TestAgentPubSub:
             self.subscriber1.disconnect()
         if hasattr(self, "subscriber2"):
             self.subscriber2.disconnect()
-        if hasattr(self, "subscriber2"):
             self.subscriber2.core.stop().get()
 
     def test_basic_publish_subscribe(self):

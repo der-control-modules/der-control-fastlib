@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from tests.test_utils import (
+from .test_utils import (
     TestMessageBusManager,
     create_connected_test_agent,
     create_test_agent,

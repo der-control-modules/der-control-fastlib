@@ -2,27 +2,23 @@
 Test agent RPC (Remote Procedure Call) functionality using pytest
 """
 
-import pytest
 import gevent
-from aems.client.agent import Agent
+import pytest
 
 
 class TestAgentRPC:
     """Test agent RPC functionality."""
 
     @pytest.fixture(autouse=True)
-    def setup_agents(self, message_bus):
+    def setup_agents(self, message_bus_manager_fixture):
         """Set up test agents for RPC tests with the running message bus."""
-        # Store the message bus reference
-        self.message_bus = message_bus
+        # Store the message bus manager reference
+        self.manager = message_bus_manager_fixture
+        self.manager.start_bus()
 
-        # Create agents with the correct port
-        self.server_agent = Agent("rpc_server", port=8888)
-        self.client_agent = Agent("rpc_client", port=8888)
-
-        # Connect both agents
-        self.server_agent.connect()
-        self.client_agent.connect()
+        # Create agents using the new paradigm
+        self.server_agent = self.manager.create_connected_agent("rpc_server")
+        self.client_agent = self.manager.create_connected_agent("rpc_client")
 
         # Wait for connections
         gevent.sleep(1)

@@ -2,8 +2,9 @@
 """
 Comprehensive test for agent lifecycle signals
 """
-import pytest
 import gevent
+import pytest
+
 from aems.client.agent import Agent, Core
 
 
@@ -13,6 +14,7 @@ class LifecycleTestAgent(Agent):
         # Track all lifecycle events
         self.lifecycle_events = []
         self.event_counts = {
+            "onsetup": 0,
             "onconnected": 0,
             "onstart": 0,
             "onconfigure": 0,
@@ -29,6 +31,7 @@ class LifecycleTestAgent(Agent):
 
         # Register event handlers after core is created
         def register_handlers():
+            self.core._handlers["onsetup"].append(self.on_setup)
             self.core._handlers["onconnected"].append(self.on_connected)
             self.core._handlers["onstart"].append(self.on_start)
             self.core._handlers["onconfigure"].append(self.on_configure)
@@ -38,6 +41,11 @@ class LifecycleTestAgent(Agent):
 
         # Delay registration until after initialization
         gevent.spawn_later(0, register_handlers)
+
+    def on_setup(self, sender, **kwargs):
+        self.event_counts["onsetup"] += 1
+        self.lifecycle_events.append("onsetup")
+        print(f"ONSETUP called! Count: {self.event_counts['onsetup']}")
 
     def on_connected(self, sender, **kwargs):
         self.event_counts["onconnected"] += 1
