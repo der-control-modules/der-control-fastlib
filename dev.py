@@ -21,14 +21,12 @@ Usage:
 Run `dev.py help` for a full list of available commands.
 """
 
+import json
+import re
 import subprocess
 import sys
-import re
-import urllib.request
 import urllib.parse
-import json
-import os
-from pathlib import Path
+import urllib.request
 
 # Import tomllib (Python 3.11+) or tomli as a fallback for older Python versions
 try:
@@ -74,28 +72,27 @@ def trigger_update(server_url=None, token=None):
             "action": "deploy",
             "version": current_version,
             "repository": "aems-lib-fastapi",
-            "timestamp": subprocess.run("date -Iseconds", shell=True, capture_output=True, text=True).stdout.strip()
+            "timestamp": subprocess.run(
+                "date -Iseconds", shell=True, capture_output=True, text=True
+            ).stdout.strip(),
         }
 
         # Add authentication if token provided
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "aems-dev-script"
-        }
+        headers = {"Content-Type": "application/json", "User-Agent": "aems-dev-script"}
 
         if token:
             headers["Authorization"] = f"Bearer {token}"
 
         # Prepare request
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(server_url, data=data, headers=headers, method='POST')
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(server_url, data=data, headers=headers, method="POST")
 
         print(f"🔄 Triggering update on {server_url}...")
         print(f"📦 Version: {current_version}")
 
         # Send webhook
         with urllib.request.urlopen(req, timeout=30) as response:
-            response_data = response.read().decode('utf-8')
+            response_data = response.read().decode("utf-8")
             if response.status == 200:
                 print("✅ Update triggered successfully!")
                 if response_data:
@@ -110,9 +107,9 @@ def trigger_update(server_url=None, token=None):
     except urllib.error.HTTPError as e:
         print(f"❌ HTTP Error: {e.code} - {e.reason}")
         try:
-            error_response = e.read().decode('utf-8')
+            error_response = e.read().decode("utf-8")
             print(f"📝 Error details: {error_response}")
-        except:
+        except Exception:
             pass
         return False
     except urllib.error.URLError as e:
@@ -135,10 +132,7 @@ def get_current_version():
     """
     # Get all tags sorted by version
     result = subprocess.run(
-        "git tag -l --sort=-version:refname",
-        shell=True,
-        capture_output=True,
-        text=True
+        "git tag -l --sort=-version:refname", shell=True, capture_output=True, text=True
     )
 
     if result.returncode != 0 or not result.stdout.strip():
@@ -146,8 +140,8 @@ def get_current_version():
         return "0.0.0"
 
     # Get the most recent tag (first in the sorted list)
-    latest_tag = result.stdout.strip().split('\n')[0]
-    return latest_tag.lstrip('v')
+    latest_tag = result.stdout.strip().split("\n")[0]
+    return latest_tag.lstrip("v")
 
 
 def parse_version(version_str):
@@ -173,7 +167,7 @@ def parse_version(version_str):
         (1, 2, 3, 'alpha', 1)
     """
     # Match semantic version with optional pre-release (alpha, beta, rc)
-    match = re.match(r'^v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.?(\d+))?', version_str)
+    match = re.match(r"^v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.?(\d+))?", version_str)
     if not match:
         raise ValueError(f"Invalid version format: {version_str}")
 
@@ -307,11 +301,13 @@ def version(version_arg=None):
         try:
             # Validate the version format
             parse_version(version_arg)
-            new_version = version_arg.lstrip('v')
+            new_version = version_arg.lstrip("v")
             print(f"Setting version: {current_version} → {new_version}")
         except ValueError as e:
             print(f"❌ Error: {e}")
-            print("Version should be in format: major.minor.patch[-prerelease.num] (e.g., 1.2.3, 1.2.3-alpha.1)")
+            print(
+                "Version should be in format: major.minor.patch[-prerelease.num] (e.g., 1.2.3, 1.2.3-alpha.1)"
+            )
             return False
 
     # Create git tag
@@ -319,10 +315,7 @@ def version(version_arg=None):
 
     # Check if tag already exists
     check_result = subprocess.run(
-        f"git tag -l {tag_name}",
-        shell=True,
-        capture_output=True,
-        text=True
+        f"git tag -l {tag_name}", shell=True, capture_output=True, text=True
     )
 
     if check_result.stdout.strip():
@@ -330,10 +323,7 @@ def version(version_arg=None):
         return False
 
     # Create the tag
-    tag_success = run_command(
-        f"git tag {tag_name}",
-        f"Creating git tag {tag_name}"
-    )
+    tag_success = run_command(f"git tag {tag_name}", f"Creating git tag {tag_name}")
 
     if tag_success:
         print(f"✅ Version {new_version} tagged successfully!")
@@ -404,11 +394,7 @@ def run_command(cmd, description=None):
 
     # Run the command and capture output
     process = subprocess.run(
-        cmd,
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
+        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
 
     if process.returncode != 0:
@@ -448,10 +434,7 @@ def setup_upstream(upstream_url=None):
 
     # Check if upstream already exists
     result = subprocess.run(
-        "git remote get-url upstream",
-        shell=True,
-        capture_output=True,
-        text=True
+        "git remote get-url upstream", shell=True, capture_output=True, text=True
     )
 
     if result.returncode == 0:
@@ -460,7 +443,9 @@ def setup_upstream(upstream_url=None):
 
         if current_upstream != upstream_url:
             print(f"🔄 Updating upstream URL from {current_upstream} to {upstream_url}")
-            return run_command(f"git remote set-url upstream {upstream_url}", "Updating upstream URL")
+            return run_command(
+                f"git remote set-url upstream {upstream_url}", "Updating upstream URL"
+            )
         else:
             print("✅ Upstream is already correctly configured")
             return True
@@ -489,10 +474,7 @@ def sync_fork():
 
     # Check if upstream remote exists
     result = subprocess.run(
-        "git remote get-url upstream",
-        shell=True,
-        capture_output=True,
-        text=True
+        "git remote get-url upstream", shell=True, capture_output=True, text=True
     )
 
     if result.returncode != 0:
@@ -505,12 +487,7 @@ def sync_fork():
         return False
 
     # Get current branch
-    result = subprocess.run(
-        "git branch --show-current",
-        shell=True,
-        capture_output=True,
-        text=True
-    )
+    result = subprocess.run("git branch --show-current", shell=True, capture_output=True, text=True)
 
     if result.returncode != 0:
         print("❌ Error: Could not determine current branch")
@@ -531,10 +508,7 @@ def sync_fork():
 
     # Sync develop branch if it exists
     result = subprocess.run(
-        "git branch -r | grep origin/develop",
-        shell=True,
-        capture_output=True,
-        text=True
+        "git branch -r | grep origin/develop", shell=True, capture_output=True, text=True
     )
 
     if result.returncode == 0:
@@ -589,10 +563,7 @@ def create_pr_branch(branch_name=None):
     # Switch to develop (or main if no develop)
     base_branch = "develop"
     result = subprocess.run(
-        "git branch -r | grep origin/develop",
-        shell=True,
-        capture_output=True,
-        text=True
+        "git branch -r | grep origin/develop", shell=True, capture_output=True, text=True
     )
 
     if result.returncode != 0:
@@ -630,12 +601,7 @@ def prepare_pr():
     print("🔄 Preparing branch for pull request...")
 
     # Get current branch
-    result = subprocess.run(
-        "git branch --show-current",
-        shell=True,
-        capture_output=True,
-        text=True
-    )
+    result = subprocess.run("git branch --show-current", shell=True, capture_output=True, text=True)
 
     if result.returncode != 0:
         print("❌ Error: Could not determine current branch")
@@ -659,14 +625,14 @@ def prepare_pr():
         "git log origin/develop..HEAD --oneline 2>/dev/null || git log origin/main..HEAD --oneline",
         shell=True,
         capture_output=True,
-        text=True
+        text=True,
     )
 
     if not result.stdout.strip():
         print("❌ Error: No commits found on this branch")
         return False
 
-    commits = result.stdout.strip().split('\n')
+    commits = result.stdout.strip().split("\n")
     print(f"📝 Found {len(commits)} commit(s) on this branch:")
     for commit in commits[:5]:  # Show first 5 commits
         print(f"  • {commit}")
@@ -676,10 +642,7 @@ def prepare_pr():
 
     # Push branch if not already pushed
     result = subprocess.run(
-        f"git ls-remote --heads origin {current_branch}",
-        shell=True,
-        capture_output=True,
-        text=True
+        f"git ls-remote --heads origin {current_branch}", shell=True, capture_output=True, text=True
     )
 
     if not result.stdout.strip():
@@ -706,9 +669,7 @@ def install():
     Returns:
         bool: True if installation was successful, False otherwise
     """
-    return run_command(
-        "pip install -e .[dev]", "Installing development dependencies"
-    )
+    return run_command("pip install -e .[dev]", "Installing development dependencies")
 
 
 def install_prod():
@@ -731,9 +692,7 @@ def install_prod():
         run_command(f"pip uninstall -y {pkg}", f"Removing {pkg}")
 
     # Then install only production dependencies
-    return run_command(
-        "pip install -e .", "Installing production dependencies only"
-    )
+    return run_command("pip install -e .", "Installing production dependencies only")
 
 
 def update():
@@ -829,7 +788,7 @@ def coverage():
     # The -v flag makes pytest output each test name as it runs
     result = subprocess.run(
         ["python", "-m", "pytest", "-v", "--cov=src", "--cov-report=term", "--cov-report=html"],
-        text=True
+        text=True,
     )
 
     if result.returncode != 0:
@@ -861,7 +820,9 @@ def security():
     pip_audit_ok = run_command("pip-audit", "Scanning dependencies with pip-audit")
 
     # Run bandit for code security analysis
-    bandit_ok = run_command("bandit -r src/ -f json -o bandit-report.json", "Running Bandit security analysis")
+    bandit_ok = run_command(
+        "bandit -r src/ -f json -o bandit-report.json", "Running Bandit security analysis"
+    )
 
     if bandit_ok:
         print("📄 Bandit report saved to bandit-report.json")
@@ -869,6 +830,8 @@ def security():
         run_command("bandit -r src/", "Bandit security summary")
 
     return pip_audit_ok and bandit_ok
+
+
 def build():
     """
     Build wheel package.
@@ -883,9 +846,7 @@ def build():
     print("🔨 Building wheel package...")
 
     # Clean previous builds
-    clean_ok = run_command(
-        "rm -rf build/ dist/ *.egg-info/", "Cleaning previous builds"
-    )
+    clean_ok = run_command("rm -rf build/ dist/ *.egg-info/", "Cleaning previous builds")
     if not clean_ok:
         return False
 
@@ -928,7 +889,8 @@ def show_help():
     Displays comprehensive help information about all available
     commands, their purposes, and examples of how to use them.
     """
-    print("""
+    print(
+        """
 🚀 Development Helper Commands:
 
   install         Install development dependencies (default for developers)
@@ -986,7 +948,8 @@ Examples:
   ./dev.py check
   ./dev.py version alpha # Create alpha release
   ./dev.py trigger-update https://test.example.com/webhook
-""")
+"""
+    )
 
 
 def main():
@@ -1044,19 +1007,19 @@ def main():
 
     # Map command names to their corresponding functions
     commands = {
-        'install': install,
-        'install-prod': install_prod,
-        'update': update,
-        'format': format_code,
-        'lint': lint,
-        'test': test,
-        'coverage': coverage,
-        'security': security,
-        'build': build,
-        'check': check,
-        'sync-fork': sync_fork,
-        'prepare-pr': prepare_pr,
-        'help': show_help,
+        "install": install,
+        "install-prod": install_prod,
+        "update": update,
+        "format": format_code,
+        "lint": lint,
+        "test": test,
+        "coverage": coverage,
+        "security": security,
+        "build": build,
+        "check": check,
+        "sync-fork": sync_fork,
+        "prepare-pr": prepare_pr,
+        "help": show_help,
     }
 
     if command in commands:

@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from .test_utils import (
-    TestMessageBusManager,
+from .utils import (
+    MessageBusManager,
     create_connected_test_agent,
     create_test_agent,
     get_random_open_port,
@@ -27,15 +27,15 @@ def event_loop():
 @pytest.fixture(scope="function")
 def message_bus():
     """Create and start a message bus for testing with isolated config store."""
-    with TestMessageBusManager() as manager:
+    with MessageBusManager() as manager:
         bus, port = manager.start_bus()
         yield bus
 
 
 @pytest.fixture(scope="function")
 def message_bus_manager_fixture():
-    """Provide a TestMessageBusManager for advanced test scenarios."""
-    with TestMessageBusManager() as manager:
+    """Provide a MessageBusManager for advanced test scenarios."""
+    with MessageBusManager() as manager:
         yield manager
 
 

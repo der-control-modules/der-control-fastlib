@@ -2,8 +2,9 @@
 """
 Test to check if onstart is still being called twice
 """
-import pytest
 import gevent
+import pytest
+
 from aems.client.agent import Agent, Core
 
 

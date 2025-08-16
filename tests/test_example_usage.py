@@ -7,8 +7,8 @@ import time
 import httpx
 
 from aems.client.agent import Agent, Core
-from tests.test_utils import (
-    TestMessageBusManager,
+from tests.utils import (
+    MessageBusManager,
     create_connected_test_agent,
     create_test_agent,
     get_test_base_url,
@@ -17,8 +17,8 @@ from tests.test_utils import (
 )
 
 
-class TestAgent(Agent):
-    """Example custom agent class for testing."""
+class ExampleAgent(Agent):
+    """Example agent class for testing."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -33,7 +33,7 @@ class TestAgent(Agent):
 
 
 def test_message_bus_manager_example(message_bus_manager_fixture):
-    """Example test using TestMessageBusManager fixture."""
+    """Example test using MessageBusManager fixture."""
     # Start the message bus
     bus, port = message_bus_manager_fixture.start_bus()
 
@@ -95,7 +95,7 @@ def test_with_bus_manager_fixture(message_bus_manager_fixture):
 
 def test_convenience_functions():
     """Example test using convenience functions directly."""
-    with TestMessageBusManager() as manager:
+    with MessageBusManager() as manager:
         bus, port = manager.start_bus()
 
         # Use convenience functions
@@ -121,7 +121,7 @@ def test_convenience_functions():
 
 def test_connected_agents():
     """Example test specifically for connected agents."""
-    with TestMessageBusManager() as manager:
+    with MessageBusManager() as manager:
         bus, port = manager.start_bus()
 
         # Create multiple connected agents
@@ -160,10 +160,10 @@ def test_connected_agent_factory(message_bus, connected_agent_factory):
     assert agent2.connected
 
     # Create connected custom agent using the factory
-    custom_agent = connected_agent_factory("custom_agent", agent_class=TestAgent)
+    custom_agent = connected_agent_factory("custom_agent", agent_class=ExampleAgent)
     assert custom_agent.identity == "custom_agent"
     assert custom_agent.connected
-    assert isinstance(custom_agent, TestAgent)
+    assert isinstance(custom_agent, ExampleAgent)
 
     # Give time for onstart event to be processed
     time.sleep(0.1)
@@ -173,7 +173,7 @@ def test_connected_agent_factory(message_bus, connected_agent_factory):
 
 def test_custom_agent_classes():
     """Example test using custom agent classes."""
-    with TestMessageBusManager() as manager:
+    with MessageBusManager() as manager:
         bus, port = manager.start_bus()
 
         # Create regular agent
@@ -182,8 +182,8 @@ def test_custom_agent_classes():
         assert regular_agent.connected
 
         # Create custom agent
-        custom_agent = manager.create_connected_agent("custom_agent", agent_class=TestAgent)
-        assert isinstance(custom_agent, TestAgent)
+        custom_agent = manager.create_connected_agent("custom_agent", agent_class=ExampleAgent)
+        assert isinstance(custom_agent, ExampleAgent)
         assert custom_agent.connected
 
         # Give time for onstart event to be processed
@@ -195,8 +195,8 @@ def test_custom_agent_classes():
         assert custom_agent.message_count == 0
 
         # Create another custom agent with convenience function
-        custom_agent2 = create_connected_test_agent("custom_agent2", agent_class=TestAgent)
-        assert isinstance(custom_agent2, TestAgent)
+        custom_agent2 = create_connected_test_agent("custom_agent2", agent_class=ExampleAgent)
+        assert isinstance(custom_agent2, ExampleAgent)
         assert custom_agent2.connected
 
         # Give time for onstart event to be processed
@@ -216,5 +216,13 @@ def test_random_port_fixture(random_port):
 
 if __name__ == "__main__":
     # Run a simple test
-    test_message_bus_manager_example()
-    print("✅ Example test passed!")
+    manager = MessageBusManager()
+    try:
+        bus, port = manager.start_bus()
+        print(f"✅ Message bus started on port {port}")
+        manager.stop_bus()
+        print("✅ Example test passed!")
+    except Exception as e:
+        print(f"❌ Test failed: {e}")
+        if manager:
+            manager.stop_bus()

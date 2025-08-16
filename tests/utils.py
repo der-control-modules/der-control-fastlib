@@ -22,7 +22,7 @@ def get_random_open_port() -> int:
     return port
 
 
-class TestMessageBusManager:
+class MessageBusManager:
     """Manager for test message bus instances."""
 
     def __init__(self):
@@ -201,7 +201,7 @@ def start_test_message_bus(
     Returns:
         Tuple of (message_bus_instance, port_number)
     """
-    manager = TestMessageBusManager()
+    manager = MessageBusManager()
     return manager.start_bus(port, host)
 
 

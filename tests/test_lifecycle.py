@@ -193,7 +193,7 @@ def test_agent_lifecycle(message_bus):
         try:
             if hasattr(agent, "connected") and agent.connected:
                 agent.disconnect()
-        except:
+        except Exception:
             pass
 
 

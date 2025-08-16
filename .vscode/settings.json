@@ -4,12 +4,10 @@
     "python.linting.flake8Enabled": true,
     "python.linting.pycodestyleEnabled": false,
     "python.linting.mypyEnabled": false,
-    // Black formatter settings - use modern extension
     "python.formatting.provider": "black",
     "python.formatting.blackArgs": [
         "--line-length=100"
     ],
-    // Python-specific formatter
     "[python]": {
         "editor.defaultFormatter": "ms-python.python",
         "editor.formatOnSave": true,
@@ -17,17 +15,14 @@
             "source.organizeImports": "explicit"
         }
     },
-    // Pylint settings - avoid conflicts with Black
     "python.linting.pylintArgs": [
         "--max-line-length=100",
         "--disable=line-too-long,trailing-whitespace,bad-whitespace"
     ],
-    // Flake8 settings
     "python.linting.flake8Args": [
         "--max-line-length=100",
         "--extend-ignore=E203,W503,E501,W504"
     ],
-    // Editor settings for consistency
     "editor.rulers": [
         100
     ],
@@ -39,6 +34,5 @@
     "files.trimTrailingWhitespace": true,
     "files.insertFinalNewline": true,
     "files.trimFinalNewlines": true,
-    // Ensure linting runs after formatting
     "python.linting.lintOnSave": true
 }

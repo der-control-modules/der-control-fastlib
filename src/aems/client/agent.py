@@ -23,12 +23,12 @@ from aems.client import dualmethod
 
 # Use volttron-core JSON-RPC utilities for compatibility
 try:
-    from volttron.utils.jsonrpc import Error, MethodNotFound, RemoteError, exception_from_json
+    from volttron.utils.jsonrpc import RemoteError, exception_from_json
 
     VOLTTRON_JSONRPC_AVAILABLE = True
 except ImportError:
     # Fallback to our custom implementation
-    from .jsonrpc import Error, MethodNotFound, RemoteError, exception_from_json
+    from .jsonrpc import RemoteError, exception_from_json
 
     VOLTTRON_JSONRPC_AVAILABLE = False
 
