@@ -2,8 +2,9 @@
 """
 Test to simulate the NormalFrameworkConnector agent onstart issue
 """
-import pytest
 import gevent
+import pytest
+
 from aems.client.agent import Agent, Core
 
 
@@ -36,9 +37,7 @@ def test_normal_framework_connector_onstart(message_bus):
         print(f"Heartbeat setup count: {agent.heartbeat_setup_count}")
 
         # Check that heartbeat setup was called exactly once
-        assert (
-            agent.heartbeat_setup_count == 1
-        ), f"Expected heartbeat_setup_count=1, got {agent.heartbeat_setup_count}"
+        assert agent.heartbeat_setup_count == 1, f"Expected heartbeat_setup_count=1, got {agent.heartbeat_setup_count}"
         print("✓ Heartbeat setup was called exactly once!")
 
     finally:

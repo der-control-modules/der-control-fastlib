@@ -57,10 +57,7 @@ def test_message_bus_manager_example(message_bus_manager_fixture):
     assert connected_agent.connected
 
     # Get URLs
-    assert (
-        message_bus_manager_fixture.get_ws_url("test_agent")
-        == f"ws://127.0.0.1:{port}/ws/test_agent"
-    )
+    assert message_bus_manager_fixture.get_ws_url("test_agent") == f"ws://127.0.0.1:{port}/ws/test_agent"
 
 
 def test_with_fixture_message_bus(message_bus, test_port):

@@ -2,7 +2,6 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Optional
 
 
 class JSONSerializable:
@@ -41,9 +40,7 @@ class Message:
         return "%s(**{%s})" % (self.__class__.__name__, attrs)
 
     @staticmethod
-    def create_message(
-        *, peer: str, user: str, subsystem: str, msg_id: str, args: list = None
-    ) -> "Message":
+    def create_message(*, peer: str, user: str, subsystem: str, msg_id: str, args: list = None) -> "Message":
         if args is None:
             args = []
         return Message(peer=peer, subsystem=subsystem, msg_id=msg_id, user=user, args=args)

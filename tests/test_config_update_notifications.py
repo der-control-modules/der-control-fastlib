@@ -2,8 +2,9 @@
 """
 Test to verify that UPDATE notifications are sent when configs are stored
 """
-import pytest
 import gevent
+import pytest
+
 from aems.client.agent import Agent
 
 
@@ -57,12 +58,8 @@ def test_config_update_notification_sent(message_bus):
         assert len(agent.update_notifications) > 0, "No UPDATE notifications received"
 
         # Verify that at least one notification was for our config
-        our_notifications = [
-            n for n in agent.update_notifications if n["config_name"] == "notification_test_config"
-        ]
-        assert (
-            len(our_notifications) > 0
-        ), "No notifications received for 'notification_test_config'"
+        our_notifications = [n for n in agent.update_notifications if n["config_name"] == "notification_test_config"]
+        assert len(our_notifications) > 0, "No notifications received for 'notification_test_config'"
 
         # Verify that at least one was an UPDATE action
         update_notifications = [n for n in our_notifications if n["action"] == "UPDATE"]
@@ -120,12 +117,8 @@ def test_config_update_notification_multiple_subscribers(message_bus):
         print(f"Agent2 notifications: {len(agent2.update_notifications)}")
 
         # Each agent should have received exactly one notification for their own config
-        agent1_notifications = [
-            n for n in agent1.update_notifications if n["config_name"] == "shared_name_config"
-        ]
-        agent2_notifications = [
-            n for n in agent2.update_notifications if n["config_name"] == "shared_name_config"
-        ]
+        agent1_notifications = [n for n in agent1.update_notifications if n["config_name"] == "shared_name_config"]
+        agent2_notifications = [n for n in agent2.update_notifications if n["config_name"] == "shared_name_config"]
 
         assert (
             len(agent1_notifications) == 1
@@ -157,12 +150,8 @@ def test_config_update_via_rest_api_isolation(message_bus):
         gevent.sleep(0.5)
 
         print("2. Both agents subscribing to config with same name...")
-        agent1.config.subscribe(
-            callback=agent1.config_update_callback, pattern="api_test_config", actions=["UPDATE"]
-        )
-        agent2.config.subscribe(
-            callback=agent2.config_update_callback, pattern="api_test_config", actions=["UPDATE"]
-        )
+        agent1.config.subscribe(callback=agent1.config_update_callback, pattern="api_test_config", actions=["UPDATE"])
+        agent2.config.subscribe(callback=agent2.config_update_callback, pattern="api_test_config", actions=["UPDATE"])
         gevent.sleep(0.5)
 
         print("3. Updating agent1's config via REST API...")
@@ -215,12 +204,8 @@ def test_config_update_via_rest_api_isolation(message_bus):
         print(f"Agent2 notifications: {len(agent2.update_notifications)}")
 
         # Each agent should have received exactly one notification
-        agent1_api_notifications = [
-            n for n in agent1.update_notifications if n["config_name"] == "api_test_config"
-        ]
-        agent2_api_notifications = [
-            n for n in agent2.update_notifications if n["config_name"] == "api_test_config"
-        ]
+        agent1_api_notifications = [n for n in agent1.update_notifications if n["config_name"] == "api_test_config"]
+        agent2_api_notifications = [n for n in agent2.update_notifications if n["config_name"] == "api_test_config"]
 
         assert (
             len(agent1_api_notifications) == 1

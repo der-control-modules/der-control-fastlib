@@ -31,9 +31,7 @@ class MessageBusManager:
         self.temp_config_dir = None
         self.host = "127.0.0.1"
 
-    def start_bus(
-        self, port: Optional[int] = None, host: str = "127.0.0.1"
-    ) -> Tuple[FastAPIMessageBus, int]:
+    def start_bus(self, port: Optional[int] = None, host: str = "127.0.0.1") -> Tuple[FastAPIMessageBus, int]:
         """
         Start a message bus for testing.
 
@@ -63,9 +61,7 @@ class MessageBusManager:
         # Create and start the bus
         self.bus = FastAPIMessageBus(host=host, port=port, config_store_dir=self.temp_config_dir)
 
-        print(
-            f"Starting test message bus on {host}:{port} with config store: {self.temp_config_dir}"
-        )
+        print(f"Starting test message bus on {host}:{port} with config store: {self.temp_config_dir}")
         self.bus.start()
 
         # Wait for server to be ready
@@ -188,9 +184,7 @@ class MessageBusManager:
 
 
 # Convenience functions for simple use cases
-def start_test_message_bus(
-    port: Optional[int] = None, host: str = "127.0.0.1"
-) -> Tuple[FastAPIMessageBus, int]:
+def start_test_message_bus(port: Optional[int] = None, host: str = "127.0.0.1") -> Tuple[FastAPIMessageBus, int]:
     """
     Start a test message bus (convenience function).
 

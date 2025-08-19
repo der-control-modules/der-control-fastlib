@@ -1,10 +1,7 @@
 import datetime
 import sys
 
-import gevent
-from gevent.event import AsyncResult
-
-from aems.client.agent import Agent, Core, RPC
+from aems.client.agent import RPC, Agent, Core
 
 
 class ListenerAgent(Agent):

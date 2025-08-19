@@ -102,9 +102,7 @@ class TestAgentRPC:
             assert False, "Should have raised an exception for non-existent method"
         except Exception as e:
             # Should get some kind of method not found error
-            assert (
-                "method" in str(e).lower() or "not found" in str(e).lower()
-            ), f"Expected method error, got {e}"
+            assert "method" in str(e).lower() or "not found" in str(e).lower(), f"Expected method error, got {e}"
 
     def test_rpc_to_nonexistent_agent(self):
         """Test RPC call to a non-existent agent."""

@@ -1,11 +1,13 @@
 # listener_agent_test.py
 
-import gevent
-from aems.client.agent import Agent
-from listener_agent import ListenerAgent
 import datetime
 import random
 import sys
+
+import gevent
+from listener_agent import ListenerAgent
+
+from aems.client.agent import Agent
 
 
 def run_listener_test():
@@ -48,11 +50,7 @@ def run_listener_test():
             message = {
                 "value": random.random() * 100,
                 "timestamp": datetime.datetime.now().isoformat(),
-                "units": (
-                    "watts"
-                    if "energy" in topic
-                    else "celsius" if "temperature" in topic else "state"
-                ),
+                "units": ("watts" if "energy" in topic else "celsius" if "temperature" in topic else "state"),
                 "source": "test_script",
             }
 
@@ -70,9 +68,7 @@ def run_listener_test():
         # Use RPC to update listener configuration
         print("\n=== Testing RPC configuration update ===")
         print("Adding an ignore pattern for 'analysis/' topics...")
-        result = controller.vip.rpc.call(
-            "listener", "update_config", "ignore_patterns", ["analysis/"]
-        ).get()
+        result = controller.vip.rpc.call("listener", "update_config", "ignore_patterns", ["analysis/"]).get()
         print(f"Result: {result}")
 
         # Publish another message after configuration change

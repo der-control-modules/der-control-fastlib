@@ -2,27 +2,23 @@
 Test agent configuration functionality using pytest - simplified for debugging
 """
 
-import pytest
 import gevent
-from aems.client.agent import Agent
+import pytest
 
 
 class TestAgentConfigSimple:
     """Test agent configuration functionality with config merging."""
 
     @pytest.fixture(autouse=True)
-    def setup_agents(self, message_bus):
+    def setup_agents(self, message_bus_manager_fixture):
         """Set up test agents with the running message bus."""
-        # Store the message bus reference
-        self.message_bus = message_bus
+        # Store the message bus manager reference
+        self.manager = message_bus_manager_fixture
+        self.manager.start_bus()
 
-        # Create agents with the correct port
-        self.agent = Agent("config_test_agent", port=8888)
-        self.config_agent = Agent("config_manager", port=8888)
-
-        # Connect both agents
-        self.agent.connect()
-        self.config_agent.connect()
+        # Create agents using the new paradigm
+        self.agent = self.manager.create_connected_agent("config_test_agent")
+        self.config_agent = self.manager.create_connected_agent("config_manager")
 
         # Wait for connections
         gevent.sleep(1)
@@ -80,9 +76,7 @@ class TestAgentConfigSimple:
             print(f"Get result type: {type(result)}")
 
             # Should return the server config since no defaults are set
-            assert (
-                result == server_config
-            ), f"Should return server config. Expected: {server_config}, Got: {result}"
+            assert result == server_config, f"Should return server config. Expected: {server_config}, Got: {result}"
         except Exception as e:
             print(f"Get error: {e}")
             assert False, f"Get should not fail: {e}"

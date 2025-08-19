@@ -61,9 +61,7 @@ class LifecycleTestAgent(Agent):
         self.event_counts["onconfigure"] += 1
         self.lifecycle_events.append("onconfigure")
         configs = kwargs.get("configs", [])
-        print(
-            f"ONCONFIGURE called! Count: {self.event_counts['onconfigure']}, configs: {len(configs)}"
-        )
+        print(f"ONCONFIGURE called! Count: {self.event_counts['onconfigure']}, configs: {len(configs)}")
 
     def on_stop(self, sender, **kwargs):
         self.event_counts["onstop"] += 1
@@ -107,9 +105,7 @@ def test_agent_lifecycle(message_bus):
         assert (
             agent.event_counts["onconfigure"] == 1
         ), f"Expected onconfigure=1, got {agent.event_counts['onconfigure']}"
-        assert (
-            agent.event_counts["onstart"] == 1
-        ), f"Expected onstart=1, got {agent.event_counts['onstart']}"
+        assert agent.event_counts["onstart"] == 1, f"Expected onstart=1, got {agent.event_counts['onstart']}"
 
         # Verify event order during connection
         expected_connection_order = ["onconnected", "onconfigure", "onstart"]
@@ -135,9 +131,7 @@ def test_agent_lifecycle(message_bus):
         print(f"Events fired during disconnection: {agent.lifecycle_events}")
 
         # Verify disconnection events
-        assert (
-            agent.event_counts["onstop"] == 1
-        ), f"Expected onstop=1, got {agent.event_counts['onstop']}"
+        assert agent.event_counts["onstop"] == 1, f"Expected onstop=1, got {agent.event_counts['onstop']}"
         assert (
             agent.event_counts["ondisconnected"] == 1
         ), f"Expected ondisconnected=1, got {agent.event_counts['ondisconnected']}"
@@ -163,9 +157,7 @@ def test_agent_lifecycle(message_bus):
         print(f"Events fired during core.stop(): {agent.lifecycle_events}")
 
         # core.stop() should fire onfinish
-        assert (
-            agent.event_counts["onfinish"] >= 1
-        ), f"Expected onfinish>=1, got {agent.event_counts['onfinish']}"
+        assert agent.event_counts["onfinish"] >= 1, f"Expected onfinish>=1, got {agent.event_counts['onfinish']}"
 
         print("✓ Core stop lifecycle events fired correctly")
 
@@ -224,9 +216,7 @@ def test_signal_decorators(message_bus):
 
         # Verify decorator handlers were called
         assert "decorator_onstart" in agent.decorator_events, "Decorator onstart handler not called"
-        assert (
-            "decorator_onconnected" in agent.decorator_events
-        ), "Decorator onconnected handler not called"
+        assert "decorator_onconnected" in agent.decorator_events, "Decorator onconnected handler not called"
 
         print("✓ @Core.receiver decorators work correctly")
 

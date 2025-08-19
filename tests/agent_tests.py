@@ -1,6 +1,7 @@
 # agent_tests.py
 
 import gevent
+
 from aems.client.agent import Agent
 
 
@@ -31,13 +32,9 @@ def run_publisher_subscriber_test():
 
     # Publish messages - using the new hierarchical API with AsyncResult
     publisher.vip.pubsub.publish("test/topic1", "Hello from topic1").get()  # Wait for result
-    publisher.vip.pubsub.publish(
-        "test/special/topic2", "Hello from special topic2"
-    ).get()  # Wait for result
+    publisher.vip.pubsub.publish("test/special/topic2", "Hello from special topic2").get()  # Wait for result
     publisher.vip.pubsub.publish("other/topic3", "Hello from other topic3").get()  # Wait for result
-    publisher.vip.pubsub.publish(
-        "pattern/123/test", "Hello from pattern match"
-    ).get()  # Wait for result
+    publisher.vip.pubsub.publish("pattern/123/test", "Hello from pattern match").get()  # Wait for result
 
     # Wait for messages to be processed
     gevent.sleep(2)

@@ -1,9 +1,8 @@
 # config_test_agent.py - Updated with cron example
 
-from aems.client.agent import Agent, Core, RPC, AsyncResult
-import gevent
 import datetime
-import json
+
+from aems.client.agent import RPC, Agent, Core
 
 
 class ConfigTestAgent(Agent):
@@ -53,9 +52,7 @@ class ConfigTestAgent(Agent):
         self._schedule_processing_task()
 
         # Schedule a daily report task (won't change with config)
-        self.core.schedule(
-            self._daily_report, "0 0 * * *", name="daily_report"  # Midnight every day
-        )
+        self.core.schedule(self._daily_report, "0 0 * * *", name="daily_report")  # Midnight every day
 
         print(f"{self.identity} agent started!")
 
@@ -108,9 +105,7 @@ class ConfigTestAgent(Agent):
                 configured_interval = self._config.get("interval", 60)
                 current_interval = current_tasks["_process_data"].get("interval", 0)
                 if current_interval != configured_interval:
-                    print(
-                        f"Updating processing interval from {current_interval} to {configured_interval}"
-                    )
+                    print(f"Updating processing interval from {current_interval} to {configured_interval}")
                     self.core.update_interval("_process_data", configured_interval)
 
     @Core.receiver("onconfigure")
@@ -257,7 +252,7 @@ class ConfigTestAgent(Agent):
             target[keys[-1]] = value
 
             # Store the updated config
-            result = self.config.set("config", new_config).get(timeout=5)
+            self.config.set("config", new_config).get(timeout=5)
             return {"success": True, "message": f"Updated {key} to {value}"}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -266,7 +261,7 @@ class ConfigTestAgent(Agent):
     def reset_config(self):
         """RPC method to reset the configuration to defaults."""
         try:
-            result = self.config.set("config", self.default_config.copy()).get(timeout=5)
+            self.config.set("config", self.default_config.copy()).get(timeout=5)
             return {"success": True, "message": "Configuration reset to defaults"}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -280,7 +275,7 @@ class ConfigTestAgent(Agent):
             if cron_schedule:
                 new_config["cron_schedule"] = cron_schedule
 
-            result = self.config.set("config", new_config).get(timeout=5)
+            self.config.set("config", new_config).get(timeout=5)
             return {
                 "success": True,
                 "message": f"Switched to cron scheduling with expression: {new_config['cron_schedule']}",
@@ -297,7 +292,7 @@ class ConfigTestAgent(Agent):
             if interval is not None:
                 new_config["interval"] = interval
 
-            result = self.config.set("config", new_config).get(timeout=5)
+            self.config.set("config", new_config).get(timeout=5)
             return {
                 "success": True,
                 "message": f"Switched to interval scheduling with interval: {new_config['interval']} seconds",
@@ -340,7 +335,7 @@ class ConfigTestAgent(Agent):
         # Remember the task name for later updates
         self._process_task_name = task_name
 
-    def _process_data(self):
+    def _manual_process_data(self):
         """Task to process data based on configuration."""
         if not self._config.get("enabled", False):
             print("Processing skipped - agent is disabled")
@@ -361,7 +356,8 @@ class ConfigTestAgent(Agent):
 
 
 if __name__ == "__main__":
-    from agent import run_agent
     import sys
+
+    from agent import run_agent
 
     sys.exit(run_agent(ConfigTestAgent))

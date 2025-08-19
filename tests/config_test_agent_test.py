@@ -1,11 +1,11 @@
 # config_test_agent_test.py - Updated with cron testing
 
-import gevent
-from aems.client.agent import Agent
-from config_test_agent import ConfigTestAgent
-import datetime
-import random
 import sys
+
+import gevent
+from config_test_agent import ConfigTestAgent
+
+from aems.client.agent import Agent
 
 
 def run_config_test():
@@ -39,9 +39,7 @@ def run_config_test():
 
         # Modify a configuration value
         print("\n=== Modifying Configuration ===")
-        result = controller.vip.rpc.call("config_test", "set_config_value", "interval", 10).get(
-            timeout=5
-        )
+        result = controller.vip.rpc.call("config_test", "set_config_value", "interval", 10).get(timeout=5)
         print(f"Set interval=10 result: {result}")
 
         # Wait to see the effect of the configuration change
@@ -49,17 +47,15 @@ def run_config_test():
 
         # Modify a nested configuration value
         print("\n=== Modifying Nested Configuration ===")
-        result = controller.vip.rpc.call(
-            "config_test", "set_config_value", "nested.setting1", "newvalue"
-        ).get(timeout=5)
+        result = controller.vip.rpc.call("config_test", "set_config_value", "nested.setting1", "newvalue").get(
+            timeout=5
+        )
         print(f"Set nested.setting1=newvalue result: {result}")
 
         # Add new targets
         print("\n=== Adding Targets ===")
         new_targets = ["device1", "device2", "device3", "device4"]
-        result = controller.vip.rpc.call(
-            "config_test", "set_config_value", "targets", new_targets
-        ).get(timeout=5)
+        result = controller.vip.rpc.call("config_test", "set_config_value", "targets", new_targets).get(timeout=5)
         print(f"Set new targets result: {result}")
 
         # Wait to see the effect of the configuration changes
@@ -73,9 +69,7 @@ def run_config_test():
         # Test switching to cron scheduling
         print("\n=== Switching to Cron Scheduling ===")
         # Use "*/1 * * * *" for testing to ensure it runs every minute
-        result = controller.vip.rpc.call("config_test", "switch_to_cron", "*/1 * * * *").get(
-            timeout=5
-        )
+        result = controller.vip.rpc.call("config_test", "switch_to_cron", "*/1 * * * *").get(timeout=5)
         print(f"Switch to cron result: {result}")
 
         # Wait to see the effect of cron scheduling

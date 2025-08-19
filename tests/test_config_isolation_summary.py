@@ -2,9 +2,10 @@
 """
 Summary test demonstrating config store isolation per agent
 """
-import pytest
 import gevent
+import pytest
 import requests
+
 from aems.client.agent import Agent
 
 
@@ -15,9 +16,7 @@ class ConfigIsolationTestAgent(Agent):
 
     def on_config_update(self, config_name, action, config_value):
         """Handle configuration updates."""
-        self.notifications.append(
-            {"config_name": config_name, "action": action, "agent_identity": self.identity}
-        )
+        self.notifications.append({"config_name": config_name, "action": action, "agent_identity": self.identity})
         print(f"[{self.identity}] Received {action} for '{config_name}'")
 
 
@@ -75,12 +74,8 @@ def test_config_store_isolation_summary(message_bus):
         print(f"Agent B notifications: {len(agent_b.notifications)}")
 
         # Each agent should have received exactly one notification for their own config
-        assert (
-            len(agent_a.notifications) == 1
-        ), f"Agent A should have 1 notification, got {len(agent_a.notifications)}"
-        assert (
-            len(agent_b.notifications) == 1
-        ), f"Agent B should have 1 notification, got {len(agent_b.notifications)}"
+        assert len(agent_a.notifications) == 1, f"Agent A should have 1 notification, got {len(agent_a.notifications)}"
+        assert len(agent_b.notifications) == 1, f"Agent B should have 1 notification, got {len(agent_b.notifications)}"
 
         # Verify the notifications are for the correct agent
         assert agent_a.notifications[0]["agent_identity"] == "agent_a"

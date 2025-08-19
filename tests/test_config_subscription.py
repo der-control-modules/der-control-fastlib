@@ -2,8 +2,9 @@
 """
 Test configuration subscription and UPDATE notification behavior
 """
-import pytest
 import gevent
+import pytest
+
 from aems.client.agent import Agent
 
 
@@ -71,9 +72,7 @@ def test_config_subscription_and_update(message_bus):
         # Verify the config content matches what was stored
         if isinstance(received_config, dict):
             assert "setting1" in received_config, "setting1 not found in received config"
-            assert (
-                received_config["setting1"] == "value1"
-            ), f"Expected 'value1', got {received_config['setting1']}"
+            assert received_config["setting1"] == "value1", f"Expected 'value1', got {received_config['setting1']}"
 
         print("✓ Configuration UPDATE notification was received correctly!")
 
@@ -94,9 +93,7 @@ def test_config_subscription_multiple_updates(message_bus):
         gevent.sleep(1)
 
         print("2. Subscribing to config 'multi_config'...")
-        agent.config.subscribe(
-            callback=agent.config_callback, pattern="multi_config", actions=["UPDATE", "NEW"]
-        )
+        agent.config.subscribe(callback=agent.config_callback, pattern="multi_config", actions=["UPDATE", "NEW"])
         gevent.sleep(0.5)
 
         print("3. Storing multiple configuration updates...")
@@ -121,19 +118,13 @@ def test_config_subscription_multiple_updates(message_bus):
         print(f"Final config: {agent.received_configs.get('multi_config')}")
 
         # Should have received at least one update (the final one)
-        assert (
-            len(agent.received_updates) >= 1
-        ), f"Expected at least 1 update, got {len(agent.received_updates)}"
+        assert len(agent.received_updates) >= 1, f"Expected at least 1 update, got {len(agent.received_updates)}"
 
         # The final config should be the last one set
         final_config = agent.received_configs.get("multi_config")
         if final_config and isinstance(final_config, dict):
-            assert (
-                final_config.get("version") == 3
-            ), f"Expected version 3, got {final_config.get('version')}"
-            assert (
-                final_config.get("data") == "third"
-            ), f"Expected 'third', got {final_config.get('data')}"
+            assert final_config.get("version") == 3, f"Expected version 3, got {final_config.get('version')}"
+            assert final_config.get("data") == "third", f"Expected 'third', got {final_config.get('data')}"
 
         print("✓ Multiple configuration updates were handled correctly!")
 

@@ -1,18 +1,20 @@
 # config_store.py - Enhanced to support different formats
 
-import os
-import json
 import csv
-import io
-import glob
-from typing import Optional, Any, Union
-import threading
 import datetime
+import io
+import json
+import logging
+import os
+import threading
+from typing import Any, Optional, Union
 
 from watchdog.observers import Observer
 
 from aems.server.config_store_handler import ConfigFileHandler
 from aems.server.models import Message, MessageBus
+
+_log = logging.getLogger(__name__)
 
 
 class ConfigStore:
@@ -50,11 +52,9 @@ class ConfigStore:
         observer.schedule(ConfigFileHandler(self), self.base_dir, recursive=True)
         observer.start()
 
-        print(f"ConfigStore initialized with base directory: {base_dir}")
+        _log.info(f"ConfigStore initialized with base directory: {base_dir}")
 
-    def store(
-        self, agent_id: str, config_name: str, config_data: Any, config_type: str = "json"
-    ) -> bool:
+    def store(self, agent_id: str, config_name: str, config_data: Any, config_type: str = "json") -> bool:
         """
         Store a configuration entry for an agent.
 
@@ -80,7 +80,7 @@ class ConfigStore:
             elif config_type == "csv":
                 return self._store_csv(agent_dir, config_name, config_data)
             else:
-                print(f"Unsupported config type: {config_type}")
+                _log.error(f"Unsupported config type: {config_type}")
                 return False
 
     def _store_metadata(self, agent_dir: str, config_name: str, config_type: str):
@@ -105,7 +105,7 @@ class ConfigStore:
                 with open(metadata_file, "w") as f:
                     json.dump(metadata, f, indent=2)
             except Exception as e:
-                print(f"Error updating metadata: {e}")
+                _log.error(f"Error updating metadata: {e}")
 
     def _store_json(self, agent_dir: str, config_name: str, config_data: Any) -> bool:
         """Store a JSON configuration."""
@@ -117,12 +117,10 @@ class ConfigStore:
             self._update_metadata(agent_dir, config_name)
             return True
         except Exception as e:
-            print(f"Error storing JSON config {config_name}: {e}")
+            _log.error(f"Error storing JSON config {config_name}: {e}")
             return False
 
-    def _store_csv(
-        self, agent_dir: str, config_name: str, csv_data: Union[str, list[list[str]]]
-    ) -> bool:
+    def _store_csv(self, agent_dir: str, config_name: str, csv_data: Union[str, list[list[str]]]) -> bool:
         """Store a CSV configuration."""
         config_file = os.path.join(agent_dir, f"{config_name}")
 
@@ -143,7 +141,7 @@ class ConfigStore:
             self._update_metadata(agent_dir, config_name)
             return True
         except Exception as e:
-            print(f"Error storing CSV config {config_name}: {e}")
+            _log.error(f"Error storing CSV config {config_name}: {e}")
             return False
 
     def retrieve(self, agent_id: str, config_name: str, raw: bool = False) -> Optional[Any]:
@@ -172,7 +170,7 @@ class ConfigStore:
                     with open(config_file, "r") as f:
                         return f.read()
                 except Exception as e:
-                    print(f"Error reading raw config {config_name}: {e}")
+                    _log.error(f"Error reading raw config {config_name}: {e}")
                     return None
 
             # Otherwise, parse based on type
@@ -185,7 +183,7 @@ class ConfigStore:
                         metadata = json.load(f)
                     config_type = metadata.get("type", "json")
                 except Exception as e:
-                    print(f"Error reading metadata for {config_name}: {e}")
+                    _log.error(f"Error reading metadata for {config_name}: {e}")
 
             # Parse based on type
             if config_type == "json":
@@ -193,7 +191,7 @@ class ConfigStore:
             elif config_type == "csv":
                 return self._retrieve_csv(config_file)
             else:
-                print(f"Unsupported config type: {config_type}")
+                _log.error(f"Unsupported config type: {config_type}")
                 return None
 
     def _retrieve_json(self, config_file: str) -> Optional[Any]:
@@ -202,7 +200,7 @@ class ConfigStore:
             with open(config_file, "r") as f:
                 return json.load(f)
         except Exception as e:
-            print(f"Error retrieving JSON config from {config_file}: {e}")
+            _log.error(f"Error retrieving JSON config from {config_file}: {e}")
             return None
 
     def _retrieve_csv(self, config_file: str) -> Optional[list[list[str]]]:
@@ -212,7 +210,7 @@ class ConfigStore:
                 reader = csv.reader(f)
                 return [row for row in reader]
         except Exception as e:
-            print(f"Error retrieving CSV config from {config_file}: {e}")
+            _log.error(f"Error retrieving CSV config from {config_file}: {e}")
             return None
 
     def list_configs(self, agent_id: Optional[str] = None) -> dict[str, list[dict[str, Any]]]:
@@ -236,11 +234,7 @@ class ConfigStore:
             else:
                 # list configs for all agents
                 if os.path.exists(self.base_dir):
-                    agent_dirs = [
-                        d
-                        for d in os.listdir(self.base_dir)
-                        if os.path.isdir(os.path.join(self.base_dir, d))
-                    ]
+                    agent_dirs = [d for d in os.listdir(self.base_dir) if os.path.isdir(os.path.join(self.base_dir, d))]
 
                     for agent_dir_name in agent_dirs:
                         agent_dir_path = os.path.join(self.base_dir, agent_dir_name)
@@ -260,7 +254,6 @@ class ConfigStore:
         ]
 
         for filename in all_files:
-            config_path = os.path.join(agent_dir, filename)
             metadata_path = os.path.join(agent_dir, f"{filename}.metadata")
 
             config_info = {"name": filename, "type": "json"}  # Default type
@@ -300,7 +293,7 @@ class ConfigStore:
                 try:
                     os.remove(config_file)
                 except Exception as e:
-                    print(f"Error deleting config {config_name}: {e}")
+                    _log.error(f"Error deleting config {config_name}: {e}")
                     success = False
             else:
                 success = False
@@ -310,7 +303,7 @@ class ConfigStore:
                 try:
                     os.remove(metadata_file)
                 except Exception as e:
-                    print(f"Error deleting metadata for {config_name}: {e}")
+                    _log.error(f"Error deleting metadata for {config_name}: {e}")
                     # Don't set success to False here, as long as the main config was deleted
 
             return success
@@ -378,7 +371,7 @@ class ConfigStore:
             value: The new configuration value (None for DELETE actions)
         """
         if self.messagebus is None:
-            print("Config change not published: No message bus provided")
+            _log.warning("Config change not published: No message bus provided")
             return
 
         try:
@@ -393,7 +386,7 @@ class ConfigStore:
             if action != "DELETE" and value is not None:
                 payload["value"] = value
 
-            print(f"Publishing config change: {config_name} ({action})")
+            _log.info(f"Publishing config change: {config_name} ({action})")
 
             # Format topic for easier subscription matching
             topic = f"config/{config_name}"
@@ -414,7 +407,7 @@ class ConfigStore:
                     )
                     self.messagebus.send_vip_message(message)
             else:
-                print("Cannot publish config change: No active connections found")
+                _log.warning("Cannot publish config change: No active connections found")
 
         except Exception as e:
-            print(f"Error publishing config change notification: {e}")
+            _log.error(f"Error publishing config change notification: {e}")

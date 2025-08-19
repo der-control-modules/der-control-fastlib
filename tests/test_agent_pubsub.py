@@ -55,14 +55,10 @@ class TestAgentPubSub:
         pub_result1 = self.publisher.vip.pubsub.publish("", "test/topic1", "Hello from topic1")
         assert pub_result1.get() is True, "Publish 1 should succeed"
 
-        pub_result2 = self.publisher.vip.pubsub.publish(
-            "", "test/special/topic2", "Hello from special topic2"
-        )
+        pub_result2 = self.publisher.vip.pubsub.publish("", "test/special/topic2", "Hello from special topic2")
         assert pub_result2.get() is True, "Publish 2 should succeed"
 
-        pub_result3 = self.publisher.vip.pubsub.publish(
-            "", "other/topic3", "Hello from other topic3"
-        )
+        pub_result3 = self.publisher.vip.pubsub.publish("", "other/topic3", "Hello from other topic3")
         assert pub_result3.get() is True, "Publish 3 should succeed"
 
         # Wait for message processing
@@ -73,14 +69,10 @@ class TestAgentPubSub:
         sub2_messages = self.subscriber2.get_received_messages()
 
         # Subscriber1 should receive messages from "test/" prefix
-        assert (
-            len(sub1_messages) >= 2
-        ), f"Subscriber1 should receive at least 2 messages, got {len(sub1_messages)}"
+        assert len(sub1_messages) >= 2, f"Subscriber1 should receive at least 2 messages, got {len(sub1_messages)}"
 
         # Subscriber2 should receive messages from "test/special/" prefix only
-        assert (
-            len(sub2_messages) >= 1
-        ), f"Subscriber2 should receive at least 1 message, got {len(sub2_messages)}"
+        assert len(sub2_messages) >= 1, f"Subscriber2 should receive at least 1 message, got {len(sub2_messages)}"
 
     def test_regex_subscription(self):
         """Test regex pattern subscription."""
@@ -107,9 +99,7 @@ class TestAgentPubSub:
 
         # Should receive messages that match the pattern
         pubsub_messages = [msg for msg in messages if msg.get("type") == "pubsub"]
-        assert (
-            len(pubsub_messages) >= 2
-        ), f"Should receive at least 2 matching messages, got {len(pubsub_messages)}"
+        assert len(pubsub_messages) >= 2, f"Should receive at least 2 matching messages, got {len(pubsub_messages)}"
 
     def test_multiple_subscriptions(self):
         """Test multiple subscriptions on the same agent."""
@@ -139,9 +129,7 @@ class TestAgentPubSub:
         pubsub_messages = [msg for msg in messages if msg.get("type") == "pubsub"]
 
         # Should receive messages from both subscribed topics
-        assert (
-            len(pubsub_messages) >= 2
-        ), f"Should receive at least 2 messages, got {len(pubsub_messages)}"
+        assert len(pubsub_messages) >= 2, f"Should receive at least 2 messages, got {len(pubsub_messages)}"
 
         # Verify topics
         topics = [msg.get("topic", "") for msg in pubsub_messages]

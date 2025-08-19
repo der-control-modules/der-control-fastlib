@@ -3,8 +3,9 @@
 Test that the config store list method correctly returns cached configurations.
 This test verifies that the list method returns configs from the cache instead of querying the server.
 """
-import pytest
 import gevent
+import pytest
+
 from aems.client.agent import Agent
 
 
@@ -71,13 +72,15 @@ def test_config_list_from_cache(message_bus):
 
             # If it's a default config, verify it matches the default value
             if config_name in default_configs:
-                assert config_value == default_configs[config_name], \
-                    f"Default config {config_name} value doesn't match expected"
+                assert (
+                    config_value == default_configs[config_name]
+                ), f"Default config {config_name} value doesn't match expected"
 
             # If it's a server config, verify it matches the server value
             if config_name in server_configs:
-                assert config_value == server_configs[config_name], \
-                    f"Server config {config_name} value doesn't match expected"
+                assert (
+                    config_value == server_configs[config_name]
+                ), f"Server config {config_name} value doesn't match expected"
 
         print("✅ SUCCESS: List method returned all configurations from the cache!")
 
@@ -99,7 +102,11 @@ def test_merged_config_in_list(message_bus):
 
         print("2. Setting a default configuration...")
         # Set a default configuration
-        default_value = {"source": "default", "only_in_default": True, "shared_key": "default_value"}
+        default_value = {
+            "source": "default",
+            "only_in_default": True,
+            "shared_key": "default_value",
+        }
         agent.config.set_default("merged_config", default_value)
 
         print("3. Setting a server configuration with the same name...")
@@ -127,8 +134,8 @@ def test_merged_config_in_list(message_bus):
         # The merged config should have values from both default and server,
         # with server values taking precedence for overlapping keys
         assert merged_config["source"] == "server", "Server value should override default for 'source'"
-        assert merged_config["only_in_default"] == True, "Value from default should be present"
-        assert merged_config["only_in_server"] == True, "Value from server should be present"
+        assert merged_config["only_in_default"] is True, "Value from default should be present"
+        assert merged_config["only_in_server"] is True, "Value from server should be present"
         assert merged_config["shared_key"] == "server_value", "Server value should override default for 'shared_key'"
 
         print("✅ SUCCESS: Merged configuration was correctly returned!")
