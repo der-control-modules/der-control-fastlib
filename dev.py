@@ -72,9 +72,7 @@ def trigger_update(server_url=None, token=None):
             "action": "deploy",
             "version": current_version,
             "repository": "aems-lib-fastapi",
-            "timestamp": subprocess.run(
-                "date -Iseconds", shell=True, capture_output=True, text=True
-            ).stdout.strip(),
+            "timestamp": subprocess.run("date -Iseconds", shell=True, capture_output=True, text=True).stdout.strip(),
         }
 
         # Add authentication if token provided
@@ -131,9 +129,7 @@ def get_current_version():
         str: The current version string without the 'v' prefix
     """
     # Get all tags sorted by version
-    result = subprocess.run(
-        "git tag -l --sort=-version:refname", shell=True, capture_output=True, text=True
-    )
+    result = subprocess.run("git tag -l --sort=-version:refname", shell=True, capture_output=True, text=True)
 
     if result.returncode != 0 or not result.stdout.strip():
         # No tags found, start with 0.0.0
@@ -305,18 +301,14 @@ def version(version_arg=None):
             print(f"Setting version: {current_version} → {new_version}")
         except ValueError as e:
             print(f"❌ Error: {e}")
-            print(
-                "Version should be in format: major.minor.patch[-prerelease.num] (e.g., 1.2.3, 1.2.3-alpha.1)"
-            )
+            print("Version should be in format: major.minor.patch[-prerelease.num] (e.g., 1.2.3, 1.2.3-alpha.1)")
             return False
 
     # Create git tag
     tag_name = f"v{new_version}"
 
     # Check if tag already exists
-    check_result = subprocess.run(
-        f"git tag -l {tag_name}", shell=True, capture_output=True, text=True
-    )
+    check_result = subprocess.run(f"git tag -l {tag_name}", shell=True, capture_output=True, text=True)
 
     if check_result.stdout.strip():
         print(f"❌ Error: Tag {tag_name} already exists")
@@ -393,9 +385,7 @@ def run_command(cmd, description=None):
         print(f"🔄 {description}...")
 
     # Run the command and capture output
-    process = subprocess.run(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    )
+    process = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     if process.returncode != 0:
         print("❌ Error:")
@@ -433,9 +423,7 @@ def setup_upstream(upstream_url=None):
         return False
 
     # Check if upstream already exists
-    result = subprocess.run(
-        "git remote get-url upstream", shell=True, capture_output=True, text=True
-    )
+    result = subprocess.run("git remote get-url upstream", shell=True, capture_output=True, text=True)
 
     if result.returncode == 0:
         current_upstream = result.stdout.strip()
@@ -443,9 +431,7 @@ def setup_upstream(upstream_url=None):
 
         if current_upstream != upstream_url:
             print(f"🔄 Updating upstream URL from {current_upstream} to {upstream_url}")
-            return run_command(
-                f"git remote set-url upstream {upstream_url}", "Updating upstream URL"
-            )
+            return run_command(f"git remote set-url upstream {upstream_url}", "Updating upstream URL")
         else:
             print("✅ Upstream is already correctly configured")
             return True
@@ -473,9 +459,7 @@ def sync_fork():
     print("🔄 Syncing fork with upstream...")
 
     # Check if upstream remote exists
-    result = subprocess.run(
-        "git remote get-url upstream", shell=True, capture_output=True, text=True
-    )
+    result = subprocess.run("git remote get-url upstream", shell=True, capture_output=True, text=True)
 
     if result.returncode != 0:
         print("❌ Error: No upstream remote configured")
@@ -507,9 +491,7 @@ def sync_fork():
         return False
 
     # Sync develop branch if it exists
-    result = subprocess.run(
-        "git branch -r | grep origin/develop", shell=True, capture_output=True, text=True
-    )
+    result = subprocess.run("git branch -r | grep origin/develop", shell=True, capture_output=True, text=True)
 
     if result.returncode == 0:
         if not run_command("git checkout develop", "Switching to develop branch"):
@@ -562,9 +544,7 @@ def create_pr_branch(branch_name=None):
 
     # Switch to develop (or main if no develop)
     base_branch = "develop"
-    result = subprocess.run(
-        "git branch -r | grep origin/develop", shell=True, capture_output=True, text=True
-    )
+    result = subprocess.run("git branch -r | grep origin/develop", shell=True, capture_output=True, text=True)
 
     if result.returncode != 0:
         base_branch = "main"
@@ -820,9 +800,7 @@ def security():
     pip_audit_ok = run_command("pip-audit", "Scanning dependencies with pip-audit")
 
     # Run bandit for code security analysis
-    bandit_ok = run_command(
-        "bandit -r src/ -f json -o bandit-report.json", "Running Bandit security analysis"
-    )
+    bandit_ok = run_command("bandit -r src/ -f json -o bandit-report.json", "Running Bandit security analysis")
 
     if bandit_ok:
         print("📄 Bandit report saved to bandit-report.json")

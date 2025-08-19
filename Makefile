@@ -13,18 +13,18 @@ PRECOMMIT := .venv/bin/pre-commit
 # Formatting and linting
 .PHONY: format
 format: ## Format code with Black and isort
-	$(BLACK) --line-length=100 src/ tests/
-	$(ISORT) --profile black --line-length=100 src/ tests/
+	$(BLACK) --line-length=120 src/ tests/
+	$(ISORT) --profile black --line-length=120 src/ tests/
 
 .PHONY: format-check
 format-check: ## Check if code is formatted correctly
-	$(BLACK) --line-length=100 --check src/ tests/
-	$(ISORT) --profile black --line-length=100 --check-only src/ tests/
+	$(BLACK) --line-length=120 --check src/ tests/
+	$(ISORT) --profile black --line-length=120 --check-only src/ tests/
 
 .PHONY: lint
 lint: ## Run linting with flake8 and pylint
-	$(FLAKE8) --max-line-length=100 src/ tests/
-	$(PYLINT) --max-line-length=100 src/
+	$(FLAKE8) --max-line-length=120 src/ tests/
+	$(PYLINT) --max-line-length=120 src/
 
 .PHONY: lint-fix
 lint-fix: format lint ## Format code and then run linting

@@ -24,12 +24,111 @@ from aems.server.config_store import ConfigStore
 from aems.server.connection_manager import ConnectionManager
 from aems.server.models import Message, MessageBus
 
-logging.basicConfig(level=logging.DEBUG)
+
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter with color support for different log levels and sections."""
+
+    # ANSI color codes
+    COLORS = {
+        "DEBUG": "\033[36m",  # Cyan
+        "INFO": "\033[32m",  # Green
+        "WARNING": "\033[33m",  # Yellow
+        "ERROR": "\033[31m",  # Red
+        "CRITICAL": "\033[35m",  # Magenta
+    }
+
+    # Section-specific colors
+    SECTION_COLORS = {
+        "timestamp": "\033[90m",  # Dark gray
+        "level": "",  # Use level-specific color
+        "module": "\033[34m",  # Blue
+        "lineno": "\033[90m",  # Dark gray
+        "message": "\033[0m",  # Reset to default
+    }
+
+    RESET = "\033[0m"  # Reset color
+    BOLD = "\033[1m"  # Bold text
+
+    def __init__(self, format_string=None, use_colors=None):
+        if format_string is None:
+            format_string = "%(asctime)s %(levelname)s %(module)s:%(lineno)d %(message)s"
+        super().__init__(format_string)
+
+        # Auto-detect color support if not explicitly set
+        if use_colors is None:
+            import sys
+
+            self.use_colors = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        else:
+            self.use_colors = use_colors
+
+    def format(self, record):
+        # Skip coloring if colors are disabled
+        if not self.use_colors:
+            return super().format(record)
+
+        # Format the record first with the standard formatter
+        formatted = super().format(record)
+
+        # Apply colors to the formatted string
+        level_color = self.COLORS.get(record.levelname, "")
+
+        # Apply colors using string replacement on the formatted output
+        # This avoids type conversion issues with format fields
+
+        # Color the timestamp (first part before first space after the date/time)
+        import re
+
+        # Pattern to match timestamp at the beginning
+        timestamp_pattern = r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})"
+        formatted = re.sub(timestamp_pattern, f"{self.SECTION_COLORS['timestamp']}\\1{self.RESET}", formatted)
+
+        # Color the log level (looks for level names in the formatted string)
+        level_pattern = f"({record.levelname})"
+        formatted = re.sub(level_pattern, f"{level_color}{self.BOLD}\\1{self.RESET}", formatted, count=1)
+
+        # Color the module name (looks for module:lineno pattern)
+        module_pattern = f"({record.module}):"
+        formatted = re.sub(module_pattern, f"{self.SECTION_COLORS['module']}\\1{self.RESET}:", formatted, count=1)
+
+        # Color the line number (looks for :number pattern after module)
+        lineno_pattern = f":({record.lineno})"
+        formatted = re.sub(lineno_pattern, f":{self.SECTION_COLORS['lineno']}\\1{self.RESET}", formatted, count=1)
+
+        return formatted
+
+
+# Configure basic logging with colored formatter
+def setup_colored_logging():
+    """Set up colored logging for the application."""
+    # Create console handler with colored formatter
+    console_handler = logging.StreamHandler()
+    colored_formatter = ColoredFormatter("%(asctime)s %(levelname)s %(module)s:%(lineno)d %(message)s")
+    console_handler.setFormatter(colored_formatter)
+
+    # Configure root logger to INFO to reduce noise
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # Remove existing handlers and add our colored handler
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    root_logger.addHandler(console_handler)
+
+
+# Set up colored logging
+setup_colored_logging()
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
 
-# Turn down watchdog logging to reduce noise
+# Enable debug logging for our application modules
+logging.getLogger("aems").setLevel(logging.DEBUG)
+
+# Turn down noisy loggers to reduce debug spam
 logging.getLogger("watchdog.observers").setLevel(logging.INFO)
+logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)  # Silence all uvicorn.error messages
+logging.getLogger("uvicorn").setLevel(logging.INFO)
+logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
 
 def get_package_version():
@@ -109,7 +208,7 @@ class FastAPIMessageBus(MessageBus):
                 while True:
                     data = await websocket.receive_json()
 
-                    print(f"DEBUG: Received data from {identity}: {data['type']}")
+                    _log.debug(f"Received data from {identity}: {data['type']}")
 
                     # Process the incoming message based on its type
                     if "type" not in data:
@@ -125,35 +224,23 @@ class FastAPIMessageBus(MessageBus):
                         if hasattr(message, "subsystem"):
                             if message.subsystem == "rpc":
                                 # Forward the RPC message to the target peer
-                                if (
-                                    hasattr(message, "peer")
-                                    and message.peer in self.manager.active_connections
-                                ):
-                                    print(f"DEBUG: Forwarding VIP RPC message to {message.peer}")
+                                if hasattr(message, "peer") and message.peer in self.manager.active_connections:
+                                    _log.debug(f"Forwarding VIP RPC message to {message.peer}")
                                     await self.manager.send_message(
                                         message.peer, {"type": "vip", "message": message.__dict__}
                                     )
                             elif message.subsystem == "rpc_response":
                                 # Handle RPC response
                                 if hasattr(message, "msg_id"):
-                                    print(
-                                        f"DEBUG: Received VIP RPC response for msg_id {message.msg_id}"
-                                    )
+                                    _log.debug(f"Received VIP RPC response for msg_id {message.msg_id}")
                                     # Set the result for the waiting future
                                     self.manager.set_rpc_response(
                                         message.msg_id,
-                                        (
-                                            message.args[0]
-                                            if hasattr(message, "args") and message.args
-                                            else None
-                                        ),
+                                        (message.args[0] if hasattr(message, "args") and message.args else None),
                                     )
 
                                     # Forward the response to the original requester
-                                    if (
-                                        hasattr(message, "peer")
-                                        and message.peer in self.manager.active_connections
-                                    ):
+                                    if hasattr(message, "peer") and message.peer in self.manager.active_connections:
                                         await self.manager.send_message(
                                             message.peer,
                                             {"type": "vip", "message": message.__dict__},
@@ -234,7 +321,7 @@ class FastAPIMessageBus(MessageBus):
                         if "msg_id" in data and "result" in data:
                             msg_id = data["msg_id"]
                             result = data["result"]
-                            print(f"DEBUG: Setting RPC response for msg_id {msg_id}: {result}")
+                            _log.debug(f"Setting RPC response for msg_id {msg_id}: {result}")
                             self.manager.set_rpc_response(msg_id, result)
 
                     elif data["type"] == "rpc_error":
@@ -242,14 +329,14 @@ class FastAPIMessageBus(MessageBus):
                         if "msg_id" in data and "error" in data:
                             msg_id = data["msg_id"]
                             error = data["error"]
-                            print(f"DEBUG: Setting RPC error for msg_id {msg_id}: {error}")
+                            _log.debug(f"Setting RPC error for msg_id {msg_id}: {error}")
                             self.manager.set_rpc_error(msg_id, error)
 
             except WebSocketDisconnect:
-                print(f"DEBUG: WebSocket disconnect for {identity}")
+                _log.debug(f"WebSocket disconnect for {identity}")
                 self.manager.disconnect(identity)
             except Exception as e:
-                print(f"Error in websocket connection for {identity}: {e}")
+                _log.error(f"Error in websocket connection for {identity}: {e}")
                 self.manager.disconnect(identity)
 
         @self.app.get("/config-store/list")
@@ -263,9 +350,7 @@ class FastAPIMessageBus(MessageBus):
             """Retrieve a configuration for an agent."""
             config = self.config_store.retrieve(agent_id, config_name, raw)
             if config is None:
-                raise HTTPException(
-                    status_code=404, detail=f"Config {config_name} not found for agent {agent_id}"
-                )
+                raise HTTPException(status_code=404, detail=f"Config {config_name} not found for agent {agent_id}")
             return {"status": "success", "data": config}
 
         @self.app.put("/config-store/{agent_id}/{config_name}")
@@ -290,22 +375,16 @@ class FastAPIMessageBus(MessageBus):
             except ValueError as json_error:
                 raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(json_error)}")
             except UnicodeDecodeError as decode_error:
-                raise HTTPException(
-                    status_code=400, detail=f"Invalid text encoding: {str(decode_error)}"
-                )
+                raise HTTPException(status_code=400, detail=f"Invalid text encoding: {str(decode_error)}")
 
             if success:
                 # Notify the agent of the config update if it's connected
                 if agent_id in self.manager.active_connections:
                     try:
-                        await self.manager.send_message(
-                            agent_id, {"type": "config_update", "config_name": config_name}
-                        )
+                        await self.manager.send_message(agent_id, {"type": "config_update", "config_name": config_name})
                     except ConnectionError:
                         # Agent disconnected between check and notification - that's okay
-                        _log.warning(
-                            f"Agent {agent_id} disconnected during config update notification"
-                        )
+                        _log.warning(f"Agent {agent_id} disconnected during config update notification")
                 return {"status": "success"}
             else:
                 raise HTTPException(status_code=500, detail="Failed to store configuration")
@@ -318,19 +397,13 @@ class FastAPIMessageBus(MessageBus):
                 # Notify the agent of the config deletion if it's connected
                 if agent_id in self.manager.active_connections:
                     try:
-                        await self.manager.send_message(
-                            agent_id, {"type": "config_delete", "config_name": config_name}
-                        )
+                        await self.manager.send_message(agent_id, {"type": "config_delete", "config_name": config_name})
                     except ConnectionError:
                         # Agent disconnected between check and notification - that's okay
-                        _log.warning(
-                            f"Agent {agent_id} disconnected during config delete notification"
-                        )
+                        _log.warning(f"Agent {agent_id} disconnected during config delete notification")
                 return {"status": "success"}
             else:
-                raise HTTPException(
-                    status_code=404, detail=f"Config {config_name} not found for agent {agent_id}"
-                )
+                raise HTTPException(status_code=404, detail=f"Config {config_name} not found for agent {agent_id}")
 
         @self.app.get("/version")
         async def get_version():
@@ -388,9 +461,7 @@ class FastAPIMessageBus(MessageBus):
                             _log.debug(f"Fallback parsed JSON data: {auth_data}")
                 except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as parse_error:
                     _log.error(f"Failed to parse request data: {parse_error}")
-                    raise HTTPException(
-                        status_code=400, detail=f"Unable to parse request data: {str(parse_error)}"
-                    )
+                    raise HTTPException(status_code=400, detail=f"Unable to parse request data: {str(parse_error)}")
 
             if not auth_data:
                 raise HTTPException(status_code=400, detail="No data received in request")
@@ -399,9 +470,7 @@ class FastAPIMessageBus(MessageBus):
 
             # Validate required fields
             if "username" not in auth_data or "password" not in auth_data:
-                raise HTTPException(
-                    status_code=400, detail="Missing required fields: username and password"
-                )
+                raise HTTPException(status_code=400, detail="Missing required fields: username and password")
 
             username = auth_data["username"]
             password = auth_data["password"]
@@ -411,9 +480,7 @@ class FastAPIMessageBus(MessageBus):
             if username and password:
                 try:
                     # JWT configuration
-                    secret_key = os.environ.get(
-                        "JWT_SECRET_KEY", "your-secret-key-change-in-production"
-                    )
+                    secret_key = os.environ.get("JWT_SECRET_KEY", "your-secret-key-change-in-production")
                     algorithm = "HS256"
 
                     # Current time
@@ -435,9 +502,7 @@ class FastAPIMessageBus(MessageBus):
                         "exp": now + datetime.timedelta(days=7),
                         "type": "refresh",
                     }
-                    refresh_token = jwt.encode(
-                        refresh_token_payload, secret_key, algorithm=algorithm
-                    )
+                    refresh_token = jwt.encode(refresh_token_payload, secret_key, algorithm=algorithm)
 
                     return {
                         "status": "success",
@@ -463,14 +528,10 @@ class FastAPIMessageBus(MessageBus):
 
             # Validate JSON-RPC 2.0 format
             if "jsonrpc" not in rpc_data or rpc_data["jsonrpc"] != "2.0":
-                raise HTTPException(
-                    status_code=400, detail="Invalid JSON-RPC format. Must include 'jsonrpc': '2.0'"
-                )
+                raise HTTPException(status_code=400, detail="Invalid JSON-RPC format. Must include 'jsonrpc': '2.0'")
 
             if "id" not in rpc_data:
-                raise HTTPException(
-                    status_code=400, detail="Missing required field: 'id' (agent identifier)"
-                )
+                raise HTTPException(status_code=400, detail="Missing required field: 'id' (agent identifier)")
 
             if "method" not in rpc_data:
                 raise HTTPException(status_code=400, detail="Missing required field: 'method'")
@@ -506,7 +567,7 @@ class FastAPIMessageBus(MessageBus):
                     "msg_id": msg_id,
                 }
 
-                print(f"DEBUG: Sending HTTP RPC request to {agent_id}: {method}\nparams: {params}")
+                _log.debug(f"Sending HTTP RPC request to {agent_id}: {method}\nparams: {params}")
                 await self.manager.send_message(agent_id, rpc_message)
 
                 # Wait for the response (with timeout)
@@ -550,9 +611,7 @@ class FastAPIMessageBus(MessageBus):
             except Exception as rpc_error:
                 # Clean up the future - this is our fallback for truly unexpected errors
                 self.manager.clear_rpc_response(msg_id)
-                _log.error(
-                    f"Unexpected error in RPC processing: {type(rpc_error).__name__}: {rpc_error}"
-                )
+                _log.error(f"Unexpected error in RPC processing: {type(rpc_error).__name__}: {rpc_error}")
                 return {
                     "jsonrpc": "2.0",
                     "id": rpc_data.get("id"),
@@ -581,12 +640,10 @@ class FastAPIMessageBus(MessageBus):
         self.server = uvicorn.Server(config)
 
         # Run the server in a separate thread
-        self._server_thread = threading.Thread(
-            target=self._run_server, daemon=True, name="FastAPIMessageBus-Server"
-        )
+        self._server_thread = threading.Thread(target=self._run_server, daemon=True, name="FastAPIMessageBus-Server")
         self._server_thread.start()
 
-        print(f"FastAPIMessageBus running on http://{self.host}:{self.port}")
+        _log.info(f"FastAPIMessageBus running on http://{self.host}:{self.port}")
 
         # Initialize other components after server start
         if hasattr(self, "_init_after_start"):
@@ -595,26 +652,26 @@ class FastAPIMessageBus(MessageBus):
     def _run_server(self):
         """Run the uvicorn server."""
         try:
-            print(f"DEBUG: Starting server thread for {self.host}:{self.port}")
+            _log.debug(f"Starting server thread for {self.host}:{self.port}")
             # Since we're in a separate thread, we need to create our own event loop
             # This avoids conflicts with any existing event loop in the main thread
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
             try:
-                print("DEBUG: About to start uvicorn server...")
+                _log.debug("About to start uvicorn server...")
                 new_loop.run_until_complete(self.server.serve())
-                print("DEBUG: Uvicorn server finished serving")
+                _log.debug("Uvicorn server finished serving")
             finally:
-                print("DEBUG: Closing event loop")
+                _log.debug("Closing event loop")
                 new_loop.close()
         except Exception as e:
-            print(f"Error running server: {e}")
+            _log.error(f"Error running server: {e}")
             import traceback
 
             traceback.print_exc()
             raise
         finally:
-            print("DEBUG: Server thread ending, setting running=False")
+            _log.debug("Server thread ending, setting running=False")
             self.running = False
 
     def stop(self):
@@ -625,7 +682,7 @@ class FastAPIMessageBus(MessageBus):
         if self._stop_handler:
             self._stop_handler.message_bus_shutdown()
 
-        print("Stopping FastAPIMessageBus...")
+        _log.info("Stopping FastAPIMessageBus...")
 
         # Signal the server to stop
         self.server.should_exit = True
@@ -635,7 +692,7 @@ class FastAPIMessageBus(MessageBus):
             self._server_thread.join(timeout=5.0)
 
         self.running = False
-        print("DEBUG: MessageBus stopped")
+        _log.debug("MessageBus stopped")
 
     def is_running(self) -> bool:
         """Check if the message bus is running."""
@@ -648,9 +705,7 @@ class FastAPIMessageBus(MessageBus):
     async def _send_vip_message_async(self, message: Message):
         """Async implementation of send_vip_message."""
         if hasattr(message, "peer") and message.peer in self.manager.active_connections:
-            await self.manager.send_message(
-                message.peer, {"type": "vip", "message": message.__dict__}
-            )
+            await self.manager.send_message(message.peer, {"type": "vip", "message": message.__dict__})
 
     def receive_vip_message(self) -> Message:
         """Receive a VIP message synchronously."""
@@ -680,8 +735,8 @@ def start_server(host="127.0.0.1", port=8000, config_store_dir=None):
     # Create and start the server
     server = FastAPIMessageBus(host=host, port=port, config_store_dir=config_store_dir)
     server.start()
-    print(f"AEMS message bus server started at {host}:{port}")
-    print(f"Using config store directory: {server.config_store.base_dir}")
+    _log.info(f"AEMS message bus server started at {host}:{port}")
+    _log.info(f"Using config store directory: {server.config_store.base_dir}")
 
     return server
 
@@ -695,12 +750,8 @@ def _main():
     parser = argparse.ArgumentParser(description="AEMS Message Bus Server")
     parser.add_argument("--host", default="127.0.0.1", help="Host address to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
-    parser.add_argument(
-        "--volttron-home", default=os.environ.get("VOLTTRON_HOME"), help="VOLTTRON_HOME directory"
-    )
-    parser.add_argument(
-        "--config-dir", help="Config store directory (defaults to VOLTTRON_HOME/aems_config_store)"
-    )
+    parser.add_argument("--volttron-home", default=os.environ.get("VOLTTRON_HOME"), help="VOLTTRON_HOME directory")
+    parser.add_argument("--config-dir", help="Config store directory (defaults to VOLTTRON_HOME/aems_config_store)")
     parser.add_argument(
         "--reload",
         action="store_true",
@@ -743,16 +794,55 @@ def _main():
         return False
 
     if is_debugger_attached():
-        print("Debugger detected - using direct uvicorn.run() for better debugging support")
+        _log.info("Debugger detected - using direct uvicorn.run() for better debugging support")
 
         # Create the FastAPI app directly for uvicorn.run()
-        server = FastAPIMessageBus(
-            host=args.host, port=args.port, config_store_dir=config_dir, reload=args.reload
-        )
+        server = FastAPIMessageBus(host=args.host, port=args.port, config_store_dir=config_dir, reload=args.reload)
 
         # Use uvicorn.run() directly for debugging
+        # Set up colored logging before starting uvicorn to avoid config issues
+        root_logger = logging.getLogger()
+
+        # Clear any existing handlers
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+
+        # Add our colored handler
+        console_handler = logging.StreamHandler()
+        colored_formatter = ColoredFormatter("%(asctime)s %(levelname)s %(module)s:%(lineno)d %(message)s")
+        console_handler.setFormatter(colored_formatter)
+        root_logger.addHandler(console_handler)
+        root_logger.setLevel(logging.INFO)  # Set to INFO to reduce uvicorn debug spam
+
+        # Enable debug logging for our application modules
+        logging.getLogger("aems").setLevel(logging.DEBUG)
+
+        # Configure all uvicorn loggers
+        uvicorn_loggers = {
+            "uvicorn": logging.INFO,
+            "uvicorn.error": logging.CRITICAL,  # Silence all uvicorn.error messages
+            "uvicorn.access": logging.INFO,
+        }
+        for logger_name, level in uvicorn_loggers.items():
+            logger = logging.getLogger(logger_name)
+            # Clear existing handlers
+            for handler in logger.handlers[:]:
+                logger.removeHandler(handler)
+            # Add our colored handler
+            handler = logging.StreamHandler()
+            formatter = ColoredFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            logger.setLevel(level)
+            logger.propagate = False
+
         uvicorn.run(
-            server.app, host=args.host, port=args.port, reload=args.reload, log_level="debug"
+            server.app,
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+            log_level="debug",
+            log_config=None,  # Disable uvicorn's logging config since we set it up ourselves
         )
     else:
         # Use the threaded approach for production
@@ -765,7 +855,7 @@ def _main():
             while server.is_running():
                 time.sleep(1)
         except KeyboardInterrupt:
-            print("Stopping server...")
+            _log.info("Stopping server...")
             server.stop()
 
 

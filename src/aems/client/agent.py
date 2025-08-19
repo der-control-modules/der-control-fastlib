@@ -35,6 +35,9 @@ except ImportError:
 # Patch standard library to work with gevent
 monkey.patch_all()
 
+# Set up logging for the agent module
+_log = logging.getLogger(__name__)
+
 SIZE_OUTPUT = 100
 
 
@@ -91,7 +94,7 @@ class RPC:
     def export_method(self, method_name: str, method: Callable):
         """Programmatically export an RPC method that can be called remotely."""
         self._exported_methods[method_name] = method
-        print(f"Agent {self._agent.identity} exported RPC method: {method_name}")
+        _log.debug(f"Agent {self._agent.identity} exported RPC method: {method_name}")
         return method  # Return the method for chaining
 
     def _register_decorated_methods(self, agent):
@@ -102,10 +105,7 @@ class RPC:
                 # Use the custom name if provided, otherwise use the method's name
                 method_name = getattr(attr, "rpc_name") or attr_name
                 self._exported_methods[method_name] = attr
-                print(
-                    f"Agent {self._agent.identity} exported RPC method: "
-                    f"{method_name} (from decorator)"
-                )
+                _log.debug(f"Agent {self._agent.identity} exported RPC method: " f"{method_name} (from decorator)")
 
     def call(self, peer: str, method: str, *args, **kwargs):
         """Make an RPC call to another agent, returning an AsyncResult."""
@@ -116,10 +116,7 @@ class RPC:
         async_result = AsyncResult()
         self._agent.rpc_responses[msg_id] = async_result
 
-        print(
-            f"DEBUG: Agent {self._agent.identity} making RPC call to "
-            f"{peer}.{method} with msg_id {msg_id}"
-        )
+        _log.debug(f"Agent {self._agent.identity} making RPC call to " f"{peer}.{method} with msg_id {msg_id}")
 
         self._agent.websocket.send(
             json.dumps(
@@ -134,9 +131,8 @@ class RPC:
             )
         )
 
-        print(
-            f"Agent {self._agent.identity} sent RPC call to {peer}: "
-            f"method={method}, args={args}, kwargs={kwargs}"
+        _log.debug(
+            f"Agent {self._agent.identity} sent RPC call to {peer}: " f"method={method}, args={args}, kwargs={kwargs}"
         )
 
         # Spawn a timeout watcher
@@ -167,7 +163,7 @@ class RPC:
             # This is a remote call to another agent
             target = parts[0]
             actual_method = ".".join(parts[1:])
-            print(f"DEBUG: Remote call detected: {target}.{actual_method}")
+            _log.debug(f"Remote call detected: {target}.{actual_method}")
 
             # Forward the call to the target agent
             try:
@@ -191,7 +187,7 @@ class RPC:
                 return final_result
             except Exception as e:
                 error_msg = f"Remote call error: {str(e)}"
-                print(f"DEBUG: {error_msg}")
+                _log.debug(error_msg)
                 async_result = AsyncResult()
                 async_result.set_exception(Exception(error_msg))
                 return async_result
@@ -202,21 +198,17 @@ class RPC:
             if method_name in self._exported_methods:
                 try:
                     method = self._exported_methods[method_name]
-                    print(f"DEBUG: Agent {self._agent.identity} executing method {method_name}")
+                    _log.debug(f"Agent {self._agent.identity} executing method {method_name}")
                     result = method(*args, **kwargs)
-                    print(
-                        f"DEBUG: Agent {self._agent.identity} method {method_name} result: {result}"
-                    )
+                    _log.debug(f"Agent {self._agent.identity} method {method_name} result: {result}")
                     async_result.set(result)
                 except Exception as e:
                     error = str(e)
-                    print(
-                        f"DEBUG: Agent {self._agent.identity} method {method_name} error: {error}"
-                    )
+                    _log.error(f"Agent {self._agent.identity} method {method_name} error: {error}")
                     async_result.set_exception(e)
             else:
                 error = f"Method {method_name} not found or not exported"
-                print(f"DEBUG: {error}")
+                _log.debug(error)
                 async_result.set_exception(Exception(error))
 
             return async_result
@@ -229,9 +221,7 @@ class PubSub:
         self._agent = agent
         self._subscriptions = {}
 
-    def publish(
-        self, peer: str, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""
-    ):
+    def publish(self, peer: str, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""):
         """Publish a message to a topic, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
@@ -261,14 +251,12 @@ class PubSub:
             )
 
             if topic == "config/config":
-                print(f"Agent {self._agent.identity} published to {topic}: default update sent")
+                _log.info(f"Agent {self._agent.identity} published to {topic}: default update sent")
             else:
-                print(
-                    f"Agent {self._agent.identity} published to {topic}: {get_smaller_print(message)}"
-                )
+                _log.info(f"Agent {self._agent.identity} published to {topic}: {get_smaller_print(message)}")
             async_result.set(True)  # Success
         except Exception as e:
-            print(f"Error publishing message: {e}")
+            _log.error(f"Error publishing message: {e}")
             async_result.set_exception(e)
 
         return async_result
@@ -303,7 +291,7 @@ class PubSub:
                         # Some other TypeError, re-raise it
                         raise
             except Exception as e:
-                print(f"Error in subscription callback: {e}")
+                _log.error(f"Error in subscription callback: {e}")
                 traceback.print_exc()
                 # Return None when there's an error
                 return None
@@ -318,9 +306,7 @@ class PubSub:
         subscription_id = str(uuid.uuid4())
 
         # Store the original callback
-        actual_callback = callback or (
-            lambda msg: print(f"Subscription callback for {prefix}: {msg}")
-        )
+        actual_callback = callback or (lambda msg: _log.info(f"Subscription callback for {prefix}: {msg}"))
 
         # Wrap the callback with our adapter
         adapted_callback = self._callback_adapter(actual_callback)
@@ -331,14 +317,12 @@ class PubSub:
         async_result = AsyncResult()
 
         try:
-            self._agent.websocket.send(
-                json.dumps({"type": "subscribe", "prefix": prefix, "id": subscription_id})
-            )
+            self._agent.websocket.send(json.dumps({"type": "subscribe", "prefix": prefix, "id": subscription_id}))
 
-            print(f"Agent {self._agent.identity} subscribed to prefix: {prefix}")
+            _log.info(f"Agent {self._agent.identity} subscribed to prefix: {prefix}")
             async_result.set(subscription_id)  # Return the subscription ID
         except Exception as e:
-            print(f"Error subscribing to topic: {e}")
+            _log.error(f"Error subscribing to topic: {e}")
             async_result.set_exception(e)
 
         return async_result
@@ -351,9 +335,7 @@ class PubSub:
         subscription_id = str(uuid.uuid4())
 
         # Store the original callback
-        actual_callback = callback or (
-            lambda msg: print(f"Subscription callback for {pattern}: {msg}")
-        )
+        actual_callback = callback or (lambda msg: _log.info(f"Subscription callback for {pattern}: {msg}"))
 
         # Wrap the callback with our adapter
         adapted_callback = self._callback_adapter(actual_callback)
@@ -364,14 +346,12 @@ class PubSub:
         async_result = AsyncResult()
 
         try:
-            self._agent.websocket.send(
-                json.dumps({"type": "subscribe", "pattern": pattern, "id": subscription_id})
-            )
+            self._agent.websocket.send(json.dumps({"type": "subscribe", "pattern": pattern, "id": subscription_id}))
 
-            print(f"Agent {self._agent.identity} subscribed to pattern: {pattern}")
+            _log.info(f"Agent {self._agent.identity} subscribed to pattern: {pattern}")
             async_result.set(subscription_id)  # Return the subscription ID
         except Exception as e:
-            print(f"Error subscribing to pattern: {e}")
+            _log.error(f"Error subscribing to pattern: {e}")
             async_result.set_exception(e)
 
         return async_result
@@ -390,7 +370,7 @@ class PubSub:
                 try:
                     callback(data)
                 except Exception as e:
-                    print(f"Error calling subscription callback: {e}")
+                    _log.error(f"Error calling subscription callback: {e}")
                     traceback.print_exc()
 
 
@@ -431,12 +411,10 @@ class VIP:
                 )
             )
 
-            print(
-                f"Agent {self._agent.identity} sent VIP message to {peer}: subsystem={subsystem}, args={args}"
-            )
+            _log.debug(f"Agent {self._agent.identity} sent VIP message to {peer}: subsystem={subsystem}, args={args}")
             async_result.set(msg_id)  # Return the message ID
         except Exception as e:
-            print(f"Error sending VIP message: {e}")
+            _log.error(f"Error sending VIP message: {e}")
             async_result.set_exception(e)
 
         return async_result
@@ -654,7 +632,7 @@ class Core:
                 try:
                     gevent.spawn(handler, sender, **kwargs)
                 except Exception as e:
-                    print(f"Error in {event_name} handler: {e}")
+                    _log.error(f"Error in {event_name} handler: {e}")
 
 
 class ConfigCallback:
@@ -675,7 +653,7 @@ class ConfigCallback:
             try:
                 self.callback(config_name, action, value)
             except Exception as e:
-                print(f"Error in config callback for {config_name}: {e}")
+                _log.error(f"Error in config callback for {config_name}: {e}")
                 import traceback
 
                 traceback.print_exc()
@@ -778,7 +756,9 @@ class Config:
         async_result = AsyncResult()
 
         # Prepare request
-        request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+        request_url = (
+            f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+        )
 
         # Use gevent to make the HTTP request asynchronously
         def store_config():
@@ -806,13 +786,11 @@ class Config:
                                 try:
                                     callback(config_name, "UPDATE", merged_config)
                                 except Exception as e:
-                                    print(f"Error in config update callback: {e}")
+                                    _log.error(f"Error in config update callback: {e}")
 
                         async_result.set(True)
                     else:
-                        async_result.set_exception(
-                            Exception(f"Failed to store config: {response.text}")
-                        )
+                        async_result.set_exception(Exception(f"Failed to store config: {response.text}"))
             except Exception as e:
                 async_result.set_exception(e)
 
@@ -830,7 +808,9 @@ class Config:
         async_result = AsyncResult()
 
         # Prepare request
-        request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+        request_url = (
+            f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+        )
 
         # Use gevent to make the HTTP request asynchronously
         def delete_config():
@@ -852,13 +832,11 @@ class Config:
                                 try:
                                     callback(config_name, "DELETE", None)
                                 except Exception as e:
-                                    print(f"Error in config delete callback: {e}")
+                                    _log.error(f"Error in config delete callback: {e}")
 
                         async_result.set(True)
                     else:
-                        async_result.set_exception(
-                            Exception(f"Failed to delete config: {response.text}")
-                        )
+                        async_result.set_exception(Exception(f"Failed to delete config: {response.text}"))
             except Exception as e:
                 async_result.set_exception(e)
 
@@ -904,16 +882,16 @@ class Config:
             # Add the callback if not already registered
             if callback not in self._config_callbacks[pattern]:
                 self._config_callbacks[pattern].append(ConfigCallback(callback, actions))
-                print(f"Registered callback for config: {pattern}")
+                _log.debug(f"Registered callback for config: {pattern}")
 
             # If we already have this config, notify immediately
             if pattern in self._config_cache:
                 value = self._config_cache[pattern]
                 try:
                     callback(pattern, value)
-                    print(f"Called callback with existing config: {pattern}")
+                    _log.debug(f"Called callback with existing config: {pattern}")
                 except Exception as e:
-                    print(f"Error calling callback for config {pattern}: {e}")
+                    _log.error(f"Error calling callback for config {pattern}: {e}")
 
             # Return some identifier for this subscription
             return f"{pattern}:{len(self._config_callbacks[pattern])}"
@@ -936,7 +914,9 @@ class Config:
         if config_name in self._config_callbacks:
             # Fetch the updated config directly from the server
             try:
-                request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+                request_url = (
+                    f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+                )
                 with httpx.Client() as client:
                     response = client.get(request_url)
                     if response.status_code == 200:
@@ -963,20 +943,18 @@ class Config:
                             try:
                                 callback(config_name, "UPDATE", self._config_cache[config_name])
                             except Exception as e:
-                                print(f"Error in config update callback: {e}")
+                                _log.error(f"Error in config update callback: {e}")
                     else:
-                        print(
-                            f"Failed to fetch updated config {config_name}: {response.status_code}"
-                        )
+                        _log.error(f"Failed to fetch updated config {config_name}: {response.status_code}")
             except Exception as e:
-                print(f"Error handling config update for {config_name}: {e}")
+                _log.error(f"Error handling config update for {config_name}: {e}")
 
     def set_default(self, name, value):
         """
         Set a local default configuration value.
         Does not send to the server, just stores locally.
         """
-        print(f"Setting default config: {name}")
+        _log.debug(f"Setting default config: {name}")
         self._default_configs[name] = value
 
         # Update the comprehensive cache
@@ -995,7 +973,7 @@ class Config:
         Called when the agent receives configuration updates from the server.
         This method handles synchronizing the local config cache with the server.
         """
-        print(f"Agent {self._agent.identity} received configuration update from server")
+        _log.info(f"Agent {self._agent.identity} received configuration update from server")
         configs = kwargs.get("configs", [])
 
         if not self._new_default_configs_sent:
@@ -1005,9 +983,9 @@ class Config:
                     for callback in self._config_callbacks.get(name, []):
                         callback(name, "NEW", value)
                     # self._send_default_config(name, "NEW", value)
-                    print(f"Sent default config to server: {name} = {get_smaller_print(value)}")
+                    _log.debug(f"Sent default config to server: {name} = {get_smaller_print(value)}")
                 except Exception as e:
-                    print(f"Error sending default config {name}: {e}")
+                    _log.error(f"Error sending default config {name}: {e}")
 
             self._new_default_configs_sent = True
 
@@ -1017,7 +995,9 @@ class Config:
 
             # Fetch the config directly from the server instead of using get()
             try:
-                request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+                request_url = (
+                    f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+                )
                 with httpx.Client() as client:
                     response = client.get(request_url)
                     if response.status_code == 200:
@@ -1043,22 +1023,25 @@ class Config:
                         if config_name in self._config_callbacks:
                             for callback in self._config_callbacks[config_name]:
                                 try:
-                                    print(f"Calling callback for config: {config_name}")
+                                    _log.debug(f"Calling callback for config: {config_name}")
                                     callback(config_name, "UPDATE", self._config_cache[config_name])
                                 except Exception as e:
-                                    print(f"Error in config callback for {config_name}: {e}")
+                                    _log.error(f"Error in config callback for {config_name}: {e}")
                     else:
-                        print(f"Failed to fetch config {config_name}: {response.status_code}")
+                        _log.error(f"Failed to fetch config {config_name}: {response.status_code}")
             except Exception as e:
-                print(f"Error processing config update for {config_name}: {e}")
+                _log.error(f"Error processing config update for {config_name}: {e}")
 
     def _on_connection_established(self, sender, **kwargs):
         """Called when connection to the server is established."""
-        print(f"Agent {self._agent.identity} connected to server")
+        _log.info(f"Agent {self._agent.identity} connected to server")
         self._connected = True
 
         # Fetch all configurations for this agent's identity from the server
-        self._fetch_all_server_configs()
+        # Wait for completion to ensure configs are loaded before proceeding
+        fetch_greenlet = self._fetch_all_server_configs()
+        if fetch_greenlet:
+            fetch_greenlet.join(timeout=5)  # Wait up to 5 seconds for configs to load
 
         # Set up all pending subscriptions with the server
         for subscription in self._pending_subscriptions:
@@ -1066,8 +1049,7 @@ class Config:
 
             # Only fetch current config values if agent has onconfigure handler
             has_onconfigure_handler = (
-                hasattr(self._agent, "onconfigure")
-                and len(self._agent.core.onconfigure._handlers) > 0
+                hasattr(self._agent, "onconfigure") and len(self._agent.core.onconfigure._handlers) > 0
             )
             if has_onconfigure_handler:
                 self._fetch_config_for_subscription(subscription)
@@ -1079,35 +1061,43 @@ class Config:
 
         def fetch_configs():
             try:
-                request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/list?agent_id={self._agent.identity}"
+                request_url = (
+                    f"http://{self._agent._host}:{self._agent._port}/config-store/list?agent_id={self._agent.identity}"
+                )
                 with httpx.Client() as client:
                     response = client.get(request_url)
                     if response.status_code == 200:
                         data = response.json()
                         if self._agent.identity in data["data"]:
                             config_entries = data["data"][self._agent.identity]
-                            print(
-                                f"Found {len(config_entries)} configs for agent {self._agent.identity}"
-                            )
+                            _log.info(f"Found {len(config_entries)} configs for agent {self._agent.identity}")
 
-                            # Fetch each individual configuration
+                            # Fetch each individual configuration synchronously
+                            fetch_greenlets = []
                             for config_entry in config_entries:
                                 # Extract just the name from the config entry
                                 if isinstance(config_entry, dict) and "name" in config_entry:
                                     config_name = config_entry["name"]
-                                    self._fetch_single_config(config_name)
+                                    greenlet = self._fetch_single_config(config_name)
+                                    if greenlet:
+                                        fetch_greenlets.append(greenlet)
                                 else:
                                     # Fallback if for some reason we got a string instead of a dict
-                                    self._fetch_single_config(config_entry)
-                        else:
-                            print(f"No configs found for agent {self._agent.identity}")
-                    else:
-                        print(f"Failed to list configs: {response.status_code} - {response.text}")
-            except Exception as e:
-                print(f"Error fetching all configs: {e}")
+                                    greenlet = self._fetch_single_config(config_entry)
+                                    if greenlet:
+                                        fetch_greenlets.append(greenlet)
 
-        # Run asynchronously
-        gevent.spawn(fetch_configs)
+                            # Wait for all configs to be fetched
+                            gevent.joinall(fetch_greenlets, timeout=10)
+                        else:
+                            _log.info(f"No configs found for agent {self._agent.identity}")
+                    else:
+                        _log.error(f"Failed to list configs: {response.status_code} - {response.text}")
+            except Exception as e:
+                _log.error(f"Error fetching all configs: {e}")
+
+        # Run and return the greenlet so caller can wait for it
+        return gevent.spawn(fetch_configs)
 
     def _fetch_config_for_subscription(self, subscription):
         """Fetch current config values from server for a subscription pattern."""
@@ -1119,14 +1109,16 @@ class Config:
         else:
             # For wildcard patterns, we'd need to list all configs and filter
             # This is more complex, so for now we'll handle specific config names
-            print(f"Wildcard patterns not yet implemented for initial fetch: {pattern}")
+            _log.warning(f"Wildcard patterns not yet implemented for initial fetch: {pattern}")
 
     def _fetch_single_config(self, config_name):
         """Fetch a single config from the server and cache it."""
 
         def fetch_config():
             try:
-                request_url = f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+                request_url = (
+                    f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+                )
                 with httpx.Client() as client:
                     response = client.get(request_url)
                     if response.status_code == 200:
@@ -1148,18 +1140,14 @@ class Config:
                             # No default, use server config directly
                             self._config_cache[config_name] = copy.deepcopy(server_config)
 
-                        print(
-                            f"Cached config for {config_name}: {get_smaller_print(server_config)}"
-                        )
+                        _log.debug(f"Cached config for {config_name}: {get_smaller_print(server_config)}")
                     else:
-                        print(
-                            f"No server config found for {config_name} (status: {response.status_code})"
-                        )
+                        _log.warning(f"No server config found for {config_name} (status: {response.status_code})")
             except Exception as e:
-                print(f"Failed to fetch config {config_name}: {e}")
+                _log.error(f"Failed to fetch config {config_name}: {e}")
 
-        # Run the fetch asynchronously
-        gevent.spawn(fetch_config)
+        # Run the fetch and return the greenlet so caller can wait for it
+        return gevent.spawn(fetch_config)
 
     def _setup_subscription(self, subscription):
         """Set up a pattern-based subscription with the server."""
@@ -1181,16 +1169,11 @@ class Config:
                 # Handle different actions
                 if action == "DELETE":
                     # For DELETE, remove from config cache if not a default
-                    if (
-                        config_name in self._config_cache
-                        and config_name not in self._default_configs
-                    ):
+                    if config_name in self._config_cache and config_name not in self._default_configs:
                         del self._config_cache[config_name]
                     elif config_name in self._config_cache and config_name in self._default_configs:
                         # Reset to default value
-                        self._config_cache[config_name] = copy.deepcopy(
-                            self._default_configs[config_name]
-                        )
+                        self._config_cache[config_name] = copy.deepcopy(self._default_configs[config_name])
                 else:
                     # For NEW or UPDATE, update the cache with server value
                     if config_name in self._default_configs and config_value is not None:
@@ -1214,7 +1197,7 @@ class Config:
                 try:
                     callback(config_name, action, merged_config)
                 except Exception as e:
-                    print(f"Error in config subscription callback: {e}")
+                    _log.error(f"Error in config subscription callback: {e}")
 
         # Subscribe using the agent's VIP connection
         topic = f"config/{pattern}" if pattern else "config/*"
@@ -1244,9 +1227,7 @@ class CronTimer:
         self.cron_pattern = cron_pattern
 
         # Parse the cron pattern
-        self.minutes, self.hours, self.days_of_month, self.months, self.days_of_week = (
-            self._parse_pattern(cron_pattern)
-        )
+        self.minutes, self.hours, self.days_of_month, self.months, self.days_of_week = self._parse_pattern(cron_pattern)
 
     def _parse_pattern(self, pattern):
         """Parse a cron pattern into its components."""
@@ -1275,9 +1256,7 @@ class CronTimer:
         for day in self._parse_component(parts[4], 0, 7, is_dow=True):
             if isinstance(day, str):
                 day_num = self._day_name_to_number(day)
-                days_of_week.add(
-                    day_num if day_num < 7 else 0
-                )  # Convert 7 to 0 (both represent Sunday)
+                days_of_week.add(day_num if day_num < 7 else 0)  # Convert 7 to 0 (both represent Sunday)
             else:
                 days_of_week.add(day if day < 7 else 0)  # Convert 7 to 0
 
@@ -1453,12 +1432,12 @@ class Peerlist:
     def add_peer(self, peer: str):
         """Add a peer to the list."""
         self._connected_peers.add(peer)
-        print(f"Peer added: {peer}")
+        _log.debug(f"Peer added: {peer}")
 
     def remove_peer(self, peer: str):
         """Remove a peer from the list."""
         self._connected_peers.discard(peer)
-        print(f"Peer removed: {peer}")
+        _log.debug(f"Peer removed: {peer}")
 
     def list_peers(self) -> list | AsyncResult:
         """List all connected peers."""
@@ -1589,9 +1568,7 @@ class Scheduler:
             if interval_or_cron <= 0:
                 raise ValueError("Interval must be a positive number")
         elif not isinstance(interval_or_cron, str):
-            raise ValueError(
-                "Schedule must be either a positive number (interval) or a cron expression"
-            )
+            raise ValueError("Schedule must be either a positive number (interval) or a cron expression")
 
         name = name or function.__name__
 
@@ -1697,7 +1674,7 @@ class Scheduler:
                 try:
                     gevent.spawn(event.function, *event.args, **event.kwargs)
                 except Exception as e:
-                    print(f"Error spawning periodic task {event.name}: {e}")
+                    _log.error(f"Error spawning periodic task {event.name}: {e}")
 
                 # Compute the next execution time
                 event.compute_next_time()
@@ -1735,13 +1712,11 @@ class Signal:
 
     def fire(self, sender, **kwargs):
         """Fire the signal, calling all connected handlers."""
-        for handler in self._handlers[
-            :
-        ]:  # Copy to avoid issues if handlers are added/removed during iteration
+        for handler in self._handlers[:]:  # Copy to avoid issues if handlers are added/removed during iteration
             try:
                 gevent.spawn(handler, sender, **kwargs)
             except Exception as e:
-                print(f"Error in {self.name} handler: {e}")
+                _log.error(f"Error in {self.name} handler: {e}")
 
 
 class Agent:
@@ -1807,7 +1782,7 @@ class Agent:
             if gevent.time.time() - start_time > timeout:
                 raise ConnectionError(f"Connection timeout for agent {self.identity}")
 
-        print(f"Agent {self.identity} connected")
+        _log.info(f"Agent {self.identity} connected")
 
         # Fire the onconnected event with self as sender
         self.core.fire_event("onconnected", sender=self)
@@ -1824,19 +1799,20 @@ class Agent:
     def _load_configs(self):
         """Load configurations and trigger the onconfigure event."""
         try:
+            # If a config_path was provided, load it first
+            if self.config_path and self.connected:
+                self._load_config_from_path()
+                # Give the server time to process the config
+                gevent.sleep(0.5)
+
             # List available configurations for this agent
             configs = self.config.list().get(timeout=5)
 
-            # If a config_path was provided and no configs are found,
-            # try to load the configuration from the file
-            if self.config_path and not configs and self.connected:
-                self._load_config_from_path()
-
-            # Fire the onconfigure event
+            # Fire the onconfigure event with the loaded configs
             self.core.fire_event("onconfigure", sender=self, configs=configs)
 
         except Exception as e:
-            print(f"Error loading configurations: {e}")
+            _log.error(f"Error loading configurations: {e}")
 
     def _load_config_from_path(self):
         """
@@ -1853,12 +1829,9 @@ class Agent:
 
         try:
             self._logger.debug(f"Loading configuration from file: {self.config_path}")
+
+            # Load the configuration based on file extension
             with open(self.config_path, "r") as f:
-                import yaml
-
-                config_data = yaml.safe_load(f)
-                print("After loaind configuration from path")
-
                 if self.config_path.endswith(".json"):
                     config_data = json.load(f)
                 elif self.config_path.endswith((".yml", ".yaml")):
@@ -1866,17 +1839,19 @@ class Agent:
 
                     config_data = yaml.safe_load(f)
                 else:
-                    print(f"Unsupported config file format: {self.config_path}")
+                    _log.error(f"Unsupported config file format: {self.config_path}")
                     return
 
-                # Push the config to the server's config store
-                self.config.set("config", config_data).get(timeout=5)
-                print(f"Pushed configuration from {self.config_path} to the server's config store")
+            _log.info(f"Loaded configuration from {self.config_path}")
 
-                # We don't need to store the config locally here, as we'll retrieve it
-                # from the server during the onconfigure phase
+            # Push the config to the server's config store
+            self.config.set("config", config_data).get(timeout=5)
+            _log.info(f"Pushed configuration from {self.config_path} to the server's config store")
+
+            # We don't need to store the config locally here, as we'll retrieve it
+            # from the server during the onconfigure phase
         except Exception as e:
-            print(f"Error loading configuration from {self.config_path}: {e}")
+            _log.error(f"Error loading configuration from {self.config_path}: {e}")
             # TODO: Implement proper health status tracking
             # self.health.set_status(Status.WARNING, f"Config load error: {e}")
 
@@ -1892,7 +1867,7 @@ class Agent:
                 self._listener_greenlet.join(timeout=1)
 
             self.connected = False
-            print(f"Agent {self.identity} disconnected")
+            _log.info(f"Agent {self.identity} disconnected")
 
             # Fire the ondisconnected event with self as sender
             self.core.fire_event("ondisconnected", sender=self)
@@ -1900,17 +1875,15 @@ class Agent:
     def __on_ws_open__(self, ws):
         """Callback when WebSocket connection is opened."""
         self.connected = True
-        print(f"DEBUG: Agent {self.identity} websocket connection opened")
+        _log.debug(f"Agent {self.identity} websocket connection opened")
 
     def __on_ws_message__(self, ws, message):
         """Internal callback when a WebSocket message is received."""
         try:
 
-            small_msg = get_smaller_print(
-                message, '"type":"rpc","method":"set_temperature_setpoints"'
-            )
+            small_msg = get_smaller_print(message, '"type":"rpc","method":"set_temperature_setpoints"')
             if '"type":"rpc","method":"set_temperature_setpoints"' in message:
-                print(f"DEBUG: Agent {self.identity} received set_temperature_setpoints RPC call")
+                _log.debug(f"Agent {self.identity} received set_temperature_setpoints RPC call")
 
             data = json.loads(message)
             if "kwargs" in data and "authentication" in data["kwargs"]:
@@ -1918,7 +1891,7 @@ class Agent:
 
             self.received_messages.append(data)
 
-            print(f"Agent {self.identity} received data {small_msg}. ")
+            _log.debug(f"Agent {self.identity} received data {small_msg}. ")
 
             # Handle different message types
             msg_type = data.get("type")
@@ -1941,12 +1914,12 @@ class Agent:
                         try:
                             callback(config_name, None)
                         except Exception as e:
-                            print(f"Error in config delete callback: {e}")
+                            _log.error(f"Error in config delete callback: {e}")
             elif msg_type in ("rpc_request", "rpc"):
                 # Handle RPC request
-                print(f"DEBUG: Agent {self.identity} received RPC request: {data}")
+                _log.debug(f"Agent {self.identity} received RPC request: {data}")
                 if "authentication" in data:
-                    print(f"data: {data}")
+                    _log.debug(f"data: {data}")
                 sender = data.get("sender")
                 method_name = data.get("method")
                 args = data.get("args", [])
@@ -1954,9 +1927,7 @@ class Agent:
                 msg_id = data.get("msg_id")
 
                 # Process the RPC request - returns an AsyncResult
-                async_result = self.vip.rpc.handle_request(
-                    sender, method_name, args, kwargs, msg_id
-                )
+                async_result = self.vip.rpc.handle_request(sender, method_name, args, kwargs, msg_id)
 
                 # Wait for the result and send the response
                 def send_response():
@@ -1964,17 +1935,13 @@ class Agent:
                         # Wait for the result (with timeout)
                         result = async_result.get(timeout=10)
                         # Send successful response
-                        print(f"DEBUG: Agent {self.identity} sending RPC response: {result}")
-                        self.websocket.send(
-                            json.dumps({"type": "rpc_response", "msg_id": msg_id, "result": result})
-                        )
+                        _log.debug(f"Agent {self.identity} sending RPC response: {result}")
+                        self.websocket.send(json.dumps({"type": "rpc_response", "msg_id": msg_id, "result": result}))
                     except Exception as e:
                         # Send error response
                         error = str(e)
-                        print(f"DEBUG: Agent {self.identity} sending RPC error response: {error}")
-                        self.websocket.send(
-                            json.dumps({"type": "rpc_error", "msg_id": msg_id, "error": error})
-                        )
+                        _log.debug(f"Agent {self.identity} sending RPC error response: {error}")
+                        self.websocket.send(json.dumps({"type": "rpc_error", "msg_id": msg_id, "error": error}))
 
                 # Spawn a greenlet to process the response asynchronously
                 gevent.spawn(send_response)
@@ -1983,23 +1950,19 @@ class Agent:
                 # Handle RPC response
                 msg_id = data.get("msg_id")
                 result = data.get("result")
-                print(
-                    f"DEBUG: Agent {self.identity} received RPC response for msg_id {msg_id}: {result}"
-                )
+                _log.debug(f"Agent {self.identity} received RPC response for msg_id {msg_id}: {result}")
                 if msg_id in self.rpc_responses:
                     # Get the AsyncResult for this message ID and set its result
                     async_result = self.rpc_responses.pop(msg_id)
                     async_result.set(result)
                 else:
-                    print(f"DEBUG: No pending RPC request found for msg_id {msg_id}")
+                    _log.debug(f"No pending RPC request found for msg_id {msg_id}")
 
             elif msg_type == "rpc_error":
                 # Handle RPC error
                 msg_id = data.get("msg_id")
                 error = data.get("error", "Unknown RPC error")
-                print(
-                    f"DEBUG: Agent {self.identity} received RPC error for msg_id {msg_id}: {error}"
-                )
+                _log.debug(f"Agent {self.identity} received RPC error for msg_id {msg_id}: {error}")
                 if msg_id in self.rpc_responses:
                     # Get the AsyncResult for this message ID and set the exception
                     async_result = self.rpc_responses.pop(msg_id)
@@ -2020,7 +1983,7 @@ class Agent:
                             exception = Exception(f"Remote error: {error}")
                     async_result.set_exception(exception)
                 else:
-                    print(f"DEBUG: No pending RPC request found for msg_id {msg_id}")
+                    _log.debug(f"No pending RPC request found for msg_id {msg_id}")
 
             elif msg_type == "vip":
                 # Handle VIP messages
@@ -2064,7 +2027,7 @@ class Agent:
                         async_result.set_exception(exception)
 
         except Exception as e:
-            print(f"Error processing message in agent {self.identity}: {e}")
+            _log.error(f"Error processing message in agent {self.identity}: {e}")
             import traceback
 
             traceback.print_exc()
@@ -2075,7 +2038,7 @@ class Agent:
         msg_id = message.get("msg_id", "")
         args = message.get("args", [])
 
-        print(f"DEBUG: Agent {self.identity} received VIP RPC request: {message}")
+        _log.debug(f"Agent {self.identity} received VIP RPC request: {message}")
 
         if len(args) >= 2:
             method_name = args[0]
@@ -2090,9 +2053,7 @@ class Agent:
                     # Wait for the result (with timeout)
                     result = async_result.get(timeout=10)
                     # Send successful response via VIP
-                    self.vip.send_message(
-                        peer=peer, subsystem="rpc_response", args=[result, msg_id]
-                    )
+                    self.vip.send_message(peer=peer, subsystem="rpc_response", args=[result, msg_id])
                 except Exception as e:
                     # Send error response via VIP
                     self.vip.send_message(peer=peer, subsystem="rpc_error", args=[str(e), msg_id])
@@ -2102,12 +2063,12 @@ class Agent:
 
     def __on_ws_error__(self, ws, error):
         """Callback when an error occurs."""
-        print(f"Agent {self.identity} error: {error}")
+        _log.error(f"Agent {self.identity} error: {error}")
 
     def __on_ws_close__(self, ws, close_status_code, close_msg):
         """Callback when the connection is closed."""
         self.connected = False
-        print(f"Agent {self.identity} connection closed: {close_status_code} {close_msg}")
+        _log.info(f"Agent {self.identity} connection closed: {close_status_code} {close_msg}")
 
     def get_received_messages(self):
         """Get all received messages."""
@@ -2121,20 +2082,20 @@ class Agent:
         """Run the agent and return exit code when finished."""
         try:
             # Connect to the message bus
-            print(f"Starting agent: {self.identity}")
+            _log.info(f"Starting agent: {self.identity}")
             self.connect()
 
             # Keep the agent running until stopped
-            print(f"Agent {self.identity} running. Press Ctrl+C to stop.")
+            _log.info(f"Agent {self.identity} running. Press Ctrl+C to stop.")
             while not self._stop_event.is_set():
                 gevent.sleep(1.0)  # Sleep to avoid busy waiting
 
             return 0  # Success
 
         except KeyboardInterrupt:
-            print(f"\nKeyboard interrupt received, stopping agent: {self.identity}")
+            _log.info(f"\nKeyboard interrupt received, stopping agent: {self.identity}")
         except Exception as e:
-            print(f"Error running agent {self.identity}: {e}")
+            _log.error(f"Error running agent {self.identity}: {e}")
             import traceback
 
             traceback.print_exc()
@@ -2143,9 +2104,9 @@ class Agent:
             # Ensure proper shutdown
             try:
                 self.core.stop().get(timeout=5)
-                print(f"Agent {self.identity} stopped cleanly")
+                _log.info(f"Agent {self.identity} stopped cleanly")
             except Exception as e:
-                print(f"Error stopping agent {self.identity}: {e}")
+                _log.error(f"Error stopping agent {self.identity}: {e}")
                 return 1  # Error
 
     def stop(self):
@@ -2182,16 +2143,14 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     parser.add_argument("--identity", help="Agent identity", default=identity)
     parser.add_argument("--host", help="Message bus host", default="127.0.0.1")
     parser.add_argument("--port", help="Message bus port", type=int, default=8000)
-    parser.add_argument(
-        "--volttron-home", help="VOLTTRON_HOME directory", default=os.environ.get("VOLTTRON_HOME")
-    )
+    parser.add_argument("--volttron-home", help="VOLTTRON_HOME directory", default=os.environ.get("VOLTTRON_HOME"))
 
     args = parser.parse_args()
 
     # Set VOLTTRON_HOME environment variable if provided
     if args.volttron_home:
         os.environ["VOLTTRON_HOME"] = args.volttron_home
-        print(f"Using VOLTTRON_HOME: {args.volttron_home}")
+        _log.info(f"Using VOLTTRON_HOME: {args.volttron_home}")
 
     # Use command line config path if provided, otherwise use the argument
     config_path = args.config or config_path
@@ -2207,21 +2166,17 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
                     try:
                         agent_config = json.load(f)
                     except json.JSONDecodeError:
-                        print(
-                            f"Error decoding JSON from {config_path}. Ensure it is a valid JSON file."
-                        )
+                        _log.error(f"Error decoding JSON from {config_path}. Ensure it is a valid JSON file.")
 
-                    print(f"Unsupported config file format: {config_path}")
+                    _log.error(f"Unsupported config file format: {config_path}")
         except Exception as e:
-            print(f"Error loading configuration from {config_path}: {e}")
+            _log.error(f"Error loading configuration from {config_path}: {e}")
             return 1
 
     # Create the agent
     agent_identity = args.identity or identity or agent_class.__name__.lower()
 
-    agent = agent_class(
-        identity=agent_identity, host=args.host, port=args.port, config_path=config_path, **kwargs
-    )
+    agent = agent_class(identity=agent_identity, host=args.host, port=args.port, config_path=config_path, **kwargs)
 
     # Set initial configuration if loaded from file
     if agent_config:
@@ -2229,9 +2184,9 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
         if hasattr(agent, "config") and hasattr(agent.config, "set"):
             try:
                 agent.config.set("config", agent_config).get(timeout=5)
-                print(f"Loaded configuration from {config_path}")
+                _log.info(f"Loaded configuration from {config_path}")
             except Exception as e:
-                print(f"Error storing initial configuration: {e}")
+                _log.error(f"Error storing initial configuration: {e}")
 
     # Run the agent
     try:

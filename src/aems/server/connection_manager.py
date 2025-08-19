@@ -1,11 +1,14 @@
 # connection_manager.py
 
 import asyncio
+import logging
 import re
 from typing import Any, Callable, Dict, List, Pattern, Tuple
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState
+
+_log = logging.getLogger(__name__)
 
 # Subscription callback type
 SubscriptionCallback = Callable[[str, str, str, str, dict, Any], None]
@@ -34,7 +37,7 @@ class ConnectionManager:
         if not self._status_reporter_started:
             self._start_status_reporter()
 
-        print(f"DEBUG: Client {identity} connected")
+        _log.debug(f"Client {identity} connected")
 
     def disconnect(self, identity: str):
         """Disconnect a client from the message bus."""
@@ -48,19 +51,19 @@ class ConnectionManager:
             for identity_key, subscriptions in self.regex_subscriptions.items()
             if identity_key != identity
         }
-        print(f"DEBUG: Client {identity} disconnected")
+        _log.debug(f"Client {identity} disconnected")
 
     async def send_message(self, identity: str, message: dict):
         """Send a message to a specific client."""
         if identity in self.active_connections:
             websocket = self.active_connections[identity]
             if websocket.client_state != WebSocketState.DISCONNECTED:
-                print(f"DEBUG: Sending message to {identity}: {message}")
+                _log.debug(f"Sending message to {identity}: {message}")
                 await websocket.send_json(message)
             else:
-                print(f"DEBUG: Cannot send message to {identity}, websocket is disconnected")
+                _log.debug(f"Cannot send message to {identity}, websocket is disconnected")
         else:
-            print(f"DEBUG: Cannot send message to {identity}, client not found")
+            _log.debug(f"Cannot send message to {identity}, client not found")
 
     async def broadcast(self, message: dict):
         """Broadcast a message to all connected clients."""
@@ -96,7 +99,7 @@ class ConnectionManager:
                         try:
                             callback(peer, sender, bus, topic, headers, message)
                         except Exception as e:
-                            print(f"Error in prefix subscription callback: {e}")
+                            _log.error(f"Error in prefix subscription callback: {e}")
 
         # Process regex subscriptions
         for identity, patterns in self.regex_subscriptions.items():
@@ -105,13 +108,13 @@ class ConnectionManager:
                     try:
                         callback(peer, sender, bus, topic, headers, message)
                     except Exception as e:
-                        print(f"Error in regex subscription callback: {e}")
+                        _log.error(f"Error in regex subscription callback: {e}")
 
     def register_rpc_response_future(self, msg_id: str) -> asyncio.Future:
         """Register a future for an RPC response."""
         future = asyncio.get_event_loop().create_future()
         self.rpc_responses[msg_id] = future
-        print(f"DEBUG: Registered RPC response future for msg_id {msg_id}")
+        _log.debug(f"Registered RPC response future for msg_id {msg_id}")
         return future
 
     def set_rpc_response(self, msg_id: str, response: Any):
@@ -119,24 +122,24 @@ class ConnectionManager:
         if msg_id in self.rpc_responses:
             future = self.rpc_responses.pop(msg_id)
             if not future.done():
-                print(f"DEBUG: Setting RPC response for msg_id {msg_id}: {response}")
+                _log.debug(f"Setting RPC response for msg_id {msg_id}: {response}")
                 future.set_result(response)
             else:
-                print(f"DEBUG: Future for msg_id {msg_id} was already done")
+                _log.debug(f"Future for msg_id {msg_id} was already done")
         else:
-            print(f"DEBUG: No future found for msg_id {msg_id}")
+            _log.debug(f"No future found for msg_id {msg_id}")
 
     def set_rpc_error(self, msg_id: str, error: str):
         """Set an exception for an RPC response future."""
         if msg_id in self.rpc_responses:
             future = self.rpc_responses.pop(msg_id)
             if not future.done():
-                print(f"DEBUG: Setting RPC error for msg_id {msg_id}: {error}")
+                _log.debug(f"Setting RPC error for msg_id {msg_id}: {error}")
                 future.set_exception(Exception(error))
             else:
-                print(f"DEBUG: Future for msg_id {msg_id} was already done")
+                _log.debug(f"Future for msg_id {msg_id} was already done")
         else:
-            print(f"DEBUG: No future found for msg_id {msg_id}")
+            _log.debug(f"No future found for msg_id {msg_id}")
 
     def clear_rpc_response(self, msg_id: str):
         """Clear an RPC response future."""
@@ -144,22 +147,15 @@ class ConnectionManager:
             future = self.rpc_responses.pop(msg_id)
             if not future.done():
                 future.cancel()
-            print(f"DEBUG: Cleared RPC response future for msg_id {msg_id}")
+            _log.debug(f"Cleared RPC response future for msg_id {msg_id}")
 
-    async def handle_rpc(
-        self, sender: str, peer: str, method: str, args: list, kwargs: dict, msg_id: str
-    ):
+    async def handle_rpc(self, sender: str, peer: str, method: str, args: list, kwargs: dict, msg_id: str):
         """Handle RPC request between clients."""
-        print(
-            f"DEBUG: RPC request from {sender} to {peer}: "
-            f"{method}({args}, {kwargs}) [msg_id: {msg_id}]"
-        )
+        _log.debug(f"RPC request from {sender} to {peer}: {method}({args}, {kwargs}) [msg_id: {msg_id}]")
 
         if peer not in self.active_connections:
-            print(f"DEBUG: RPC target {peer} not found")
-            await self.send_message(
-                sender, {"type": "rpc_error", "msg_id": msg_id, "error": f"Peer {peer} not found"}
-            )
+            _log.debug(f"RPC target {peer} not found")
+            await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": f"Peer {peer} not found"})
             return
 
         # Create a message for the RPC call
@@ -176,29 +172,23 @@ class ConnectionManager:
         future = self.register_rpc_response_future(msg_id)
 
         # Send to the target peer
-        print(f"DEBUG: Sending RPC request to {peer}")
+        _log.debug(f"Sending RPC request to {peer}")
         await self.send_message(peer, rpc_message)
 
         # Wait for response with timeout
         try:
-            print(f"DEBUG: Waiting for RPC response for msg_id {msg_id}")
+            _log.debug(f"Waiting for RPC response for msg_id {msg_id}")
             response = await asyncio.wait_for(future, 10.0)  # 10 second timeout
-            print(f"DEBUG: Received RPC response for msg_id {msg_id}: {response}")
-            await self.send_message(
-                sender, {"type": "rpc_response", "msg_id": msg_id, "result": response}
-            )
+            _log.debug(f"Received RPC response for msg_id {msg_id}: {response}")
+            await self.send_message(sender, {"type": "rpc_response", "msg_id": msg_id, "result": response})
         except asyncio.TimeoutError:
-            print(f"DEBUG: RPC request timed out for msg_id {msg_id}")
-            await self.send_message(
-                sender, {"type": "rpc_error", "msg_id": msg_id, "error": "RPC request timed out"}
-            )
+            _log.debug(f"RPC request timed out for msg_id {msg_id}")
+            await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": "RPC request timed out"})
             self.clear_rpc_response(msg_id)
         except Exception as e:
             # Handle exceptions from RPC method execution
-            print(f"DEBUG: RPC request failed for msg_id {msg_id}: {e}")
-            await self.send_message(
-                sender, {"type": "rpc_error", "msg_id": msg_id, "error": str(e)}
-            )
+            _log.error(f"RPC request failed for msg_id {msg_id}: {e}")
+            await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": str(e)})
             self.clear_rpc_response(msg_id)
 
     def _start_status_reporter(self):
@@ -207,11 +197,11 @@ class ConnectionManager:
             try:
                 self._status_task = asyncio.create_task(self._status_reporter_loop())
                 self._status_reporter_started = True
-                print("Connection status reporter started")
+                _log.info("Connection status reporter started")
             except RuntimeError as e:
                 # Handle case where no event loop is running
-                print(f"Cannot start status reporter: {e}")
-                print("Status reporter will be started when the first connection is made")
+                _log.error(f"Cannot start status reporter: {e}")
+                _log.info("Status reporter will be started when the first connection is made")
 
     async def _status_reporter_loop(self):
         """Background loop to print active connections every 60 seconds."""
@@ -224,26 +214,26 @@ class ConnectionManager:
                     self._no_connections_count = 0
                     count = len(active_identities)
                     identities_str = ", ".join(active_identities)
-                    print(f"Active connections ({count}): {identities_str}")
+                    _log.info(f"Active connections ({count}): {identities_str}")
                 else:
                     # Increment counter for consecutive periods with no connections
                     self._no_connections_count += 1
                     # Print "no active connections" only after 10 minutes (10 periods of 60 seconds)
                     if self._no_connections_count >= 10:
-                        print("No active connections")
+                        _log.info("No active connections")
                         # Reset counter after printing to avoid repeated messages
                         self._no_connections_count = 0
             except asyncio.CancelledError:
-                print("Connection status reporter stopped")
+                _log.info("Connection status reporter stopped")
                 break
             except Exception as e:
-                print(f"Error in status reporter: {e}")
+                _log.error(f"Error in status reporter: {e}")
 
     def stop_status_reporter(self):
         """Stop the status reporter task."""
         if self._status_task and not self._status_task.done():
             self._status_task.cancel()
-            print("Connection status reporter task cancelled")
+            _log.info("Connection status reporter task cancelled")
 
     async def startup(self):
         """Initialize the connection manager when the application starts."""
