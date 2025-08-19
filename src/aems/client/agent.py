@@ -111,7 +111,12 @@ class RPC:
         """Make an RPC call to another agent, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
-
+        new_args = []
+        for arg in args:
+            if type(arg).__name__ == "Topic":
+                new_args.append(str(arg))
+            else:
+                new_args.append(arg)
         msg_id = str(uuid.uuid4())
         async_result = AsyncResult()
         self._agent.rpc_responses[msg_id] = async_result
@@ -124,7 +129,7 @@ class RPC:
                     "type": "rpc",
                     "peer": peer,
                     "method": method,
-                    "args": args,
+                    "args": new_args,
                     "kwargs": kwargs,
                     "msg_id": msg_id,
                 }
@@ -991,7 +996,8 @@ class Config:
 
         # Process configs from server if available
         for cfg in configs:
-            config_name = cfg.get("name")
+            # cfg is the config name string, not a dictionary
+            config_name = cfg if isinstance(cfg, str) else cfg.get("name")
 
             # Fetch the config directly from the server instead of using get()
             try:
@@ -1728,6 +1734,9 @@ class Agent:
         host: str = "127.0.0.1",
         port: int = 8000,
         config_path: str = None,
+        auto_reconnect: bool = True,
+        reconnect_interval: float = 5.0,
+        max_reconnect_attempts: int = 0,  # 0 = infinite
         **kwargs,
     ):
         self._logger = logging.getLogger("Agent")
@@ -1743,6 +1752,14 @@ class Agent:
         self.rpc_responses = {}  # Maps message IDs to AsyncResults
         self._stop_event = gevent.event.Event()  # type: ignore
 
+        # Auto-reconnection settings
+        self.auto_reconnect = auto_reconnect
+        self.reconnect_interval = reconnect_interval
+        self.max_reconnect_attempts = max_reconnect_attempts
+        self._reconnect_attempts = 0
+        self._reconnect_greenlet = None
+        self._manual_disconnect = False
+
         # Create subsystems
         self.core = Core(self)
         self.config = Config(self)  # Initialize config before VIP
@@ -1756,33 +1773,8 @@ class Agent:
 
     def connect(self):
         """Connect to the message bus."""
-        # Enable trace for debugging if needed
-        # websocket.enableTrace(True)
-
-        # Create a WebSocketApp
-        self.websocket = websocket.WebSocketApp(
-            self.websocket_url,
-            on_message=self.__on_ws_message__,
-            on_error=self.__on_ws_error__,
-            on_close=self.__on_ws_close__,
-            on_open=self.__on_ws_open__,
-        )
-
-        # Start the WebSocket connection in a separate greenlet
-        self._listener_greenlet = gevent.spawn(
-            self.websocket.run_forever,
-            sslopt={"cert_reqs": ssl.CERT_NONE},  # Allow self-signed certs if needed
-        )
-
-        # Wait for the connection to be established
-        timeout = 5
-        start_time = gevent.time.time()
-        while not self.connected:
-            gevent.sleep(0.1)
-            if gevent.time.time() - start_time > timeout:
-                raise ConnectionError(f"Connection timeout for agent {self.identity}")
-
-        _log.info(f"Agent {self.identity} connected")
+        self._manual_disconnect = False  # Reset the flag for fresh connections
+        self._internal_connect()
 
         # Fire the onconnected event with self as sender
         self.core.fire_event("onconnected", sender=self)
@@ -1857,6 +1849,9 @@ class Agent:
 
     def disconnect(self):
         """Disconnect from the message bus."""
+        self._manual_disconnect = True  # Mark as intentional disconnect
+        self._stop_reconnection()  # Stop any ongoing reconnection attempts
+
         if self.websocket and self.connected:
             # Fire the onstop event with self as sender
             self.core.fire_event("onstop", sender=self)
@@ -1895,6 +1890,7 @@ class Agent:
 
             # Handle different message types
             msg_type = data.get("type")
+            _log.debug(f"Agent {self.identity} processing message type: {msg_type}")
 
             if msg_type == "pubsub":
                 # Handle pubsub messages
@@ -1932,19 +1928,38 @@ class Agent:
                 # Wait for the result and send the response
                 def send_response():
                     try:
+                        _log.debug(f"Agent {self.identity} waiting for RPC result for msg_id {msg_id}")
                         # Wait for the result (with timeout)
                         result = async_result.get(timeout=10)
                         # Send successful response
-                        _log.debug(f"Agent {self.identity} sending RPC response: {result}")
-                        self.websocket.send(json.dumps({"type": "rpc_response", "msg_id": msg_id, "result": result}))
+                        _log.debug(f"Agent {self.identity} sending RPC response for msg_id {msg_id}: {result}")
+                        response_msg = {"type": "rpc_response", "msg_id": msg_id, "result": result}
+                        self.websocket.send(json.dumps(response_msg))
+                        _log.debug(f"Agent {self.identity} successfully sent RPC response for msg_id {msg_id}")
                     except Exception as e:
                         # Send error response
                         error = str(e)
-                        _log.debug(f"Agent {self.identity} sending RPC error response: {error}")
-                        self.websocket.send(json.dumps({"type": "rpc_error", "msg_id": msg_id, "error": error}))
+                        _log.error(f"Agent {self.identity} RPC error for msg_id {msg_id}: {error}")
+                        try:
+                            error_msg = {"type": "rpc_error", "msg_id": msg_id, "error": error}
+                            self.websocket.send(json.dumps(error_msg))
+                            _log.debug(f"Agent {self.identity} sent RPC error response for msg_id {msg_id}")
+                        except Exception as ws_error:
+                            _log.error(f"Agent {self.identity} failed to send RPC error via websocket: {ws_error}")
 
                 # Spawn a greenlet to process the response asynchronously
-                gevent.spawn(send_response)
+                try:
+                    response_greenlet = gevent.spawn(send_response)
+                    _log.debug(f"Spawned RPC response handler for msg_id {msg_id}")
+                except Exception as spawn_error:
+                    _log.error(f"Failed to spawn RPC response handler for msg_id {msg_id}: {spawn_error}")
+                    # Send error response immediately
+                    try:
+                        self.websocket.send(
+                            json.dumps({"type": "rpc_error", "msg_id": msg_id, "error": "Failed to process response"})
+                        )
+                    except Exception as ws_error:
+                        _log.error(f"Failed to send error response via websocket: {ws_error}")
 
             elif msg_type == "rpc_response":
                 # Handle RPC response
@@ -1984,6 +1999,25 @@ class Agent:
                     async_result.set_exception(exception)
                 else:
                     _log.debug(f"No pending RPC request found for msg_id {msg_id}")
+
+            elif msg_type == "ping":
+                # Handle ping messages from the server
+                ping_id = data.get("ping_id")
+                timestamp = data.get("timestamp")
+                _log.debug(f"Agent {self.identity} received ping {ping_id}")
+
+                # Send pong response
+                try:
+                    pong_response = {
+                        "type": "pong",
+                        "ping_id": ping_id,
+                        "original_timestamp": timestamp,
+                        "response_timestamp": datetime.datetime.now().isoformat(),
+                    }
+                    self.websocket.send(json.dumps(pong_response))
+                    _log.debug(f"Agent {self.identity} sent pong response for ping {ping_id}")
+                except Exception as e:
+                    _log.error(f"Agent {self.identity} failed to send pong response: {e}")
 
             elif msg_type == "vip":
                 # Handle VIP messages
@@ -2065,10 +2099,21 @@ class Agent:
         """Callback when an error occurs."""
         _log.error(f"Agent {self.identity} error: {error}")
 
+        # Some errors might not trigger close, so we need to handle reconnection here too
+        if not self.connected and not self._manual_disconnect and self.auto_reconnect:
+            self._start_reconnection()
+
     def __on_ws_close__(self, ws, close_status_code, close_msg):
         """Callback when the connection is closed."""
         self.connected = False
         _log.info(f"Agent {self.identity} connection closed: {close_status_code} {close_msg}")
+
+        # Fire the ondisconnected event
+        self.core.fire_event("ondisconnected", sender=self)
+
+        # Start reconnection if not manually disconnected
+        if not self._manual_disconnect and self.auto_reconnect:
+            self._start_reconnection()
 
     def get_received_messages(self):
         """Get all received messages."""
@@ -2109,8 +2154,112 @@ class Agent:
                 _log.error(f"Error stopping agent {self.identity}: {e}")
                 return 1  # Error
 
+    def _start_reconnection(self):
+        """Start the reconnection process."""
+        if self._reconnect_greenlet and not self._reconnect_greenlet.dead:
+            # Reconnection already in progress
+            return
+
+        _log.info(f"Agent {self.identity} starting auto-reconnection")
+        self._reconnect_greenlet = gevent.spawn(self._reconnection_loop)
+
+    def _stop_reconnection(self):
+        """Stop the reconnection process."""
+        if self._reconnect_greenlet and not self._reconnect_greenlet.dead:
+            _log.debug(f"Agent {self.identity} stopping reconnection")
+            self._reconnect_greenlet.kill()
+            self._reconnect_greenlet = None
+        self._reconnect_attempts = 0
+
+    def _reconnection_loop(self):
+        """Main reconnection loop."""
+        while not self._manual_disconnect and self.auto_reconnect:
+            if self.connected:
+                # Already connected, exit loop
+                break
+
+            # Check if we've exceeded max attempts
+            if self.max_reconnect_attempts > 0 and self._reconnect_attempts >= self.max_reconnect_attempts:
+                _log.error(f"Agent {self.identity} max reconnection attempts ({self.max_reconnect_attempts}) reached")
+                break
+
+            self._reconnect_attempts += 1
+            _log.info(f"Agent {self.identity} reconnection attempt {self._reconnect_attempts}")
+
+            try:
+                # Reset manual disconnect flag for reconnection
+                self._manual_disconnect = False
+
+                # Clean up old connection
+                if self.websocket:
+                    try:
+                        self.websocket.close()
+                    except Exception:
+                        pass
+
+                if self._listener_greenlet:
+                    try:
+                        self._listener_greenlet.join(timeout=1)
+                    except Exception:
+                        pass
+
+                # Attempt to reconnect
+                self._internal_connect()
+
+                # If we get here, connection was successful
+                _log.info(f"Agent {self.identity} successfully reconnected after {self._reconnect_attempts} attempts")
+                self._reconnect_attempts = 0
+
+                # Fire reconnected event
+                self.core.fire_event("onconnected", sender=self)
+
+                # Reload configurations after reconnection
+                self._load_configs()
+
+                break
+
+            except Exception as e:
+                _log.warning(f"Agent {self.identity} reconnection attempt {self._reconnect_attempts} failed: {e}")
+
+                # Wait before next attempt
+                if not self._manual_disconnect:
+                    gevent.sleep(self.reconnect_interval)
+                else:
+                    break
+
+    def _internal_connect(self):
+        """Internal connection method used by both connect() and reconnection."""
+        # Enable trace for debugging if needed
+        # websocket.enableTrace(True)
+
+        # Create a WebSocketApp
+        self.websocket = websocket.WebSocketApp(
+            self.websocket_url,
+            on_message=self.__on_ws_message__,
+            on_error=self.__on_ws_error__,
+            on_close=self.__on_ws_close__,
+            on_open=self.__on_ws_open__,
+        )
+
+        # Start the WebSocket connection in a separate greenlet
+        self._listener_greenlet = gevent.spawn(
+            self.websocket.run_forever,
+            sslopt={"cert_reqs": ssl.CERT_NONE},  # Allow self-signed certs if needed
+        )
+
+        # Wait for the connection to be established
+        timeout = 5
+        start_time = gevent.time.time()
+        while not self.connected:
+            gevent.sleep(0.1)
+            if gevent.time.time() - start_time > timeout:
+                raise ConnectionError(f"Connection timeout for agent {self.identity}")
+
+        _log.info(f"Agent {self.identity} connected")
+
     def stop(self):
         """Signal the agent to stop."""
+        self._stop_reconnection()  # Stop reconnection first
         self._stop_event.set()
 
 

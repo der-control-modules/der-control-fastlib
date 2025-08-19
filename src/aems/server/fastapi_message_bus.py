@@ -2,17 +2,18 @@
 
 import asyncio
 import datetime
-import json
 import logging
 import os
 import subprocess
 import threading
+import uuid
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Optional
 
 import jwt
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 
 try:
     from importlib.metadata import PackageNotFoundError, version
@@ -23,6 +24,47 @@ except ImportError:
 from aems.server.config_store import ConfigStore
 from aems.server.connection_manager import ConnectionManager
 from aems.server.models import Message, MessageBus
+
+
+# Pydantic models for JSON-RPC 2.0 endpoint
+class JsonRpcParams(BaseModel):
+    authentication: Optional[dict] = None
+    data: Optional[dict] = None
+    args: Optional[list] = None
+    kwargs: Optional[dict] = None
+
+
+class JsonRpcRequest(BaseModel):
+    jsonrpc: str = "2.0"
+    id: str  # Agent identifier
+    method: str
+    params: Optional[JsonRpcParams] = None
+
+
+class JsonRpcError(BaseModel):
+    code: int
+    message: str
+
+
+class JsonRpcResponse(BaseModel):
+    jsonrpc: str = "2.0"
+    id: str
+    result: Optional[Any] = None
+    error: Optional[JsonRpcError] = None
+
+
+# Pydantic models for authentication endpoint
+class AuthRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    status: str = "success"
+    message: str
+    username: str
+    access_token: str
+    refresh_token: str
 
 
 class ColoredFormatter(logging.Formatter):
@@ -354,23 +396,25 @@ class FastAPIMessageBus(MessageBus):
             return {"status": "success", "data": config}
 
         @self.app.put("/config-store/{agent_id}/{config_name}")
-        async def store_config(agent_id: str, config_name: str, request: Request):
+        async def store_config(
+            agent_id: str,
+            config_name: str,
+            config_data: Any = Body(..., description="Configuration data (JSON object, array, or primitive)"),
+            request: Request = None,
+        ):
             """Store a configuration for an agent."""
-            content_type = request.headers.get("Content-Type", "application/json")
+            content_type = request.headers.get("Content-Type", "application/json") if request else "application/json"
 
             try:
-                if "json" in content_type:
-                    # Process as JSON
-                    config_data = await request.json()
-                    success = self.config_store.store(agent_id, config_name, config_data, "json")
-                elif "csv" in content_type:
-                    # Process as CSV
+                if "csv" in content_type:
+                    # For CSV, we need the raw request body
+                    if request is None:
+                        raise HTTPException(status_code=400, detail="CSV content requires raw request body")
                     csv_content = await request.body()
                     csv_text = csv_content.decode("utf-8")
                     success = self.config_store.store(agent_id, config_name, csv_text, "csv")
                 else:
-                    # Default to JSON
-                    config_data = await request.json()
+                    # Process as JSON (config_data is already parsed JSON from Body)
                     success = self.config_store.store(agent_id, config_name, config_data, "json")
             except ValueError as json_error:
                 raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(json_error)}")
@@ -421,59 +465,96 @@ class FastAPIMessageBus(MessageBus):
                 "service": "aems-server",
             }
 
-        @self.app.post("/authenticate")
-        async def authenticate(request: Request):
-            """Authenticate a user with username and password."""
-            auth_data = None
-            content_type = request.headers.get("content-type", "").lower()
+        @self.app.get("/connections")
+        async def get_connections():
+            """Get detailed information about active WebSocket connections."""
+            connections = {}
+            for identity, websocket in self.manager.active_connections.items():
+                connections[identity] = {
+                    "identity": identity,
+                    "connected": True,
+                    "client_state": websocket.client_state.name if hasattr(websocket, "client_state") else "unknown",
+                    "connection_time": getattr(websocket, "_connection_time", "unknown"),
+                }
 
-            _log.debug(f"Content-Type: {content_type}")
+            return {
+                "total_connections": len(self.manager.active_connections),
+                "connections": connections,
+                "timestamp": datetime.datetime.now().isoformat(),
+            }
 
-            # Handle different content types
-            if "application/x-www-form-urlencoded" in content_type:
-                # This is the case for requests.post with data parameter
-                try:
-                    form_data = await request.form()
-                    auth_data = dict(form_data)
-                    _log.debug(f"Parsed form data: {auth_data}")
-                except ValueError as e:
-                    raise HTTPException(status_code=400, detail=f"Invalid form data: {str(e)}")
-            elif "application/json" in content_type:
-                # This is for JSON requests
-                try:
-                    auth_data = await request.json()
-                    _log.debug(f"Parsed JSON data: {auth_data}")
-                except ValueError as e:
-                    raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
+        @self.app.get("/connections/{agent_identity}")
+        async def get_connection_status(agent_identity: str):
+            """Get detailed status for a specific agent connection."""
+            if agent_identity in self.manager.active_connections:
+                websocket = self.manager.active_connections[agent_identity]
+                return {
+                    "identity": agent_identity,
+                    "connected": True,
+                    "client_state": websocket.client_state.name if hasattr(websocket, "client_state") else "unknown",
+                    "connection_time": getattr(websocket, "_connection_time", "unknown"),
+                    "pending_rpc_calls": len(
+                        [msg_id for msg_id in self.manager.rpc_responses.keys() if msg_id.startswith(agent_identity)]
+                    ),  # Simplified check
+                    "timestamp": datetime.datetime.now().isoformat(),
+                }
             else:
-                # Try to determine the format by attempting to parse
-                try:
-                    # First try form data (most common for requests.post with data=)
-                    form_data = await request.form()
-                    if form_data:
-                        auth_data = dict(form_data)
-                        _log.debug(f"Fallback parsed form data: {auth_data}")
-                    else:
-                        # If form data is empty, try JSON
-                        body = await request.body()
-                        if body:
-                            auth_data = json.loads(body.decode())
-                            _log.debug(f"Fallback parsed JSON data: {auth_data}")
-                except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as parse_error:
-                    _log.error(f"Failed to parse request data: {parse_error}")
-                    raise HTTPException(status_code=400, detail=f"Unable to parse request data: {str(parse_error)}")
+                raise HTTPException(status_code=404, detail=f"Agent {agent_identity} not connected")
 
-            if not auth_data:
-                raise HTTPException(status_code=400, detail="No data received in request")
+        @self.app.post("/connections/{agent_identity}/ping")
+        async def ping_agent(agent_identity: str):
+            """Send a ping message to test agent connection."""
+            if agent_identity not in self.manager.active_connections:
+                raise HTTPException(status_code=404, detail=f"Agent {agent_identity} not connected")
 
-            _log.debug(f"Final auth data: {auth_data}")
+            try:
+                ping_id = str(uuid.uuid4())
+                await self.manager.send_message(
+                    agent_identity,
+                    {"type": "ping", "ping_id": ping_id, "timestamp": datetime.datetime.now().isoformat()},
+                )
+                return {
+                    "status": "ping_sent",
+                    "ping_id": ping_id,
+                    "agent": agent_identity,
+                    "timestamp": datetime.datetime.now().isoformat(),
+                }
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to ping agent: {str(e)}")
 
-            # Validate required fields
-            if "username" not in auth_data or "password" not in auth_data:
-                raise HTTPException(status_code=400, detail="Missing required fields: username and password")
+        @self.app.get("/rpc-status")
+        async def get_rpc_status():
+            """Get status of pending RPC calls."""
+            pending_calls = {}
+            for msg_id, future in self.manager.rpc_responses.items():
+                pending_calls[msg_id] = {
+                    "msg_id": msg_id,
+                    "done": future.done(),
+                    "cancelled": future.cancelled() if hasattr(future, "cancelled") else False,
+                }
 
-            username = auth_data["username"]
-            password = auth_data["password"]
+            return {
+                "pending_rpc_calls": len(self.manager.rpc_responses),
+                "rpc_calls": pending_calls,
+                "timestamp": datetime.datetime.now().isoformat(),
+            }
+
+        @self.app.post("/authenticate", response_model=AuthResponse)
+        async def authenticate(auth_request: AuthRequest):
+            """Authenticate a user with username and password.
+
+            Accepts username and password and returns JWT tokens for authentication.
+
+            Example request:
+            ```json
+            {
+                "username": "your_username",
+                "password": "your_password"
+            }
+            ```
+            """
+            username = auth_request.username
+            password = auth_request.password
 
             # TODO: Implement actual authentication logic here
             # For now, this is a placeholder that accepts any non-empty credentials
@@ -504,45 +585,77 @@ class FastAPIMessageBus(MessageBus):
                     }
                     refresh_token = jwt.encode(refresh_token_payload, secret_key, algorithm=algorithm)
 
-                    return {
-                        "status": "success",
-                        "message": "Authentication successful",
-                        "username": username,
-                        "access_token": access_token,
-                        "refresh_token": refresh_token,
-                    }
+                    return AuthResponse(
+                        message="Authentication successful",
+                        username=username,
+                        access_token=access_token,
+                        refresh_token=refresh_token,
+                    )
                 except (jwt.InvalidTokenError, jwt.PyJWTError) as jwt_error:
                     _log.error(f"JWT encoding error: {jwt_error}")
                     raise HTTPException(status_code=500, detail="Token generation failed")
             else:
                 raise HTTPException(status_code=401, detail="Invalid credentials")
 
-        @self.app.post("/gs")
-        async def rpc_endpoint(request: Request):
-            """Handle JSON-RPC 2.0 requests and route them to connected agents."""
-            # Parse JSON request
-            try:
-                rpc_data = await request.json()
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(e)}")
+        @self.app.post("/gs", response_model=JsonRpcResponse)
+        async def rpc_endpoint(rpc_request: JsonRpcRequest):
+            """Handle JSON-RPC 2.0 requests and route them to connected agents.
 
-            # Validate JSON-RPC 2.0 format
-            if "jsonrpc" not in rpc_data or rpc_data["jsonrpc"] != "2.0":
-                raise HTTPException(status_code=400, detail="Invalid JSON-RPC format. Must include 'jsonrpc': '2.0'")
+            Send commands and data to connected agents via JSON-RPC 2.0 protocol.
 
-            if "id" not in rpc_data:
-                raise HTTPException(status_code=400, detail="Missing required field: 'id' (agent identifier)")
+            Example using 'data' (legacy format):
+            ```json
+            {
+                "jsonrpc": "2.0",
+                "id": "platform.driver",
+                "method": "set_point",
+                "params": {
+                    "data": {
+                        "device": "PNNL/ROB/RTU02",
+                        "point": "OccupiedCoolingSetPoint",
+                        "value": 75.0
+                    }
+                }
+            }
+            ```
 
-            if "method" not in rpc_data:
-                raise HTTPException(status_code=400, detail="Missing required field: 'method'")
+            Example using 'args' (positional arguments):
+            ```json
+            {
+                "jsonrpc": "2.0",
+                "id": "platform.driver",
+                "method": "set_point",
+                "params": {
+                    "args": ["PNNL/ROB/RTU02", "OccupiedCoolingSetPoint", 75.0]
+                }
+            }
+            ```
 
-            agent_id = rpc_data["id"]
-            method = rpc_data["method"]
-            params = rpc_data.get("params", {})
+            Example using 'kwargs' (keyword arguments):
+            ```json
+            {
+                "jsonrpc": "2.0",
+                "id": "platform.driver",
+                "method": "set_point",
+                "params": {
+                    "kwargs": {
+                        "device": "PNNL/ROB/RTU02",
+                        "point": "OccupiedCoolingSetPoint",
+                        "value": 75.0
+                    }
+                }
+            }
+            ```
+            """
+            agent_id = rpc_request.id
+            method = rpc_request.method
+            params = rpc_request.params or JsonRpcParams()
 
-            # Extract authentication and data from params
-            authentication = params.get("authentication")
-            data = params.get("data", {})
+            # Extract authentication and parameters from params
+            authentication = params.authentication
+            data = params.data
+            args = params.args
+            kwargs = params.kwargs or {}
 
             # Check if the target agent is connected
             if agent_id not in self.manager.active_connections:
@@ -558,12 +671,27 @@ class FastAPIMessageBus(MessageBus):
             future = self.manager.register_rpc_response_future(msg_id)
 
             try:
-                # Create and send the RPC message directly
+                # Determine which parameter format to use and create RPC message
+                rpc_args = []
+                rpc_kwargs = kwargs.copy()
+
+                if args is not None:
+                    # Use args format
+                    rpc_args = args
+                elif data is not None:
+                    # Use legacy data format (single argument)
+                    rpc_args = [data]
+
+                # Add authentication to kwargs if provided
+                if authentication:
+                    rpc_kwargs["authentication"] = authentication
+
+                # Create and send the RPC message
                 rpc_message = {
                     "type": "rpc",
                     "method": method,
-                    "args": [data] if data else [],
-                    "kwargs": {"authentication": authentication} if authentication else {},
+                    "args": rpc_args,
+                    "kwargs": rpc_kwargs,
                     "msg_id": msg_id,
                 }
 
@@ -575,51 +703,37 @@ class FastAPIMessageBus(MessageBus):
                     result = await asyncio.wait_for(future, timeout=30.0)  # 30 second timeout
 
                     # Return JSON-RPC 2.0 success response
-                    return {"jsonrpc": "2.0", "id": rpc_data.get("id"), "result": result}
+                    return JsonRpcResponse(id=agent_id, result=result)
 
                 except asyncio.TimeoutError:
                     # Clean up the future
                     self.manager.clear_rpc_response(msg_id)
                     # Return JSON-RPC 2.0 error response for timeout
-                    return {
-                        "jsonrpc": "2.0",
-                        "id": rpc_data.get("id"),
-                        "error": {"code": -32603, "message": "Internal error: RPC call timed out"},
-                    }
+                    return JsonRpcResponse(
+                        id=agent_id, error=JsonRpcError(code=-32603, message="Internal error: RPC call timed out")
+                    )
 
             except KeyError as key_error:
                 # Clean up the future
                 self.manager.clear_rpc_response(msg_id)
                 _log.error(f"Missing key in RPC processing: {key_error}")
-                return {
-                    "jsonrpc": "2.0",
-                    "id": rpc_data.get("id"),
-                    "error": {
-                        "code": -32602,
-                        "message": f"Invalid params: missing {str(key_error)}",
-                    },
-                }
+                return JsonRpcResponse(
+                    id=agent_id, error=JsonRpcError(code=-32602, message=f"Invalid params: missing {str(key_error)}")
+                )
             except ConnectionError as conn_error:
                 # Clean up the future
                 self.manager.clear_rpc_response(msg_id)
                 _log.error(f"Connection error during RPC: {conn_error}")
-                return {
-                    "jsonrpc": "2.0",
-                    "id": rpc_data.get("id"),
-                    "error": {"code": -32603, "message": "Internal error: Connection failed"},
-                }
+                return JsonRpcResponse(
+                    id=agent_id, error=JsonRpcError(code=-32603, message="Internal error: Connection failed")
+                )
             except Exception as rpc_error:
                 # Clean up the future - this is our fallback for truly unexpected errors
                 self.manager.clear_rpc_response(msg_id)
                 _log.error(f"Unexpected error in RPC processing: {type(rpc_error).__name__}: {rpc_error}")
-                return {
-                    "jsonrpc": "2.0",
-                    "id": rpc_data.get("id"),
-                    "error": {
-                        "code": -32603,
-                        "message": "Internal error: Unexpected error occurred",
-                    },
-                }
+                return JsonRpcResponse(
+                    id=agent_id, error=JsonRpcError(code=-32603, message="Internal error: Unexpected error occurred")
+                )
 
     def start(self):
         """Start the message bus."""
