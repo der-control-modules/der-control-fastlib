@@ -19,11 +19,14 @@ class DuplicateTestAgent(Agent):
         print(f"ONSTART called! Count: {self.onstart_count}")
 
 
-def test_duplicate_onstart_issue(message_bus):
+def test_duplicate_onstart_issue(message_bus_manager_fixture):
     """Test that onstart is only called once."""
     print("Testing for duplicate onstart issue...")
 
-    agent = DuplicateTestAgent("test_agent", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    agent = manager.create_agent("test_agent", DuplicateTestAgent)
 
     try:
         print("1. Connecting agent...")

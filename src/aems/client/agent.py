@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import copy
 import heapq
 import json
 import logging
 import numbers
+import os
 import ssl
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
+from pprint import pformat
+from typing import Any
 
 import gevent
 import httpx
@@ -48,7 +52,7 @@ def get_smaller_print(data, in_str_full_value: str | None = None):
 
         return data[:SIZE_OUTPUT] + "..." if len(data) > SIZE_OUTPUT else data
     else:
-        if isinstance(data, (dict, list)):
+        if isinstance(data, dict | list):
             return get_smaller_print(json.dumps(data, default=str))
     return data
 
@@ -79,14 +83,14 @@ class RPC:
         """
         # Handle the case where decorator is used without parentheses
         if callable(method):
-            setattr(method, "rpc_exported", True)
-            setattr(method, "rpc_name", None)  # Use the method's name
+            method.rpc_exported = True
+            method.rpc_name = None  # Use the method's name
             return method
 
         # Handle the case where decorator is used with parentheses
         def decorator(f):
-            setattr(f, "rpc_exported", True)
-            setattr(f, "rpc_name", name)
+            f.rpc_exported = True
+            f.rpc_name = name
             return f
 
         return decorator
@@ -103,9 +107,9 @@ class RPC:
             attr = getattr(agent, attr_name)
             if callable(attr) and hasattr(attr, "rpc_exported"):
                 # Use the custom name if provided, otherwise use the method's name
-                method_name = getattr(attr, "rpc_name") or attr_name
+                method_name = attr.rpc_name or attr_name
                 self._exported_methods[method_name] = attr
-                _log.debug(f"Agent {self._agent.identity} exported RPC method: " f"{method_name} (from decorator)")
+                _log.debug(f"Agent {self._agent.identity} exported RPC method: {method_name} (from decorator)")
 
     def call(self, peer: str, method: str, *args, **kwargs):
         """Make an RPC call to another agent, returning an AsyncResult."""
@@ -121,7 +125,7 @@ class RPC:
         async_result = AsyncResult()
         self._agent.rpc_responses[msg_id] = async_result
 
-        _log.debug(f"Agent {self._agent.identity} making RPC call to " f"{peer}.{method} with msg_id {msg_id}")
+        _log.debug(f"Agent {self._agent.identity} making RPC call to {peer}.{method} with msg_id {msg_id}")
 
         self._agent.websocket.send(
             json.dumps(
@@ -137,7 +141,7 @@ class RPC:
         )
 
         _log.debug(
-            f"Agent {self._agent.identity} sent RPC call to {peer}: " f"method={method}, args={args}, kwargs={kwargs}"
+            f"Agent {self._agent.identity} sent RPC call to {peer}: method={method}, args={args}, kwargs={kwargs}"
         )
 
         # Spawn a timeout watcher
@@ -201,16 +205,22 @@ class RPC:
             async_result = AsyncResult()
 
             if method_name in self._exported_methods:
-                try:
-                    method = self._exported_methods[method_name]
-                    _log.debug(f"Agent {self._agent.identity} executing method {method_name}")
-                    result = method(*args, **kwargs)
-                    _log.debug(f"Agent {self._agent.identity} method {method_name} result: {result}")
-                    async_result.set(result)
-                except Exception as e:
-                    error = str(e)
-                    _log.error(f"Agent {self._agent.identity} method {method_name} error: {error}")
-                    async_result.set_exception(e)
+                # Execute RPC methods in greenlets to prevent blocking nested RPC calls
+                method = self._exported_methods[method_name]
+                _log.debug(f"Agent {self._agent.identity} executing method {method_name}")
+
+                def execute_method():
+                    try:
+                        result = method(*args, **kwargs)
+                        _log.debug(f"Agent {self._agent.identity} method {method_name} result: {result}")
+                        async_result.set(result)
+                    except Exception as e:
+                        error = str(e)
+                        _log.error(f"Agent {self._agent.identity} method {method_name} error: {error}")
+                        async_result.set_exception(e)
+
+                # Spawn the method execution in a greenlet to prevent blocking
+                gevent.spawn(execute_method)
             else:
                 error = f"Method {method_name} not found or not exported"
                 _log.debug(error)
@@ -226,7 +236,7 @@ class PubSub:
         self._agent = agent
         self._subscriptions = {}
 
-    def publish(self, peer: str, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""):
+    def publish(self, peer: str, topic: str, message: Any, headers: dict | None = None, bus: str = ""):
         """Publish a message to a topic, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
@@ -303,7 +313,7 @@ class PubSub:
 
         return adapter
 
-    def subscribe(self, prefix: str, callback: Optional[Callable] = None, **kwargs):
+    def subscribe(self, prefix: str, callback: Callable | None = None, **kwargs):
         """Subscribe to a topic prefix, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
@@ -332,7 +342,7 @@ class PubSub:
 
         return async_result
 
-    def subscribe_regex(self, pattern: str, callback: Optional[Callable] = None):
+    def subscribe_regex(self, pattern: str, callback: Callable | None = None):
         """Subscribe to a topic pattern, returning an AsyncResult."""
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
@@ -365,7 +375,7 @@ class PubSub:
         """Get all active subscriptions."""
         return list(self._subscriptions.keys())
 
-    def handle_message(self, data: Dict):
+    def handle_message(self, data: dict):
         """Handle an incoming pubsub message."""
         topic = data.get("topic", "")
 
@@ -386,7 +396,8 @@ class VIP:
         self._agent = agent
         self.rpc = RPC(agent)
         self.pubsub = PubSub(agent)
-        self.config = Config(agent)
+        # Use the agent's existing config instance instead of creating a new one
+        self.config = agent.config
         self.peerlist = Peerlist(agent)
 
     def send_message(self, peer: str, subsystem: str, args: list = None):
@@ -445,7 +456,7 @@ class Core:
             "onconnected": self.onconnected,
             "ondisconnected": self.ondisconnected,
         }
-        self._handlers = {event: [] for event in self._signals.keys()}
+        self._handlers = {event: [] for event in self._signals}
         self._scheduler = Scheduler(agent)
 
         # Register any methods decorated with @Core.receiver
@@ -465,7 +476,8 @@ class Core:
             *args: Positional arguments to pass to the function
             **kwargs: Keyword arguments to pass to the function
 
-        Returns:
+        Returns
+        -------
             The name of the scheduled event
         """
         # Convert datetime (object or string) to cron expression if needed
@@ -519,7 +531,7 @@ class Core:
 
     def cancel(self, name):
         """Cancel a scheduled event."""
-        return self._scheduler.cancel(name)
+        return self._scheduler.cancel()
 
     def update_interval(self, name, interval):
         """Update the interval of a scheduled event."""
@@ -545,7 +557,7 @@ class Core:
         """
 
         def decorator(method):
-            setattr(method, "event_name", event_name)
+            method.event_name = event_name
             return method
 
         return decorator
@@ -570,8 +582,8 @@ class Core:
         """
 
         def decorator(method):
-            setattr(method, "periodic", True)
-            setattr(method, "interval_or_cron", interval_or_cron)
+            method.periodic = True
+            method.interval_or_cron = interval_or_cron
             return method
 
         return decorator
@@ -581,7 +593,7 @@ class Core:
         for attr_name in dir(agent):
             attr = getattr(agent, attr_name)
             if callable(attr) and hasattr(attr, "periodic") and hasattr(attr, "interval_or_cron"):
-                interval_or_cron = getattr(attr, "interval_or_cron")
+                interval_or_cron = attr.interval_or_cron
                 self._scheduler.schedule(attr, interval_or_cron)
 
     def stop(self):
@@ -620,7 +632,7 @@ class Core:
         for attr_name in dir(agent):
             attr = getattr(agent, attr_name)
             if callable(attr) and hasattr(attr, "event_name"):
-                event_name = getattr(attr, "event_name")
+                event_name = attr.event_name
                 # Register with the signal to avoid double firing through _handlers
                 if event_name in self._signals:
                     self._signals[event_name].connect(attr)
@@ -643,7 +655,7 @@ class Core:
 class ConfigCallback:
     """A callback for configuration changes."""
 
-    def __init__(self, callback: Callable, actions: List[str] = None):
+    def __init__(self, callback: Callable, actions: list[str] = None):
         self.callback = callback
         self.actions = actions or ["NEW", "UPDATE", "DELETE"]
         self.is_default = False  # Indicates if this is a default config callback
@@ -686,6 +698,10 @@ class Config:
         self._watched_configs = set()
         self._new_default_configs_sent = False
         self._config_cache = {}  # Comprehensive cache of all config entries (default + server)
+        self._debug_task = None  # For periodic debug output
+
+        _log.info(f"ConfigStore created for agent {agent.identity}")
+
         # Connect to relevant agent signals
         self._agent.core.onconnected.connect(self._on_connection_established)
         self._agent.core.onconfigure.connect(self._on_update_from_server)  # Renamed method
@@ -708,10 +724,7 @@ class Config:
             # If both are dictionaries, they might have been merged
             if isinstance(default_value, dict) and isinstance(cached_value, dict):
                 # Check if cache has keys not in default
-                for key in cached_value:
-                    if key not in default_value or cached_value[key] != default_value[key]:
-                        return True
-                return False
+                return any(key not in default_value or cached_value[key] != default_value[key] for key in cached_value)
             else:
                 # For non-dict values, simply compare them
                 return default_value != cached_value
@@ -769,7 +782,9 @@ class Config:
         def store_config():
             try:
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
-                    response = client.put(request_url, json=config_data)
+                    # Include requesting agent identity for access control
+                    params = {"requesting_agent": self._agent.identity}
+                    response = client.put(request_url, json=config_data, params=params)
                     if response.status_code == 200:
                         # Update comprehensive cache
                         merged_config = {}
@@ -787,9 +802,10 @@ class Config:
 
                         # Trigger callbacks if requested
                         if send_update and config_name in self._config_callbacks:
-                            for callback in self._config_callbacks[config_name]:
+                            for config_callback in self._config_callbacks[config_name]:
                                 try:
-                                    callback(config_name, "UPDATE", merged_config)
+                                    if "UPDATE" in config_callback.actions:
+                                        config_callback.callback(config_name, "UPDATE", merged_config)
                                 except Exception as e:
                                     _log.error(f"Error in config update callback: {e}")
 
@@ -821,7 +837,9 @@ class Config:
         def delete_config():
             try:
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
-                    response = client.delete(request_url)
+                    # Include requesting agent identity for access control
+                    params = {"requesting_agent": self._agent.identity}
+                    response = client.delete(request_url, params=params)
                     if response.status_code == 200:
                         # Remove from comprehensive cache or update it to use only default values
                         if config_name in self._default_configs:
@@ -833,9 +851,10 @@ class Config:
 
                         # Trigger callbacks if requested
                         if send_update and config_name in self._config_callbacks:
-                            for callback in self._config_callbacks[config_name]:
+                            for config_callback in self._config_callbacks[config_name]:
                                 try:
-                                    callback(config_name, "DELETE", None)
+                                    if "DELETE" in config_callback.actions:
+                                        config_callback.callback(config_name, "DELETE", None)
                                 except Exception as e:
                                     _log.error(f"Error in config delete callback: {e}")
 
@@ -854,10 +873,10 @@ class Config:
         Returns the keys from our comprehensive cache which contains both server configs and defaults.
         """
         # Combine keys from both server configs and default configs
-        config_names = set(list(self._config_cache.keys()))
+        config_names = set(self._config_cache.keys())
 
         # Convert to list and sort for consistent output
-        config_list = sorted(list(config_names))
+        config_list = sorted(config_names)
 
         # Create and set the result immediately
         async_result = AsyncResult()
@@ -872,34 +891,38 @@ class Config:
             callback: Function to call when matching changes occur
             actions: List of action types to subscribe to ('NEW', 'UPDATE', 'DELETE')
             pattern: Pattern to match against config names
-            config_name: Specific config name to subscribe to (takes precedence over pattern)
+            config_name: Specific config name to subscribe to (takes precedence over pattern).
         """
         if actions is None:
             actions = ["NEW", "UPDATE", "DELETE"]
 
         # If a specific config_name is provided, use that directly
-        if pattern:
+        target_config = config_name if config_name else pattern
+
+        if target_config:
             # Register this callback for the specific config
             # TODO: pattern should allow a regular expression or wildcard matching, but is not at present
-            if pattern not in self._config_callbacks:
-                self._config_callbacks[pattern] = []
+            if target_config not in self._config_callbacks:
+                self._config_callbacks[target_config] = []
 
             # Add the callback if not already registered
-            if callback not in self._config_callbacks[pattern]:
-                self._config_callbacks[pattern].append(ConfigCallback(callback, actions))
-                _log.debug(f"Registered callback for config: {pattern}")
+            if callback not in self._config_callbacks[target_config]:
+                self._config_callbacks[target_config].append(ConfigCallback(callback, actions))
+                _log.info(
+                    f"Registered callback for config: {target_config} (total callbacks: {len(self._config_callbacks)})"
+                )
 
             # If we already have this config, notify immediately
-            if pattern in self._config_cache:
-                value = self._config_cache[pattern]
+            if target_config in self._config_cache:
+                value = self._config_cache[target_config]
                 try:
-                    callback(pattern, value)
-                    _log.debug(f"Called callback with existing config: {pattern}")
+                    callback(target_config, value)
+                    _log.debug(f"Called callback with existing config: {target_config}")
                 except Exception as e:
-                    _log.error(f"Error calling callback for config {pattern}: {e}")
+                    _log.error(f"Error calling callback for config {target_config}: {e}")
 
             # Return some identifier for this subscription
-            return f"{pattern}:{len(self._config_callbacks[pattern])}"
+            return f"{target_config}:{len(self._config_callbacks[target_config])}"
 
         # For pattern-based subscriptions, use the old mechanism with the server
         subscription = {"callback": callback, "actions": actions, "pattern": pattern}
@@ -916,43 +939,76 @@ class Config:
 
     def handle_update(self, config_name):
         """Handle a configuration update notification from the server."""
-        if config_name in self._config_callbacks:
-            # Fetch the updated config directly from the server
-            try:
-                request_url = (
-                    f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
-                )
-                with httpx.Client() as client:
-                    response = client.get(request_url)
-                    if response.status_code == 200:
-                        data = response.json()
-                        server_config = data["data"]
+        # ALWAYS fetch and update the cache, regardless of callbacks
+        try:
+            request_url = (
+                f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
+            )
+            with httpx.Client() as client:
+                response = client.get(request_url)
+                if response.status_code == 200:
+                    data = response.json()
+                    server_config = data["data"]
 
-                        # Update the comprehensive cache
-                        if config_name in self._default_configs:
-                            default_config = self._default_configs[config_name]
-                            if isinstance(default_config, dict) and isinstance(server_config, dict):
-                                # Merge dictionaries - server config overrides defaults
-                                merged_config = copy.deepcopy(default_config)
-                                merged_config.update(copy.deepcopy(server_config))
-                                self._config_cache[config_name] = merged_config
-                            else:
-                                # If either is not a dict, server config completely overrides
-                                self._config_cache[config_name] = copy.deepcopy(server_config)
+                    # Update the comprehensive cache
+                    if config_name in self._default_configs:
+                        default_config = self._default_configs[config_name]
+                        if isinstance(default_config, dict) and isinstance(server_config, dict):
+                            # Merge dictionaries - server config overrides defaults
+                            merged_config = copy.deepcopy(default_config)
+                            merged_config.update(copy.deepcopy(server_config))
+                            self._config_cache[config_name] = merged_config
                         else:
-                            # No default, use server config directly
+                            # If either is not a dict, server config completely overrides
                             self._config_cache[config_name] = copy.deepcopy(server_config)
+                    else:
+                        # No default, use server config directly
+                        self._config_cache[config_name] = copy.deepcopy(server_config)
 
-                        # Call all callbacks with the merged config
-                        for callback in self._config_callbacks[config_name]:
+                    # Log at INFO level when an agent updates its config cache
+                    _log.info(f"Agent {self._agent.identity} updated config cache: {config_name}")
+
+                    # Now check if there are callbacks to notify
+                    if config_name in self._config_callbacks:
+                        _log.info(
+                            f"Triggering {len(self._config_callbacks[config_name])} callbacks for config {config_name}"
+                        )
+                        for config_callback in self._config_callbacks[config_name]:
                             try:
-                                callback(config_name, "UPDATE", self._config_cache[config_name])
+                                # Check if this action is subscribed to
+                                if "UPDATE" in config_callback.actions:
+                                    _log.info(f"Calling callback for config {config_name} with UPDATE action")
+                                    config_callback.callback(config_name, "UPDATE", self._config_cache[config_name])
                             except Exception as e:
                                 _log.error(f"Error in config update callback: {e}")
                     else:
-                        _log.error(f"Failed to fetch updated config {config_name}: {response.status_code}")
-            except Exception as e:
-                _log.error(f"Error handling config update for {config_name}: {e}")
+                        _log.info(f"No callbacks registered for config {config_name}")
+                        _log.info(f"Available callbacks: {list(self._config_callbacks.keys())}")
+                elif response.status_code == 404:
+                    # Config was deleted on server
+                    _log.info(f"Config {config_name} not found on server (deleted)")
+                    # Remove from cache or revert to default
+                    if config_name in self._default_configs:
+                        self._config_cache[config_name] = copy.deepcopy(self._default_configs[config_name])
+                        action = "UPDATE"  # Reverted to default
+                    else:
+                        if config_name in self._config_cache:
+                            del self._config_cache[config_name]
+                        action = "DELETE"
+
+                    # Notify callbacks about the deletion/reversion
+                    if config_name in self._config_callbacks:
+                        for config_callback in self._config_callbacks[config_name]:
+                            try:
+                                if action in config_callback.actions:
+                                    value = self._config_cache.get(config_name, None)
+                                    config_callback.callback(config_name, action, value)
+                            except Exception as e:
+                                _log.error(f"Error in config callback: {e}")
+                else:
+                    _log.error(f"Failed to fetch updated config {config_name}: {response.status_code}")
+        except Exception as e:
+            _log.error(f"Error handling config update for {config_name}: {e}")
 
     def set_default(self, name, value):
         """
@@ -1021,15 +1077,17 @@ class Config:
                             else:
                                 # If either is not a dict, server config completely overrides
                                 self._config_cache[config_name] = copy.deepcopy(config_data)
+                                _log.info(f"Updated config {config_name} from server")
                         else:
                             # No default, use server config directly
                             self._config_cache[config_name] = copy.deepcopy(config_data)
+                            _log.info(f"Using server config for {config_name}")
 
                         # Notify callbacks
                         if config_name in self._config_callbacks:
                             for callback in self._config_callbacks[config_name]:
                                 try:
-                                    _log.debug(f"Calling callback for config: {config_name}")
+                                    _log.info(f"Calling callback for config: {config_name}")
                                     callback(config_name, "UPDATE", self._config_cache[config_name])
                                 except Exception as e:
                                     _log.error(f"Error in config callback for {config_name}: {e}")
@@ -1043,11 +1101,26 @@ class Config:
         _log.info(f"Agent {self._agent.identity} connected to server")
         self._connected = True
 
+        # Clear the cache to ensure fresh data
+        self._config_cache = {}
+        # Keep defaults separately
+        for name, value in self._default_configs.items():
+            if not self._has_server_config(name):
+                self._config_cache[name] = copy.deepcopy(value)
+
+        # Note: We only use direct WebSocket config_update messages now,
+        # not pubsub notifications, to avoid race conditions
+
         # Fetch all configurations for this agent's identity from the server
         # Wait for completion to ensure configs are loaded before proceeding
         fetch_greenlet = self._fetch_all_server_configs()
         if fetch_greenlet:
-            fetch_greenlet.join(timeout=5)  # Wait up to 5 seconds for configs to load
+            # Increase timeout to ensure all configs are loaded
+            # This is a critical step for agent initialization
+            fetch_greenlet.join(timeout=10)  # Wait up to 10 seconds for configs to load
+
+        # Set up periodic debug output (will only run if explicitly enabled)
+        self._start_periodic_debug()
 
         # Set up all pending subscriptions with the server
         for subscription in self._pending_subscriptions:
@@ -1063,10 +1136,16 @@ class Config:
         self._pending_subscriptions = []
 
     def _fetch_all_server_configs(self):
-        """Fetch all configurations for this agent from the server and cache them."""
+        """
+        Fetch all configurations for this agent from the server and update the cache.
+        This is critical for ensuring the internal cache matches the persisted files.
+        """
 
         def fetch_configs():
             try:
+                _log.debug(f"Fetching all server configs for agent {self._agent.identity}")
+
+                # Request the list of available configs for this agent
                 request_url = (
                     f"http://{self._agent._host}:{self._agent._port}/config-store/list?agent_id={self._agent.identity}"
                 )
@@ -1139,16 +1218,21 @@ class Config:
                                 merged_config = copy.deepcopy(default_config)
                                 merged_config.update(copy.deepcopy(server_config))
                                 self._config_cache[config_name] = merged_config
+                                _log.info(f"Updated merged config {config_name} from server")
                             else:
                                 # If either is not a dict, server config completely overrides
                                 self._config_cache[config_name] = copy.deepcopy(server_config)
+                            _log.info(f"Updated config {config_name} from server")
+                            _log.info(
+                                f"Fetched config {config_name} from server: {pformat(self._config_cache[config_name])}"
+                            )
                         else:
                             # No default, use server config directly
+                            _log.info(f"Using server config for {config_name}")
+                            _log.info(f"Fetched config {config_name} from server: {pformat(server_config)}")
                             self._config_cache[config_name] = copy.deepcopy(server_config)
-
-                        _log.debug(f"Cached config for {config_name}: {get_smaller_print(server_config)}")
-                    else:
-                        _log.warning(f"No server config found for {config_name} (status: {response.status_code})")
+                    elif response.status_code != 404:  # 404 is expected for non-existent configs
+                        _log.warning(f"Failed to fetch config {config_name}: HTTP {response.status_code}")
             except Exception as e:
                 _log.error(f"Failed to fetch config {config_name}: {e}")
 
@@ -1221,6 +1305,119 @@ class Config:
         # This would need to match your server's API for setting defaults
         self._agent.vip.rpc.call("config.store", "set_default", name, value).get()
 
+    def _start_periodic_debug(self):
+        """Start periodic debug output of the entire config store contents."""
+        # Only run periodic debug if log level is DEBUG
+        if not _log.isEnabledFor(logging.DEBUG):
+            return
+
+        if self._debug_task is not None:
+            # Cancel any existing task
+            self._debug_task.kill(block=False)
+
+        # Start a new task that logs the config store every minute
+        self._debug_task = gevent.spawn(self._periodic_debug_log)
+        _log.info(f"Started periodic config store debug logging for agent {self._agent.identity}")
+
+    def _periodic_debug_log(self):
+        """Periodically log the entire contents of the config store."""
+        try:
+            while self._connected:
+                # Log the entire config store contents
+                self._log_config_store_contents()
+                # Wait for 1 minute before logging again
+                gevent.sleep(60)
+        except gevent.GreenletExit:
+            _log.debug(f"Stopping periodic config store debug logging for agent {self._agent.identity}")
+        except Exception as e:
+            _log.error(f"Error in periodic config store debug logging: {e}")
+
+    def _log_config_store_contents(self):
+        """Log the entire contents of the config store."""
+        if not self._connected or not _log.isEnabledFor(logging.DEBUG):
+            return
+
+        # Define a helper function to safely convert objects to JSON-serializable format
+        def safe_json_dump(obj):
+            class ConfigEncoder(json.JSONEncoder):
+                def default(self, o):
+                    # Handle specific types that might be in configurations
+
+                    # Handle PosixPath objects from pathlib
+                    if hasattr(o, "__fspath__") or hasattr(o, "resolve"):
+                        return str(o)
+
+                    # Handle datetime, date, and time objects
+                    elif hasattr(o, "isoformat"):
+                        return o.isoformat()
+
+                    # Handle bytes and bytearrays
+                    elif isinstance(o, bytes | bytearray):
+                        try:
+                            return o.decode("utf-8")
+                        except UnicodeDecodeError:
+                            return str(o)
+
+                    # Handle sets
+                    elif isinstance(o, set):
+                        return list(o)
+
+                    # Handle complex numbers
+                    elif isinstance(o, complex):
+                        return {"real": o.real, "imag": o.imag}
+
+                    # Handle numpy arrays if present
+                    elif str(type(o)).startswith("<class 'numpy."):
+                        try:
+                            return o.tolist()
+                        except (AttributeError, ValueError, TypeError):
+                            return str(o)
+
+                    # Handle custom objects with __dict__
+                    elif hasattr(o, "__dict__"):
+                        return {
+                            "_type": o.__class__.__name__,
+                            "attributes": {k: v for k, v in o.__dict__.items() if not k.startswith("_")},
+                        }
+
+                    # Handle other iterables
+                    elif hasattr(o, "__iter__") and not isinstance(o, str | dict | list):
+                        return list(o)
+
+                    # Default: convert to string
+                    return str(o)
+
+            try:
+                # Use compact JSON output (no indents, no newlines)
+                return json.dumps(obj, cls=ConfigEncoder, separators=(",", ":"))
+            except Exception as e:
+                return f"<Error serializing: {str(e)}>"
+
+        try:
+            # Simplified output in a single log message to reduce log volume
+            _log.debug(
+                f"CONFIG STORE ({self._agent.identity}): "
+                f"{len(self._default_configs)} defaults, "
+                f"{len(self._config_cache)} cached, "
+                f"{len([n for n in self._config_cache if self._has_server_config(n)])} from server"
+            )
+
+            # Only log detailed contents if explicitly requested via environment variable
+            _log.debug(f"CONFIG DEFAULTS: {', '.join(self._default_configs.keys())}")
+            _log.debug(f"CACHED CONFIGS: {', '.join(self._config_cache.keys())}")
+            _log.debug(f"SERVER CONFIGS: {', '.join([n for n in self._config_cache if self._has_server_config(n)])}")
+
+            # Log full config contents if even more detail is requested
+            if os.environ.get("AEMS_CONFIG_FULL_DETAIL", "").lower() in ("1", "true", "yes"):
+                for name, value in self._config_cache.items():
+                    _log.debug(f"CONFIG {name}: {safe_json_dump(value)}")
+        except Exception as e:
+            _log.error(f"Error logging config store contents: {e}")
+            if _log.isEnabledFor(logging.DEBUG):
+                import traceback
+
+                _log.debug(traceback.format_exc())
+
 
 class CronTimer:
     """
@@ -1279,7 +1476,8 @@ class CronTimer:
             is_months: Whether this component represents months
             is_dow: Whether this component represents days of week
 
-        Returns:
+        Returns
+        -------
             A set of values for the component
         """
         if component == "*":
@@ -1400,7 +1598,8 @@ class CronTimer:
         Args:
             now: The reference time (defaults to current time)
 
-        Returns:
+        Returns
+        -------
             The next scheduled time as a datetime object
         """
         if now is None:
@@ -1546,7 +1745,7 @@ class Scheduler:
             else:
                 try:
                     result = ast.literal_eval(d)
-                    if not isinstance(result, (int, float)):
+                    if not isinstance(result, int | float):
                         invalid = True
                 except (ValueError, SyntaxError):
                     invalid = True
@@ -1567,7 +1766,8 @@ class Scheduler:
             kwargs: Keyword arguments to pass to the function
             name: Name of the event (defaults to function name)
 
-        Returns:
+        Returns
+        -------
             The name of the scheduled event
         """
         if isinstance(interval_or_cron, numbers.Number):
@@ -1585,17 +1785,24 @@ class Scheduler:
         self._events[name] = event
         heapq.heappush(self._event_queue, event)
 
-        return name
+        return self
 
-    def cancel(self, name):
+    def cancel(self):
         """Cancel a scheduled event."""
-        if name in self._events:
-            event = self._events.pop(name)
-            event.running = False
-            # Note: The event may still be in the queue, but we'll skip it
-            # when it comes up in the scheduler loop
+        if self._scheduler_greenlet is not None:
+            self._scheduler_greenlet.kill()
+            self._scheduler_greenlet = None
             return True
+
         return False
+
+        # if name in self._events:
+        #     event = self._events.pop(name)
+        #     event.running = False
+        #     # Note: The event may still be in the queue, but we'll skip it
+        #     # when it comes up in the scheduler loop
+        #     return True
+        # return False
 
     def update_interval(self, name, interval):
         """Update the interval of a scheduled event."""
@@ -1823,7 +2030,7 @@ class Agent:
             self._logger.debug(f"Loading configuration from file: {self.config_path}")
 
             # Load the configuration based on file extension
-            with open(self.config_path, "r") as f:
+            with open(self.config_path) as f:
                 if self.config_path.endswith(".json"):
                     config_data = json.load(f)
                 elif self.config_path.endswith((".yml", ".yaml")):
@@ -1904,13 +2111,39 @@ class Agent:
             elif msg_type == "config_delete":
                 # Handle config delete notifications
                 config_name = data.get("config_name")
-                if config_name and config_name in self.config._config_callbacks:
-                    # Notify callbacks with None to indicate deletion
-                    for callback in self.config._config_callbacks[config_name]:
-                        try:
-                            callback(config_name, None)
-                        except Exception as e:
-                            _log.error(f"Error in config delete callback: {e}")
+                if config_name:
+                    _log.info(f"Processing config_delete for {config_name}")
+                    # Remove from cache or revert to default
+                    if config_name in self.config._config_cache:
+                        if config_name in self.config._default_configs:
+                            # Restore to default
+                            self.config._config_cache[config_name] = copy.deepcopy(
+                                self.config._default_configs[config_name]
+                            )
+                            action = "UPDATE"  # Reverted to default
+                            value = self.config._config_cache[config_name]
+                            _log.info(f"Config {config_name} reverted to default: {value}")
+                        else:
+                            # No default, remove completely
+                            del self.config._config_cache[config_name]
+                            action = "DELETE"
+                            value = None
+                            _log.info(f"Config {config_name} deleted completely")
+
+                        # Notify callbacks about the deletion/reversion
+                        if config_name in self.config._config_callbacks:
+                            _log.info(
+                                f"Triggering {len(self.config._config_callbacks[config_name])} delete callbacks for {config_name}"
+                            )
+                            for config_callback in self.config._config_callbacks[config_name]:
+                                try:
+                                    if action in config_callback.actions:
+                                        _log.info(f"Calling delete callback for {config_name} with {action}")
+                                        config_callback.callback(config_name, action, value)
+                                except Exception as e:
+                                    _log.error(f"Error in config delete callback: {e}")
+                        else:
+                            _log.info(f"No callbacks registered for deleted config {config_name}")
             elif msg_type in ("rpc_request", "rpc"):
                 # Handle RPC request
                 _log.debug(f"Agent {self.identity} received RPC request: {data}")
@@ -1949,7 +2182,7 @@ class Agent:
 
                 # Spawn a greenlet to process the response asynchronously
                 try:
-                    response_greenlet = gevent.spawn(send_response)
+                    gevent.spawn(send_response)
                     _log.debug(f"Spawned RPC response handler for msg_id {msg_id}")
                 except Exception as spawn_error:
                     _log.error(f"Failed to spawn RPC response handler for msg_id {msg_id}: {spawn_error}")
@@ -2012,7 +2245,7 @@ class Agent:
                         "type": "pong",
                         "ping_id": ping_id,
                         "original_timestamp": timestamp,
-                        "response_timestamp": datetime.datetime.now().isoformat(),
+                        "response_timestamp": datetime.now().isoformat(),
                     }
                     self.websocket.send(json.dumps(pong_response))
                     _log.debug(f"Agent {self.identity} sent pong response for ping {ping_id}")
@@ -2192,16 +2425,12 @@ class Agent:
 
                 # Clean up old connection
                 if self.websocket:
-                    try:
+                    with contextlib.suppress(Exception):
                         self.websocket.close()
-                    except Exception:
-                        pass
 
                 if self._listener_greenlet:
-                    try:
+                    with contextlib.suppress(Exception):
                         self._listener_greenlet.join(timeout=1)
-                    except Exception:
-                        pass
 
                 # Attempt to reconnect
                 self._internal_connect()
@@ -2276,7 +2505,8 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
         identity: Agent identity, if None will be derived from agent class name
         **kwargs: Additional keyword arguments to pass to the agent constructor
 
-    Returns:
+    Returns
+    -------
         Exit code (0 for success, non-zero for errors)
     """
     import argparse
@@ -2308,7 +2538,7 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     # Load the configuration file if it exists
     if config_path and os.path.exists(config_path):
         try:
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 try:
                     agent_config = yaml.safe_load(f)
                 except ImportError:

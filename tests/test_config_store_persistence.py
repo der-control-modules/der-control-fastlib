@@ -4,7 +4,6 @@ Test config store persistence to disk and through agent restarts.
 
 import json
 import os
-import time
 import uuid
 
 import gevent
@@ -89,12 +88,12 @@ class TestConfigStorePersistence:
         assert os.path.exists(metadata_file), f"Metadata file not created: {metadata_file}"
 
         # Verify config file contents
-        with open(config_file, "r") as f:
+        with open(config_file) as f:
             stored_config = json.load(f)
         assert stored_config == test_config, "Stored config doesn't match original"
 
         # Verify metadata file contents
-        with open(metadata_file, "r") as f:
+        with open(metadata_file) as f:
             metadata = json.load(f)
         assert metadata["type"] == "json", "Config type not recorded correctly"
         assert "created" in metadata, "Creation timestamp missing"
@@ -126,12 +125,12 @@ class TestConfigStorePersistence:
         assert os.path.exists(metadata_file), f"CSV metadata file not created: {metadata_file}"
 
         # Verify CSV file contents
-        with open(config_file, "r") as f:
+        with open(config_file) as f:
             stored_csv = f.read()
         assert stored_csv == csv_data, "Stored CSV doesn't match original"
 
         # Verify metadata
-        with open(metadata_file, "r") as f:
+        with open(metadata_file) as f:
             metadata = json.load(f)
         assert metadata["type"] == "csv", "CSV config type not recorded correctly"
 

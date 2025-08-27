@@ -123,9 +123,9 @@ class TestAgentRPC:
         # Register method that handles complex data
         def process_data(data):
             if isinstance(data, dict):
-                return {k: v * 2 if isinstance(v, (int, float)) else v for k, v in data.items()}
+                return {k: v * 2 if isinstance(v, int | float) else v for k, v in data.items()}
             elif isinstance(data, list):
-                return [x * 2 if isinstance(x, (int, float)) else x for x in data]
+                return [x * 2 if isinstance(x, int | float) else x for x in data]
             else:
                 return data
 

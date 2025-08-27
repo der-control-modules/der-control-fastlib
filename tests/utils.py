@@ -7,7 +7,6 @@ import shutil
 import socket
 import tempfile
 import time
-from typing import Optional, Tuple
 
 from aems.client.agent import Agent
 from aems.server.fastapi_message_bus import FastAPIMessageBus
@@ -31,7 +30,7 @@ class MessageBusManager:
         self.temp_config_dir = None
         self.host = "127.0.0.1"
 
-    def start_bus(self, port: Optional[int] = None, host: str = "127.0.0.1") -> Tuple[FastAPIMessageBus, int]:
+    def start_bus(self, port: int | None = None, host: str = "127.0.0.1") -> tuple[FastAPIMessageBus, int]:
         """
         Start a message bus for testing.
 
@@ -184,7 +183,7 @@ class MessageBusManager:
 
 
 # Convenience functions for simple use cases
-def start_test_message_bus(port: Optional[int] = None, host: str = "127.0.0.1") -> Tuple[FastAPIMessageBus, int]:
+def start_test_message_bus(port: int | None = None, host: str = "127.0.0.1") -> tuple[FastAPIMessageBus, int]:
     """
     Start a test message bus (convenience function).
 
@@ -200,7 +199,7 @@ def start_test_message_bus(port: Optional[int] = None, host: str = "127.0.0.1") 
 
 
 def create_test_agent(
-    identity: str, agent_class=None, port: Optional[int] = None, host: str = "127.0.0.1", **kwargs
+    identity: str, agent_class=None, port: int | None = None, host: str = "127.0.0.1", **kwargs
 ) -> Agent:
     """
     Create a test agent (convenience function).
@@ -228,7 +227,7 @@ def create_test_agent(
 
 
 def create_connected_test_agent(
-    identity: str, agent_class=None, port: Optional[int] = None, host: str = "127.0.0.1", **kwargs
+    identity: str, agent_class=None, port: int | None = None, host: str = "127.0.0.1", **kwargs
 ) -> Agent:
     """
     Create a test agent and establish WebSocket connection (convenience function).

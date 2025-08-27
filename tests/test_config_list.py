@@ -20,11 +20,14 @@ class ConfigListTestAgent(Agent):
         self.configs_received[config_name] = config_value
 
 
-def test_config_list_from_cache(message_bus):
+def test_config_list_from_cache(message_bus_manager_fixture):
     """Test that the list method returns configurations from the cache."""
     print("Testing that list method returns configurations from the cache...")
 
-    agent = ConfigListTestAgent("list_test_agent", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    agent = manager.create_agent("list_test_agent", ConfigListTestAgent)
 
     try:
         print("1. Connecting agent...")
@@ -89,11 +92,14 @@ def test_config_list_from_cache(message_bus):
             agent.disconnect()
 
 
-def test_merged_config_in_list(message_bus):
+def test_merged_config_in_list(message_bus_manager_fixture):
     """Test that configs with both default and server values are correctly merged in the list."""
     print("Testing that merged configurations appear correctly in the list...")
 
-    agent = ConfigListTestAgent("merged_list_test_agent", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    agent = manager.create_agent("merged_list_test_agent", ConfigListTestAgent)
 
     try:
         print("1. Connecting agent...")

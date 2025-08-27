@@ -48,6 +48,7 @@ dev = [
     "pylint>=3.0.0",
     "flake8>=7.0.0",
     "flake8-pyproject>=1.2.0",
+    "ruff>=0.8.5",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
@@ -236,3 +237,102 @@ exclude_lines = [
 [tool.bandit]
 exclude_dirs = ["tests", "build", "dist"]
 skips = ["B101", "B601", "B404", "B603", "B607", "B602", "B110"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = [
+    "__pycache__",
+    ".git",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+# Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
+# Also enable:
+# - pycodestyle warnings (`W`)
+# - isort (`I`)
+# - pydocstyle (`D`)
+# - pyupgrade (`UP`) - upgrade syntax for newer Python versions
+# - flake8-bugbear (`B`) - additional bug and design problems
+# - flake8-simplify (`SIM`) - simplify code
+# - flake8-comprehensions (`C4`) - improve comprehensions
+# - flake8-pie (`PIE`) - miscellaneous lints
+# - flake8-type-checking (`TCH`) - type checking improvements
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "PIE", # flake8-pie
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "UP",  # pyupgrade
+    "D",   # pydocstyle (docstrings)
+]
+
+# Ignore specific rules that conflict with our coding standards or Black
+ignore = [
+    "E203",   # whitespace before ':' (conflicts with Black)
+    "E501",   # line too long (handled by Black and line-length setting)
+    "D100",   # Missing docstring in public module (not needed for all modules)
+    "D101",   # Missing docstring in public class (not needed for test classes)
+    "D102",   # Missing docstring in public method (not needed for test methods)
+    "D103",   # Missing docstring in public function (not needed for test functions)
+    "D104",   # Missing docstring in public package (not needed for __init__.py)
+    "D105",   # Missing docstring in magic method (not always needed)
+    "D107",   # Missing docstring in __init__ (not always needed)
+    "D200",   # One-line docstring should fit on one line
+    "D205",   # 1 blank line required between summary line and description (style preference)
+    "D212",   # Multi-line docstring summary should start at the first line
+    "D401",   # First line should be in imperative mood (style preference)
+    "B008",   # Do not perform function calls in argument defaults (common in FastAPI)
+    "B017",   # Do not assert blind exception (acceptable in tests)
+    "B904",   # raise ... from err (backward compatibility)
+    "UP007",  # Use X | Y for unions (want to maintain Python 3.10 compatibility)
+    "TC002",  # Move third-party imports into type-checking blocks (can break runtime)
+    "TC003",  # Move standard library imports into type-checking blocks (can break runtime)
+    "SIM102", # Use single if statement (style preference)
+    "SIM108", # Use ternary operator (style preference)
+    "PIE790", # Unnecessary pass statement (sometimes needed for clarity)
+    "E402",   # Module level import not at top (gevent monkey patching requires this)
+]
+
+# Allow autofix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can use more relaxed rules
+"tests/**/*.py" = [
+    "D",     # Don't require docstrings in tests
+    "SIM",   # Don't simplify test code (clarity over brevity)
+    "TCH",   # Don't enforce type checking imports in tests
+    "B011",  # Don't warn about assert False in tests
+    "PIE804", # Don't require unnecessary dict kwargs
+    "PIE800", # Don't warn about unnecessary spread
+]
+# Allow more flexibility in __init__ files
+"**/__init__.py" = [
+    "D104",  # Don't require docstring in __init__.py
+    "F401",  # Allow "unused" imports (they're often re-exports)
+    "F403",  # Allow star imports in __init__.py
+]
+# Scripts and examples can be more flexible
+"examples/**/*.py" = ["D", "T201", "T203"]  # Allow print statements
+"scripts/**/*.py" = ["D", "T201", "T203"]   # Allow print statements
+
+[tool.ruff.lint.isort]
+known-first-party = ["aems"]
+force-single-line = false
+combine-as-imports = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"  # Use NumPy docstring style

@@ -21,11 +21,14 @@ class ConfigUpdateTestAgent(Agent):
         )
 
 
-def test_config_update_notification_sent(message_bus):
+def test_config_update_notification_sent(message_bus_manager_fixture):
     """Test that storing a config triggers an UPDATE notification to subscribers."""
     print("Testing that UPDATE notifications are sent when configs are stored...")
 
-    agent = ConfigUpdateTestAgent("update_test_agent", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    agent = manager.create_agent("update_test_agent", ConfigUpdateTestAgent)
 
     try:
         print("1. Connecting agent...")
@@ -72,12 +75,15 @@ def test_config_update_notification_sent(message_bus):
             agent.disconnect()
 
 
-def test_config_update_notification_multiple_subscribers(message_bus):
-    """Test that UPDATE notifications are properly isolated per agent."""
-    print("\nTesting UPDATE notification isolation between agents...")
+def test_config_update_notification_isolation(message_bus_manager_fixture):
+    """Test that agents only receive UPDATE notifications for their own configs, even when config names are identical."""
+    print("\nTesting config notification isolation (agents with same config names)...")
 
-    agent1 = ConfigUpdateTestAgent("subscriber1", port=8888)
-    agent2 = ConfigUpdateTestAgent("subscriber2", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    agent1 = manager.create_agent("subscriber1", ConfigUpdateTestAgent)
+    agent2 = manager.create_agent("subscriber2", ConfigUpdateTestAgent)
 
     try:
         print("1. Connecting both agents...")
@@ -86,8 +92,8 @@ def test_config_update_notification_multiple_subscribers(message_bus):
         agent2.connect()
         gevent.sleep(0.5)
 
-        print("2. Both agents subscribing to configs with the same name...")
-        # Each agent subscribes to their own config with the same name
+        print("2. Both agents subscribing to configs with identical names (but isolated stores)...")
+        # Each agent subscribes to their own isolated config with the same name
         agent1.config.subscribe(
             callback=agent1.config_update_callback, pattern="shared_name_config", actions=["UPDATE"]
         )
@@ -96,38 +102,38 @@ def test_config_update_notification_multiple_subscribers(message_bus):
         )
         gevent.sleep(0.5)
 
-        print("3. Agent1 storing its own config (should only notify agent1)...")
-        # Agent1 stores its own config - only agent1 should be notified
+        print("3. Agent1 setting config in its isolated store (should only notify agent1)...")
+        # Agent1 stores config in its isolated store - only agent1 should be notified
         # Use send_update=False to avoid duplicate notifications (one from set, one from server)
         agent1.config.set("shared_name_config", {"updated_by": "agent1", "data": "agent1_data"}, send_update=False)
 
         print("4. Waiting for notifications...")
         gevent.sleep(2)
 
-        print("5. Agent2 storing its own config (should only notify agent2)...")
-        # Agent2 stores its own config - only agent2 should be notified
+        print("5. Agent2 setting config in its isolated store (should only notify agent2)...")
+        # Agent2 stores config in its isolated store - only agent2 should be notified
         # Use send_update=False to avoid duplicate notifications
         agent2.config.set("shared_name_config", {"updated_by": "agent2", "data": "agent2_data"}, send_update=False)
 
         print("6. Waiting for notifications...")
         gevent.sleep(2)
 
-        print("7. Checking notification isolation...")
+        print("7. Verifying config isolation - each agent only notified about its own changes...")
         print(f"Agent1 notifications: {len(agent1.update_notifications)}")
         print(f"Agent2 notifications: {len(agent2.update_notifications)}")
 
-        # Each agent should have received exactly one notification for their own config
+        # Each agent should have received exactly one notification for their own isolated config
         agent1_notifications = [n for n in agent1.update_notifications if n["config_name"] == "shared_name_config"]
         agent2_notifications = [n for n in agent2.update_notifications if n["config_name"] == "shared_name_config"]
 
         assert (
             len(agent1_notifications) == 1
-        ), f"Agent1 should receive exactly 1 notification, got {len(agent1_notifications)}"
+        ), f"Agent1 should receive exactly 1 notification for its own config, got {len(agent1_notifications)}"
         assert (
             len(agent2_notifications) == 1
-        ), f"Agent2 should receive exactly 1 notification, got {len(agent2_notifications)}"
+        ), f"Agent2 should receive exactly 1 notification for its own config, got {len(agent2_notifications)}"
 
-        print("✅ SUCCESS: Config store notifications are properly isolated per agent!")
+        print("✅ SUCCESS: Config isolation verified - agents only receive notifications for their own configs!")
 
     finally:
         for agent in [agent1, agent2]:
@@ -135,12 +141,15 @@ def test_config_update_notification_multiple_subscribers(message_bus):
                 agent.disconnect()
 
 
-def test_config_update_via_rest_api_isolation(message_bus):
+def test_config_update_via_rest_api_isolation(message_bus_manager_fixture):
     """Test that REST API config updates are properly isolated per agent."""
     print("\nTesting REST API config update isolation...")
 
-    agent1 = ConfigUpdateTestAgent("rest_agent1", port=8888)
-    agent2 = ConfigUpdateTestAgent("rest_agent2", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    agent1 = manager.create_agent("rest_agent1", ConfigUpdateTestAgent)
+    agent2 = manager.create_agent("rest_agent2", ConfigUpdateTestAgent)
 
     try:
         print("1. Connecting both agents...")
@@ -166,7 +175,7 @@ def test_config_update_via_rest_api_isolation(message_bus):
 
         try:
             response = requests.put(
-                "http://127.0.0.1:8888/config-store/rest_agent1/api_test_config",
+                f"{manager.get_base_url()}/config-store/rest_agent1/api_test_config",
                 json=config_data,
                 headers={"Content-Type": "application/json"},
             )
@@ -188,7 +197,7 @@ def test_config_update_via_rest_api_isolation(message_bus):
 
         try:
             response = requests.put(
-                "http://127.0.0.1:8888/config-store/rest_agent2/api_test_config",
+                f"{manager.get_base_url()}/config-store/rest_agent2/api_test_config",
                 json=config_data2,
                 headers={"Content-Type": "application/json"},
             )

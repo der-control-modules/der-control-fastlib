@@ -8,18 +8,18 @@ import subprocess
 import threading
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Any, Union
 
 import jwt
 import uvicorn
-from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 try:
     from importlib.metadata import PackageNotFoundError, version
 except ImportError:
     # Python < 3.8
-    from importlib_metadata import version, PackageNotFoundError
+    from importlib_metadata import PackageNotFoundError, version
 
 from aems.server.config_store import ConfigStore
 from aems.server.connection_manager import ConnectionManager
@@ -28,17 +28,17 @@ from aems.server.models import Message, MessageBus
 
 # Pydantic models for JSON-RPC 2.0 endpoint
 class JsonRpcParams(BaseModel):
-    authentication: Optional[dict] = None
-    data: Optional[dict] = None
-    args: Optional[list] = None
-    kwargs: Optional[dict] = None
+    authentication: Union[dict, str] | None = None
+    data: dict | None = None
+    args: list | None = None
+    kwargs: dict | None = None
 
 
 class JsonRpcRequest(BaseModel):
     jsonrpc: str = "2.0"
     id: str  # Agent identifier
     method: str
-    params: Optional[JsonRpcParams] = None
+    params: JsonRpcParams | None = None
 
 
 class JsonRpcError(BaseModel):
@@ -49,8 +49,8 @@ class JsonRpcError(BaseModel):
 class JsonRpcResponse(BaseModel):
     jsonrpc: str = "2.0"
     id: str
-    result: Optional[Any] = None
-    error: Optional[JsonRpcError] = None
+    result: Any | None = None
+    error: JsonRpcError | None = None
 
 
 # Pydantic models for authentication endpoint
@@ -235,7 +235,7 @@ class FastAPIMessageBus(MessageBus):
         self.reload_delay = reload_delay
         self.setup_routes()
 
-        self.config_store = ConfigStore(config_store_dir)
+        self.config_store = ConfigStore(config_store_dir, messagebus=self)
         self.message_queue = asyncio.Queue()
 
     def setup_routes(self):
@@ -382,7 +382,7 @@ class FastAPIMessageBus(MessageBus):
                 self.manager.disconnect(identity)
 
         @self.app.get("/config-store/list")
-        async def list_configs(agent_id: Optional[str] = None):
+        async def list_configs(agent_id: str | None = None):
             """List all available configurations."""
             configs = self.config_store.list_configs(agent_id)
             return {"status": "success", "data": configs}
@@ -401,8 +401,16 @@ class FastAPIMessageBus(MessageBus):
             config_name: str,
             config_data: Any = Body(..., description="Configuration data (JSON object, array, or primitive)"),
             request: Request = None,
+            requesting_agent: str = Query(None, description="Identity of the agent making the request"),
         ):
-            """Store a configuration for an agent."""
+            """Store a configuration for an agent. Only the agent itself can update its configs."""
+            # Access control: Only allow agent to update its own configs (or admin override)
+            if requesting_agent and requesting_agent != agent_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Agent {requesting_agent} cannot update configs for agent {agent_id}. Agents can only update their own configs.",
+                )
+
             content_type = request.headers.get("Content-Type", "application/json") if request else "application/json"
 
             try:
@@ -434,8 +442,18 @@ class FastAPIMessageBus(MessageBus):
                 raise HTTPException(status_code=500, detail="Failed to store configuration")
 
         @self.app.delete("/config-store/{agent_id}/{config_name}")
-        async def delete_config(agent_id: str, config_name: str):
-            """Delete a configuration for an agent."""
+        async def delete_config(
+            agent_id: str,
+            config_name: str,
+            requesting_agent: str = Query(None, description="Identity of the agent making the request"),
+        ):
+            """Delete a configuration for an agent. Only the agent itself can delete its configs."""
+            # Access control: Only allow agent to delete its own configs (or admin override)
+            if requesting_agent and requesting_agent != agent_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Agent {requesting_agent} cannot delete configs for agent {agent_id}. Agents can only delete their own configs.",
+                )
             success = self.config_store.delete_config(agent_id, config_name)
             if success:
                 # Notify the agent of the config deletion if it's connected
@@ -494,7 +512,7 @@ class FastAPIMessageBus(MessageBus):
                     "client_state": websocket.client_state.name if hasattr(websocket, "client_state") else "unknown",
                     "connection_time": getattr(websocket, "_connection_time", "unknown"),
                     "pending_rpc_calls": len(
-                        [msg_id for msg_id in self.manager.rpc_responses.keys() if msg_id.startswith(agent_identity)]
+                        [msg_id for msg_id in self.manager.rpc_responses if msg_id.startswith(agent_identity)]
                     ),  # Simplified check
                     "timestamp": datetime.datetime.now().isoformat(),
                 }
@@ -837,7 +855,8 @@ def start_server(host="127.0.0.1", port=8000, config_store_dir=None):
         port: Port to listen on
         config_store_dir: Directory for the config store, defaults to VOLTTRON_HOME/aems_config_store
 
-    Returns:
+    Returns
+    -------
         The running server instance
     """
     # Use VOLTTRON_HOME for config_store_dir if not explicitly provided
@@ -903,9 +922,7 @@ def _main():
         if "debugpy" in sys.modules:
             return True
         # Check for pdb
-        if "pdb" in sys.modules:
-            return True
-        return False
+        return "pdb" in sys.modules
 
     if is_debugger_attached():
         _log.info("Debugger detected - using direct uvicorn.run() for better debugging support")

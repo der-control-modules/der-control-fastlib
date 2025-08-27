@@ -59,7 +59,7 @@ class TestAgentConfig:
             try:
                 # List configs for this agent
                 list_url = f"http://localhost:8888/config-store/{agent.identity}"
-                response = requests.get(list_url)
+                response = requests.get(list_url, timeout=5)
                 if response.status_code == 200:
                     configs = response.json()
                     # Delete each config
@@ -67,7 +67,7 @@ class TestAgentConfig:
                         config_name = config.get("name")
                         if config_name:
                             delete_url = f"http://localhost:8888/config-store/{agent.identity}/{config_name}"
-                            requests.delete(delete_url)
+                            requests.delete(delete_url, timeout=5)
                             print(f"Deleted server config: {agent.identity}/{config_name}")
                 gevent.sleep(0.1)  # Small delay between operations
             except Exception as e:

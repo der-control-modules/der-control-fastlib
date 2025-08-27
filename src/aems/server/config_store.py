@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import threading
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 from watchdog.observers import Observer
 
@@ -64,9 +64,15 @@ class ConfigStore:
             config_data: The configuration data
             config_type: The type of configuration ("json" or "csv")
 
-        Returns:
+        Returns
+        -------
             bool: True if successful, False otherwise
         """
+        # Validate inputs to prevent errors
+        if not agent_id or not config_name:
+            _log.error(f"Cannot store config: Invalid agent_id='{agent_id}' or config_name='{config_name}'")
+            return False
+
         with self.lock:
             agent_dir = os.path.join(self.base_dir, agent_id)
             os.makedirs(agent_dir, exist_ok=True)
@@ -75,13 +81,26 @@ class ConfigStore:
             self._store_metadata(agent_dir, config_name, config_type)
 
             # Store the actual config data
+            result = False
             if config_type == "json":
-                return self._store_json(agent_dir, config_name, config_data)
+                result = self._store_json(agent_dir, config_name, config_data)
             elif config_type == "csv":
-                return self._store_csv(agent_dir, config_name, config_data)
+                result = self._store_csv(agent_dir, config_name, config_data)
             else:
                 _log.error(f"Unsupported config type: {config_type}")
                 return False
+
+            # Log successful storage at INFO level
+            if result:
+                _log.info(f"Config store updated: {agent_id}/{config_name} ({config_type})")
+
+                # Notify about the change
+                full_name = f"{agent_id}/{config_name}"
+                # Use the exists method to check if this is an update or new config
+                action = "UPDATE" if self.exists(agent_id, config_name) else "NEW"
+                self.notify_change(full_name, action, config_data)
+
+            return result
 
     def _store_metadata(self, agent_dir: str, config_name: str, config_type: str):
         """Store metadata about a configuration."""
@@ -99,7 +118,7 @@ class ConfigStore:
         metadata_file = os.path.join(agent_dir, f"{config_name}.metadata")
         if os.path.exists(metadata_file):
             try:
-                with open(metadata_file, "r") as f:
+                with open(metadata_file) as f:
                     metadata = json.load(f)
                 metadata["last_updated"] = datetime.datetime.now().isoformat()
                 with open(metadata_file, "w") as f:
@@ -144,7 +163,7 @@ class ConfigStore:
             _log.error(f"Error storing CSV config {config_name}: {e}")
             return False
 
-    def retrieve(self, agent_id: str, config_name: str, raw: bool = False) -> Optional[Any]:
+    def retrieve(self, agent_id: str, config_name: str, raw: bool = False) -> Any | None:
         """
         Retrieve a configuration entry for an agent.
 
@@ -153,7 +172,8 @@ class ConfigStore:
             config_name: The name of the configuration
             raw: If True, return the raw file content, otherwise parse based on type
 
-        Returns:
+        Returns
+        -------
             The configuration data or None if not found
         """
         with self.lock:
@@ -167,7 +187,7 @@ class ConfigStore:
             # If raw, just return the file contents
             if raw:
                 try:
-                    with open(config_file, "r") as f:
+                    with open(config_file) as f:
                         return f.read()
                 except Exception as e:
                     _log.error(f"Error reading raw config {config_name}: {e}")
@@ -179,7 +199,7 @@ class ConfigStore:
             # Try to get the type from metadata
             if os.path.exists(metadata_file):
                 try:
-                    with open(metadata_file, "r") as f:
+                    with open(metadata_file) as f:
                         metadata = json.load(f)
                     config_type = metadata.get("type", "json")
                 except Exception as e:
@@ -194,33 +214,53 @@ class ConfigStore:
                 _log.error(f"Unsupported config type: {config_type}")
                 return None
 
-    def _retrieve_json(self, config_file: str) -> Optional[Any]:
+    def _retrieve_json(self, config_file: str) -> Any | None:
         """Retrieve a JSON configuration."""
         try:
-            with open(config_file, "r") as f:
+            with open(config_file) as f:
                 return json.load(f)
         except Exception as e:
             _log.error(f"Error retrieving JSON config from {config_file}: {e}")
             return None
 
-    def _retrieve_csv(self, config_file: str) -> Optional[list[list[str]]]:
+    def _retrieve_csv(self, config_file: str) -> list[list[str]] | None:
         """Retrieve a CSV configuration as a list of rows."""
         try:
-            with open(config_file, "r", newline="") as f:
+            with open(config_file, newline="") as f:
                 reader = csv.reader(f)
-                return [row for row in reader]
+                return list(reader)
         except Exception as e:
             _log.error(f"Error retrieving CSV config from {config_file}: {e}")
             return None
 
-    def list_configs(self, agent_id: Optional[str] = None) -> dict[str, list[dict[str, Any]]]:
+    def exists(self, agent_id: str, config_name: str) -> bool:
         """
-        list available configurations.
+        Check if a configuration exists for an agent.
+
+        Args:
+            agent_id: The identity of the agent
+            config_name: The name of the configuration
+
+        Returns
+        -------
+            bool: True if the configuration exists, False otherwise
+        """
+        # Validate inputs to prevent errors
+        if not agent_id or not config_name:
+            return False
+
+        config_file = os.path.join(self.base_dir, agent_id, config_name)
+        return os.path.exists(config_file)
+
+    def list_configs(self, agent_id: str | None = None) -> dict[str, list[dict[str, Any]]]:
+        """
+        List available configurations.
 
         Args:
             agent_id: Optional agent identity to filter by
 
-        Returns:
+        Returns
+        -------
             A dictionary mapping agent IDs to lists of config names and metadata
         """
         with self.lock:
@@ -243,7 +283,7 @@ class ConfigStore:
             return result
 
     def _list_agent_configs(self, agent_dir: str) -> list[dict[str, Any]]:
-        """list configurations for a specific agent directory."""
+        """List configurations for a specific agent directory."""
         configs = []
 
         # Get all files that don't end with .metadata
@@ -261,7 +301,7 @@ class ConfigStore:
             # Try to get metadata if available
             if os.path.exists(metadata_path):
                 try:
-                    with open(metadata_path, "r") as f:
+                    with open(metadata_path) as f:
                         metadata = json.load(f)
                     config_info.update(metadata)
                 except Exception:
@@ -279,7 +319,8 @@ class ConfigStore:
             agent_id: The identity of the agent
             config_name: The name of the configuration
 
-        Returns:
+        Returns
+        -------
             bool: True if successful, False otherwise
         """
         with self.lock:
@@ -306,6 +347,14 @@ class ConfigStore:
                     _log.error(f"Error deleting metadata for {config_name}: {e}")
                     # Don't set success to False here, as long as the main config was deleted
 
+            if success:
+                # Log successful deletion at INFO level
+                _log.info(f"Config deleted from store: {agent_id}/{config_name}")
+
+                # Notify about the deletion
+                full_name = f"{agent_id}/{config_name}"
+                self.notify_change(full_name, "DELETE", None)
+
             return success
 
     def csv_to_json(self, csv_data: Union[str, list[list[str]]]) -> dict[str, Any]:
@@ -315,13 +364,14 @@ class ConfigStore:
         Args:
             csv_data: CSV data as a string or list of rows
 
-        Returns:
+        Returns
+        -------
             A JSON-compatible dictionary
         """
         # If csv_data is a string, parse it
         if isinstance(csv_data, str):
             reader = csv.reader(io.StringIO(csv_data))
-            rows = [row for row in reader]
+            rows = list(reader)
         else:
             rows = csv_data
 
@@ -361,7 +411,7 @@ class ConfigStore:
 
         return result
 
-    def notify_change(self, config_name: str, action: str, value: Optional[Any] = None):
+    def notify_change(self, config_name: str, action: str, value: Any | None = None):
         """
         Notify subscribers about configuration changes using VIP messages.
 
@@ -372,6 +422,15 @@ class ConfigStore:
         """
         if self.messagebus is None:
             _log.warning("Config change not published: No message bus provided")
+            return
+
+        # Ensure we have valid inputs
+        if not config_name:
+            _log.warning("Config change not published: Missing config name")
+            return
+
+        if action not in ("NEW", "UPDATE", "DELETE"):
+            _log.warning(f"Config change not published: Invalid action {action}")
             return
 
         try:
@@ -389,25 +448,63 @@ class ConfigStore:
             _log.info(f"Publishing config change: {config_name} ({action})")
 
             # Format topic for easier subscription matching
-            topic = f"config/{config_name}"
+            # Include agent_id in the topic to allow targeted subscriptions
+            agent_id = config_name.split("/")[0] if "/" in config_name else ""
+            config_short_name = config_name.split("/")[1] if "/" in config_name else config_name
+
+            # If agent_id is available, include it in the topic
+            if agent_id:
+                topic = f"config/{agent_id}/{config_short_name}"
+            else:
+                topic = f"config/{config_name}"
+
+            _log.debug(f"Publishing to topic: {topic}")
 
             # Get all active connections from the manager
-            if hasattr(self.messagebus, "manager") and hasattr(self.messagebus.manager, "active_connections"):  # type: ignore
-                # Create and send a message to each connected client
-                for client_id in self.messagebus.manager.active_connections:  # type: ignore  The implemented messagebus has this.
-                    message = Message(
-                        peer=client_id,  # Target specific client
-                        subsystem="pubsub",
-                        data={
-                            "topic": topic,
-                            "headers": {},
-                            "message": payload,
-                            "sender": "configstore",
-                        },
-                    )
-                    self.messagebus.send_vip_message(message)
-            else:
-                _log.warning("Cannot publish config change: No active connections found")
+            if not hasattr(self.messagebus, "manager"):
+                _log.warning("Config change not published: Message bus has no manager attribute")
+                return
+
+            if not hasattr(self.messagebus.manager, "active_connections"):
+                _log.warning("Config change not published: Manager has no active_connections attribute")
+                return
+
+            active_connections = self.messagebus.manager.active_connections
+
+            # Safety check: ensure active_connections is a dict-like object we can iterate over
+            if active_connections is None:
+                _log.warning("Config change not published: active_connections is None")
+                return
+
+            if not hasattr(active_connections, "items") and not hasattr(active_connections, "__iter__"):
+                _log.warning(
+                    f"Config change not published: active_connections is not iterable: {type(active_connections)}"
+                )
+                return
+
+            # Check if we have any active connections at all
+            if not active_connections:
+                _log.warning("Config change not published: No active connections found")
+                return
+
+            # Create and send a message to each connected client
+            for client_id in active_connections:
+                message = Message(
+                    peer=client_id,  # Target specific client
+                    subsystem="pubsub",
+                    data={
+                        "topic": topic,
+                        "headers": {},
+                        "message": payload,
+                        "sender": "configstore",
+                    },
+                )
+                self.messagebus.send_vip_message(message)
+
+                # Log successful notification at INFO level
+                _log.info(f"Published config change notification: {topic} ({action})")
+
+            # No else clause needed here - we've already checked if active_connections is empty
 
         except Exception as e:
             _log.error(f"Error publishing config change notification: {e}")

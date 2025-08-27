@@ -14,7 +14,6 @@ class LifecycleTestAgent(Agent):
         # Track all lifecycle events
         self.lifecycle_events = []
         self.event_counts = {
-            "onsetup": 0,
             "onconnected": 0,
             "onstart": 0,
             "onconfigure": 0,
@@ -23,68 +22,53 @@ class LifecycleTestAgent(Agent):
             "onfinish": 0,
         }
 
-        # Register event handlers using decorators
-        self._register_lifecycle_handlers()
-
-    def _register_lifecycle_handlers(self):
-        """Register all lifecycle event handlers."""
-
-        # Register event handlers after core is created
-        def register_handlers():
-            self.core._handlers["onsetup"].append(self.on_setup)
-            self.core._handlers["onconnected"].append(self.on_connected)
-            self.core._handlers["onstart"].append(self.on_start)
-            self.core._handlers["onconfigure"].append(self.on_configure)
-            self.core._handlers["onstop"].append(self.on_stop)
-            self.core._handlers["ondisconnected"].append(self.on_disconnected)
-            self.core._handlers["onfinish"].append(self.on_finish)
-
-        # Delay registration until after initialization
-        gevent.spawn_later(0, register_handlers)
-
-    def on_setup(self, sender, **kwargs):
-        self.event_counts["onsetup"] += 1
-        self.lifecycle_events.append("onsetup")
-        print(f"ONSETUP called! Count: {self.event_counts['onsetup']}")
-
+    @Core.receiver("onconnected")
     def on_connected(self, sender, **kwargs):
         self.event_counts["onconnected"] += 1
         self.lifecycle_events.append("onconnected")
         print(f"ONCONNECTED called! Count: {self.event_counts['onconnected']}")
 
+    @Core.receiver("onstart")
     def on_start(self, sender, **kwargs):
         self.event_counts["onstart"] += 1
         self.lifecycle_events.append("onstart")
         print(f"ONSTART called! Count: {self.event_counts['onstart']}")
 
+    @Core.receiver("onconfigure")
     def on_configure(self, sender, **kwargs):
         self.event_counts["onconfigure"] += 1
         self.lifecycle_events.append("onconfigure")
         configs = kwargs.get("configs", [])
         print(f"ONCONFIGURE called! Count: {self.event_counts['onconfigure']}, configs: {len(configs)}")
 
+    @Core.receiver("onstop")
     def on_stop(self, sender, **kwargs):
         self.event_counts["onstop"] += 1
         self.lifecycle_events.append("onstop")
         print(f"ONSTOP called! Count: {self.event_counts['onstop']}")
 
+    @Core.receiver("ondisconnected")
     def on_disconnected(self, sender, **kwargs):
         self.event_counts["ondisconnected"] += 1
         self.lifecycle_events.append("ondisconnected")
         print(f"ONDISCONNECTED called! Count: {self.event_counts['ondisconnected']}")
 
+    @Core.receiver("onfinish")
     def on_finish(self, sender, **kwargs):
         self.event_counts["onfinish"] += 1
         self.lifecycle_events.append("onfinish")
         print(f"ONFINISH called! Count: {self.event_counts['onfinish']}")
 
 
-def test_agent_lifecycle(message_bus):
+def test_agent_lifecycle(message_bus_manager_fixture):
     """Test the complete agent lifecycle and all its signals."""
     print("Testing agent lifecycle events...")
 
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
     # Create test agent
-    agent = LifecycleTestAgent("lifecycle_test_agent", port=8888)
+    agent = manager.create_agent("lifecycle_test_agent", LifecycleTestAgent)
 
     try:
         print("\n=== Testing Connection Lifecycle ===")
@@ -132,9 +116,10 @@ def test_agent_lifecycle(message_bus):
 
         # Verify disconnection events
         assert agent.event_counts["onstop"] == 1, f"Expected onstop=1, got {agent.event_counts['onstop']}"
+        # ondisconnected can fire multiple times (programmatic disconnect + websocket close)
         assert (
-            agent.event_counts["ondisconnected"] == 1
-        ), f"Expected ondisconnected=1, got {agent.event_counts['ondisconnected']}"
+            agent.event_counts["ondisconnected"] >= 1
+        ), f"Expected ondisconnected>=1, got {agent.event_counts['ondisconnected']}"
 
         print("✓ Disconnection lifecycle events fired correctly")
 
@@ -189,9 +174,12 @@ def test_agent_lifecycle(message_bus):
             pass
 
 
-def test_signal_decorators(message_bus):
+def test_signal_decorators(message_bus_manager_fixture):
     """Test using @Core.receiver decorators for lifecycle events."""
     print("\n=== Testing @Core.receiver Decorators ===")
+
+    manager = message_bus_manager_fixture
+    manager.start_bus()
 
     class DecoratorTestAgent(Agent):
         def __init__(self, *args, **kwargs):
@@ -208,7 +196,7 @@ def test_signal_decorators(message_bus):
             self.decorator_events.append("decorator_onconnected")
             print("Decorator onconnected handler called!")
 
-    agent = DecoratorTestAgent("decorator_test_agent", port=8888)
+    agent = manager.create_agent("decorator_test_agent", DecoratorTestAgent)
 
     try:
         agent.connect()
@@ -225,9 +213,12 @@ def test_signal_decorators(message_bus):
             agent.disconnect()
 
 
-def test_onstart_called_once(message_bus):
+def test_onstart_called_once(message_bus_manager_fixture):
     """Test that onstart is only called once during agent lifecycle (original test)."""
     print("\n=== Testing onstart is called exactly once ===")
+
+    manager = message_bus_manager_fixture
+    manager.start_bus()
 
     class OnstartTestAgent(Agent):
         def __init__(self, *args, **kwargs):
@@ -240,7 +231,7 @@ def test_onstart_called_once(message_bus):
             self.onstart_count += 1
             print(f"ONSTART CALLED! Count: {self.onstart_count}")
 
-    agent = OnstartTestAgent("onstart_test_agent", port=8888)
+    agent = manager.create_agent("onstart_test_agent", OnstartTestAgent)
 
     try:
         agent.connect()

@@ -3,12 +3,32 @@
 import asyncio
 import logging
 import re
-from typing import Any, Callable, Dict, List, Pattern, Tuple
+from collections.abc import Callable
+from re import Pattern
+from typing import Any
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
 _log = logging.getLogger(__name__)
+
+
+def truncate_debug_message(message: Any, max_length: int = 200) -> str:
+    """Truncate a message for debug logging to limit output size.
+
+    Args:
+        message: The message to truncate
+        max_length: Maximum length of the returned string (default: 200)
+
+    Returns
+    -------
+        Truncated string representation of the message
+    """
+    message_str = str(message)
+    if len(message_str) <= max_length:
+        return message_str
+    return message_str[:max_length] + "..."
+
 
 # Subscription callback type
 SubscriptionCallback = Callable[[str, str, str, str, dict, Any], None]
@@ -18,11 +38,11 @@ class ConnectionManager:
     """Manages WebSocket connections for the MessageBus."""
 
     def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
+        self.active_connections: dict[str, WebSocket] = {}
         self.message_queue: asyncio.Queue = asyncio.Queue()
-        self.prefix_subscriptions: Dict[str, Dict[str, List[Tuple[str, SubscriptionCallback]]]] = {}
-        self.regex_subscriptions: Dict[str, List[Tuple[Pattern, str, SubscriptionCallback]]] = {}
-        self.rpc_responses: Dict[str, asyncio.Future] = {}
+        self.prefix_subscriptions: dict[str, dict[str, list[tuple[str, SubscriptionCallback]]]] = {}
+        self.regex_subscriptions: dict[str, list[tuple[Pattern, str, SubscriptionCallback]]] = {}
+        self.rpc_responses: dict[str, asyncio.Future] = {}
         self._status_task: asyncio.Task = None
         self._status_reporter_started = False
         self._no_connections_count = 0  # Track consecutive periods with no connections
@@ -58,7 +78,7 @@ class ConnectionManager:
         if identity in self.active_connections:
             websocket = self.active_connections[identity]
             if websocket.client_state != WebSocketState.DISCONNECTED:
-                _log.debug(f"Sending message to {identity}: {message}")
+                _log.debug(f"Sending message to {identity}: {truncate_debug_message(message)}")
                 await websocket.send_json(message)
             else:
                 _log.debug(f"Cannot send message to {identity}, websocket is disconnected")
@@ -67,7 +87,7 @@ class ConnectionManager:
 
     async def broadcast(self, message: dict):
         """Broadcast a message to all connected clients."""
-        for identity, websocket in self.active_connections.items():
+        for _identity, websocket in self.active_connections.items():
             if websocket.client_state != WebSocketState.DISCONNECTED:
                 await websocket.send_json(message)
 
@@ -92,7 +112,7 @@ class ConnectionManager:
     async def publish(self, bus: str, topic: str, headers: dict, message: Any, sender: str):
         """Publish a message to subscribers."""
         # Process prefix subscriptions
-        for identity, prefixes in self.prefix_subscriptions.items():
+        for _identity, prefixes in self.prefix_subscriptions.items():
             for prefix, callbacks in prefixes.items():
                 if topic.startswith(prefix):
                     for peer, callback in callbacks:
@@ -102,7 +122,7 @@ class ConnectionManager:
                             _log.error(f"Error in prefix subscription callback: {e}")
 
         # Process regex subscriptions
-        for identity, patterns in self.regex_subscriptions.items():
+        for _identity, patterns in self.regex_subscriptions.items():
             for pattern, peer, callback in patterns:
                 if pattern.match(topic):
                     try:
@@ -122,7 +142,7 @@ class ConnectionManager:
         if msg_id in self.rpc_responses:
             future = self.rpc_responses.pop(msg_id)
             if not future.done():
-                _log.debug(f"Setting RPC response for msg_id {msg_id}: {response}")
+                _log.debug(f"Setting RPC response for msg_id {msg_id}: {truncate_debug_message(response)}")
                 future.set_result(response)
             else:
                 _log.debug(f"Future for msg_id {msg_id} was already done")
@@ -134,7 +154,7 @@ class ConnectionManager:
         if msg_id in self.rpc_responses:
             future = self.rpc_responses.pop(msg_id)
             if not future.done():
-                _log.debug(f"Setting RPC error for msg_id {msg_id}: {error}")
+                _log.debug(f"Setting RPC error for msg_id {msg_id}: {truncate_debug_message(error)}")
                 future.set_exception(Exception(error))
             else:
                 _log.debug(f"Future for msg_id {msg_id} was already done")
@@ -151,7 +171,9 @@ class ConnectionManager:
 
     async def handle_rpc(self, sender: str, peer: str, method: str, args: list, kwargs: dict, msg_id: str):
         """Handle RPC request between clients."""
-        _log.debug(f"RPC request from {sender} to {peer}: {method}({args}, {kwargs}) [msg_id: {msg_id}]")
+        _log.debug(
+            f"RPC request from {sender} to {peer}: {method}({truncate_debug_message(args)}, {truncate_debug_message(kwargs)}) [msg_id: {msg_id}]"
+        )
 
         if peer not in self.active_connections:
             _log.debug(f"RPC target {peer} not found")
@@ -179,7 +201,7 @@ class ConnectionManager:
         try:
             _log.debug(f"Waiting for RPC response for msg_id {msg_id}")
             response = await asyncio.wait_for(future, 10.0)  # 10 second timeout
-            _log.debug(f"Received RPC response for msg_id {msg_id}: {response}")
+            _log.debug(f"Received RPC response for msg_id {msg_id}: {truncate_debug_message(response)}")
             await self.send_message(sender, {"type": "rpc_response", "msg_id": msg_id, "result": response})
         except asyncio.TimeoutError:
             _log.debug(f"RPC request timed out for msg_id {msg_id}")
