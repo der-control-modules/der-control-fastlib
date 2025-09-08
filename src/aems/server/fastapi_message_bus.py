@@ -402,6 +402,7 @@ class FastAPIMessageBus(MessageBus):
             config_data: Any = Body(..., description="Configuration data (JSON object, array, or primitive)"),
             request: Request = None,
             requesting_agent: str = Query(None, description="Identity of the agent making the request"),
+            send_update: bool = Query(True, description="Whether to send WebSocket notifications to the agent"),
         ):
             """Store a configuration for an agent. Only the agent itself can update its configs."""
             # Access control: Only allow agent to update its own configs (or admin override)
@@ -430,8 +431,8 @@ class FastAPIMessageBus(MessageBus):
                 raise HTTPException(status_code=400, detail=f"Invalid text encoding: {str(decode_error)}")
 
             if success:
-                # Notify the agent of the config update if it's connected
-                if agent_id in self.manager.active_connections:
+                # Notify the agent of the config update if it's connected and send_update is True
+                if send_update and agent_id in self.manager.active_connections:
                     try:
                         await self.manager.send_message(agent_id, {"type": "config_update", "config_name": config_name})
                     except ConnectionError:
@@ -446,6 +447,7 @@ class FastAPIMessageBus(MessageBus):
             agent_id: str,
             config_name: str,
             requesting_agent: str = Query(None, description="Identity of the agent making the request"),
+            send_update: bool = Query(True, description="Whether to send WebSocket notifications to the agent"),
         ):
             """Delete a configuration for an agent. Only the agent itself can delete its configs."""
             # Access control: Only allow agent to delete its own configs (or admin override)
@@ -456,8 +458,8 @@ class FastAPIMessageBus(MessageBus):
                 )
             success = self.config_store.delete_config(agent_id, config_name)
             if success:
-                # Notify the agent of the config deletion if it's connected
-                if agent_id in self.manager.active_connections:
+                # Notify the agent of the config deletion if it's connected and send_update is True
+                if send_update and agent_id in self.manager.active_connections:
                     try:
                         await self.manager.send_message(agent_id, {"type": "config_delete", "config_name": config_name})
                     except ConnectionError:
