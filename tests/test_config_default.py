@@ -2,7 +2,6 @@ from aems.client.agent import Agent
 
 
 class ConfigListTestAgent(Agent):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.configs_received = {}

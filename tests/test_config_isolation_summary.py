@@ -2,6 +2,7 @@
 """
 Summary test demonstrating config store isolation per agent
 """
+
 import gevent
 import pytest
 import requests

@@ -2,6 +2,7 @@
 """
 Test to verify that agents receive config update notifications via pubsub
 """
+
 import logging
 import time
 

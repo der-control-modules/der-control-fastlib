@@ -286,7 +286,7 @@ def run_async_result_test():
     # Do some other work while waiting
     print("Doing other work while waiting for the result...")
     for i in range(3):
-        print(f"  Working... {i+1}")
+        print(f"  Working... {i + 1}")
         gevent.sleep(1)
 
     # Now wait for the result

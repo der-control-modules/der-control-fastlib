@@ -2,6 +2,7 @@
 """
 Test configuration subscription and UPDATE notification behavior
 """
+
 import gevent
 import pytest
 

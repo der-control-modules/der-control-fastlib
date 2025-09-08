@@ -2,6 +2,7 @@
 """
 Test to check if onstart is still being called twice
 """
+
 import gevent
 import pytest
 

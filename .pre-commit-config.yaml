@@ -13,18 +13,14 @@ repos:
       - id: check-merge-conflict
       - id: debug-statements
 
-  - repo: https://github.com/psf/black
-    rev: 24.1.1
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.5
     hooks:
-      - id: black
-        args: [--line-length=120]
-        language_version: python3
-
-
-  - repo: https://github.com/PyCQA/pylint
-    rev: v3.0.3
-    hooks:
-      - id: pylint
+      # Run the linter
+      - id: ruff
+        args: [--fix]
+      # Run the formatter
+      - id: ruff-format
 
   - repo: https://github.com/PyCQA/bandit
     rev: 1.7.5
@@ -32,9 +28,3 @@ repos:
       - id: bandit
         exclude: ^(tests|dev\.py|test_rpc\.py|dev_new\.py|new_init_project\.py|debug_rpc\.py|scoop-files-for-model\.py)
         args: [-s, "B101,B110,B307,B404,B603,B607"]
-
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        args: [--profile, black, --line-length=120]

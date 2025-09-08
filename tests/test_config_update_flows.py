@@ -122,7 +122,9 @@ class TestConfigUpdateFlows:
         # Test with callback enabled (default)
         config_with_callback = {"test": "with_callback", "value": 1}
         result = self.tracking_agent.vip.config.set(
-            config_name, config_with_callback, send_update=True  # Default, but explicit for clarity
+            config_name,
+            config_with_callback,
+            send_update=True,  # Default, but explicit for clarity
         )
         result.get(timeout=5)
 

@@ -2,6 +2,7 @@
 """
 Test to verify that UPDATE notifications are sent when configs are stored
 """
+
 import gevent
 import pytest
 
@@ -46,8 +47,9 @@ def test_config_update_notification_sent(message_bus_manager_fixture):
         print("3. Storing configuration (should trigger UPDATE notification)...")
         # Store a config - this should trigger the UPDATE notification
         test_config = {"test": "data", "timestamp": gevent.time.time()}
-        # Use send_update=False to avoid duplicate notifications (one from set, one from server)
-        agent.config.set("notification_test_config", test_config, send_update=False)
+        # Use send_update=True to ensure notifications are sent
+        result = agent.config.set("notification_test_config", test_config, send_update=True)
+        result.get(timeout=5.0)  # Wait for the set to complete
 
         print("4. Waiting for UPDATE notification...")
         gevent.sleep(2)  # Wait for the notification to be processed
@@ -104,16 +106,22 @@ def test_config_update_notification_isolation(message_bus_manager_fixture):
 
         print("3. Agent1 setting config in its isolated store (should only notify agent1)...")
         # Agent1 stores config in its isolated store - only agent1 should be notified
-        # Use send_update=False to avoid duplicate notifications (one from set, one from server)
-        agent1.config.set("shared_name_config", {"updated_by": "agent1", "data": "agent1_data"}, send_update=False)
+        # Use send_update=True to ensure notifications are sent
+        result = agent1.config.set(
+            "shared_name_config", {"updated_by": "agent1", "data": "agent1_data"}, send_update=True
+        )
+        result.get(timeout=5.0)
 
         print("4. Waiting for notifications...")
         gevent.sleep(2)
 
         print("5. Agent2 setting config in its isolated store (should only notify agent2)...")
         # Agent2 stores config in its isolated store - only agent2 should be notified
-        # Use send_update=False to avoid duplicate notifications
-        agent2.config.set("shared_name_config", {"updated_by": "agent2", "data": "agent2_data"}, send_update=False)
+        # Use send_update=True to ensure notifications are sent
+        result = agent2.config.set(
+            "shared_name_config", {"updated_by": "agent2", "data": "agent2_data"}, send_update=True
+        )
+        result.get(timeout=5.0)
 
         print("6. Waiting for notifications...")
         gevent.sleep(2)

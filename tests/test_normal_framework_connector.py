@@ -2,6 +2,7 @@
 """
 Test to simulate the NormalFrameworkConnector agent onstart issue
 """
+
 import gevent
 import pytest
 
@@ -21,11 +22,14 @@ class MockNormalFrameworkConnector(Agent):
         print(f"Setup heartbeat call #{self.heartbeat_setup_count}")
 
 
-def test_normal_framework_connector_onstart(message_bus):
+def test_normal_framework_connector_onstart(message_bus_manager_fixture):
     """Test that the NormalFrameworkConnector-style agent only sets up heartbeat once."""
     print("Testing NormalFrameworkConnector-style onstart behavior...")
 
-    agent = MockNormalFrameworkConnector("test_connector", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    agent = manager.create_agent("test_connector", MockNormalFrameworkConnector)
 
     try:
         print("1. Connecting agent...")

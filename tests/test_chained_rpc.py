@@ -325,7 +325,9 @@ class TestChainedRPC:
 
         # Test 1: Operation that should succeed (delay < driver timeout)
         result1 = self.external_client.vip.rpc.call(
-            "proxy_agent", "proxy_operation", 2  # 2 seconds - within driver's 3s timeout
+            "proxy_agent",
+            "proxy_operation",
+            2,  # 2 seconds - within driver's 3s timeout
         )
         response1 = result1.get(timeout=15)
 
@@ -333,7 +335,9 @@ class TestChainedRPC:
 
         # Test 2: Operation that should timeout at driver level
         result2 = self.external_client.vip.rpc.call(
-            "proxy_agent", "proxy_operation", 5  # 5 seconds - exceeds driver's 3s timeout
+            "proxy_agent",
+            "proxy_operation",
+            5,  # 5 seconds - exceeds driver's 3s timeout
         )
         response2 = result2.get(timeout=15)
 

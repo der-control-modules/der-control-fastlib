@@ -2,6 +2,7 @@
 """
 Test script to verify the version endpoint works
 """
+
 from fastapi.testclient import TestClient
 
 from aems.server.fastapi_message_bus import FastAPIMessageBus

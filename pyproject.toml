@@ -43,11 +43,6 @@ dynamic = ["version"]
 [project.optional-dependencies]
 # Dependencies for development
 dev = [
-    "black>=24.0.0",
-    "isort>=5.13.0",
-    "pylint>=3.0.0",
-    "flake8>=7.0.0",
-    "flake8-pyproject>=1.2.0",
     "ruff>=0.8.5",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -94,113 +89,8 @@ where = ["src"]
 [tool.setuptools_scm]
 # Uses git tags for versioning
 
-[tool.black]
-line-length = 120
-target-version = ["py310", "py311", "py312"]
-skip-string-normalization = false
-
-[tool.isort]
-profile = "black"
-line_length = 120
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-ensure_newline_before_comments = true
-
-[tool.flake8]
-max-line-length = 120
-# Ignore codes that conflict with Black formatter and common issues
-extend-ignore = [
-    "E203",  # whitespace before ':'
-    "W503",  # line break before binary operator
-    "E501",  # line too long (handled by Black)
-    "W504",  # line break after binary operator
-    "E231",  # missing whitespace after ','
-    "E226",  # missing whitespace around arithmetic operator
-    "E241",  # multiple spaces after ','
-    "E402",  # module level import not at top of file (tests may need this)
-    "F841",  # local variable assigned but never used (common in tests)
-]
-# Enable specific checks that complement Pylint
-select = [
-    "F",     # Pyflakes errors
-    "E9",    # Runtime errors
-    "W6",    # Warnings
-]
-
-[tool.pylint.format]
-max-line-length = 120
-
-[tool.pylint.messages_control]
-disable = [
-    "trailing-whitespace",
-    "line-too-long",           # Handled by Black
-    "missing-final-newline",   # Handled by Black
-    "multiple-statements",     # Can conflict with Black's formatting
-    "too-many-arguments",      # Style preference
-    "too-few-public-methods",  # Style preference
-    "missing-module-docstring", # Test files don't need module docstrings
-    "missing-class-docstring",  # Test classes don't need docstrings
-    "missing-function-docstring", # Test functions are self-documenting
-    "import-error",            # Expected in test environments
-    "unused-import",           # Many test imports are conditional
-    "unused-variable",         # Common in test fixtures
-    "unused-argument",         # Common in test fixtures and callbacks
-    "broad-exception-caught",  # Acceptable in tests and error handling
-    "too-many-statements",     # Test methods can be long
-    "too-many-branches",       # Test methods can have many conditions
-    "too-many-locals",         # Test methods can have many variables
-    "too-many-instance-attributes", # Data classes and test classes
-    "duplicate-code",          # Test files often have similar patterns
-    "wrong-import-position",   # Tests may import conditionally
-    "wrong-import-order",      # isort handles import ordering
-    "redefined-outer-name",    # Common with pytest fixtures
-    "reimported",              # Tests may reimport for clarity
-    "import-outside-toplevel", # Tests may import conditionally
-    "no-else-return",          # Style preference
-    "unnecessary-pass",        # Placeholder code
-    "unnecessary-comprehension", # Style preference
-    "consider-using-f-string", # Backwards compatibility
-    "super-with-arguments",    # Backwards compatibility
-    "useless-parent-delegation", # Sometimes needed for clarity
-    "attribute-defined-outside-init", # Common in tests
-    "protected-access",        # Tests need to access internals
-    "inconsistent-return-statements", # Complex logic may need this
-    "fixme",                   # TODO comments are acceptable
-    "raise-missing-from",      # Backwards compatibility
-    "logging-fstring-interpolation", # Performance not critical in most cases
-    "singleton-comparison",    # Sometimes needed for clarity
-    "bad-except-order",        # Backwards compatibility
-    "unspecified-encoding",    # Default encoding is often acceptable
-    "access-member-before-definition", # Complex initialization patterns
-    "assignment-from-no-return", # Library compatibility issues
-    "return-in-finally",       # Complex error handling
-    "lost-exception",          # Complex error handling
-    "broad-exception-raised",  # Generic exceptions acceptable in some contexts
-    "consider-iterating-dictionary", # Style preference
-    "too-many-lines",          # Large modules are sometimes necessary
-    "too-many-return-statements", # Complex logic may need many returns
-    "subprocess-run-check",    # Dev scripts don't always need error checking
-    "too-many-nested-blocks",  # Complex logic in server code
-    "invalid-name",            # Some names are dictated by external APIs
-    "no-self-argument",        # Descriptors and decorators may not use self
-]# Enable useful checks that complement flake8
-enable = [
-    "useless-suppression",
-]
-
-[tool.pylint.basic]
-# Allow single-character variable names in specific contexts
-good-names = ["i", "j", "k", "ex", "Run", "_", "id", "ws"]
-
-[tool.pylint.design]
-# Reasonable limits that won't conflict with practical code
-max-args = 15
-max-locals = 25
-max-branches = 20
-max-statements = 60
-max-attributes = 15
+# Ruff is now our primary linter and formatter
+# It replaces black, isort, flake8, and most of pylint
 
 [tool.pytest.ini_options]
 minversion = "6.0"
@@ -248,6 +138,16 @@ extend-exclude = [
     "build",
     "dist",
 ]
+
+[tool.ruff.format]
+# Use double quotes for strings (like black default)
+quote-style = "double"
+# Use trailing commas
+skip-magic-trailing-comma = false
+# Indent with spaces
+indent-style = "space"
+# Unix line endings
+line-ending = "lf"
 
 [tool.ruff.lint]
 # Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.

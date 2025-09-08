@@ -484,8 +484,7 @@ class Core:
         if isinstance(interval_or_cron, datetime):
             # Convert datetime object to cron expression: minute hour day month dayofweek
             cron_expr = (
-                f"{interval_or_cron.minute} {interval_or_cron.hour} "
-                f"{interval_or_cron.day} {interval_or_cron.month} *"
+                f"{interval_or_cron.minute} {interval_or_cron.hour} {interval_or_cron.day} {interval_or_cron.month} *"
             )
             interval_or_cron = cron_expr
         elif isinstance(interval_or_cron, str) and not self._is_cron_expression(interval_or_cron):
@@ -493,7 +492,7 @@ class Core:
             try:
                 # Parse common datetime string formats
                 dt = self._parse_datetime_string(interval_or_cron)
-                cron_expr = f"{dt.minute} {dt.hour} " f"{dt.day} {dt.month} *"
+                cron_expr = f"{dt.minute} {dt.hour} {dt.day} {dt.month} *"
                 interval_or_cron = cron_expr
             except ValueError:
                 # If parsing fails, assume it's already a cron expression
@@ -696,15 +695,48 @@ class Config:
         self._pending_subscriptions = []
         self._connected = False
         self._watched_configs = set()
-        self._new_default_configs_sent = False
+        self._initial_connection_processed = False
         self._config_cache = {}  # Comprehensive cache of all config entries (default + server)
         self._debug_task = None  # For periodic debug output
+        self._callback_depth = 0  # Track callback depth for reentrancy protection
+        self._pending_updates = set()  # Track updates we initiated to avoid double callbacks
 
         _log.info(f"ConfigStore created for agent {agent.identity}")
 
         # Connect to relevant agent signals
         self._agent.core.onconnected.connect(self._on_connection_established)
         self._agent.core.onconfigure.connect(self._on_update_from_server)  # Renamed method
+
+    def _execute_callbacks_safely(self, config_name: str, action: str, config_value: Any):
+        """
+        Execute callbacks with reentrancy protection to prevent infinite loops.
+
+        Args:
+            config_name: Name of the configuration
+            action: Action type (UPDATE, DELETE, etc.)
+            config_value: The configuration value
+        """
+        # Allow callbacks but prevent deep recursion
+        if self._callback_depth > 5:  # Prevent deep recursion chains
+            _log.warning(
+                f"Deep callback recursion detected: Skipping callbacks for config {config_name} during {action} (depth: {self._callback_depth})"
+            )
+            return
+
+        if config_name not in self._config_callbacks:
+            return
+
+        try:
+            self._callback_depth += 1
+            for config_callback in self._config_callbacks[config_name]:
+                try:
+                    # Use the ConfigCallback's __call__ method which handles action filtering
+                    _log.info(f"Calling callback for config {config_name} with {action} action")
+                    config_callback(config_name, action, config_value)
+                except Exception as e:
+                    _log.error(f"Error in config update callback: {e}")
+        finally:
+            self._callback_depth -= 1
 
     def _has_server_config(self, config_name: str) -> bool:
         """
@@ -778,12 +810,17 @@ class Config:
             f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
         )
 
+        # Mark as pending BEFORE making the request to avoid race conditions
+        if send_update:
+            self._pending_updates.add(config_name)
+            _log.debug(f"Pre-marked {config_name} as pending update: {self._pending_updates}")
+
         # Use gevent to make the HTTP request asynchronously
         def store_config():
             try:
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
-                    # Include requesting agent identity for access control
-                    params = {"requesting_agent": self._agent.identity}
+                    # Include requesting agent identity for access control and send_update flag
+                    params = {"requesting_agent": self._agent.identity, "send_update": send_update}
                     response = client.put(request_url, json=config_data, params=params)
                     if response.status_code == 200:
                         # Update comprehensive cache
@@ -801,18 +838,20 @@ class Config:
                         self._config_cache[config_name] = merged_config
 
                         # Trigger callbacks if requested
-                        if send_update and config_name in self._config_callbacks:
-                            for config_callback in self._config_callbacks[config_name]:
-                                try:
-                                    if "UPDATE" in config_callback.actions:
-                                        config_callback.callback(config_name, "UPDATE", merged_config)
-                                except Exception as e:
-                                    _log.error(f"Error in config update callback: {e}")
+                        if send_update:
+                            # Already marked as pending before the request
+                            self._execute_callbacks_safely(config_name, "UPDATE", merged_config)
 
                         async_result.set(True)
                     else:
+                        # Clean up pending update on failure
+                        if send_update:
+                            self._pending_updates.discard(config_name)
                         async_result.set_exception(Exception(f"Failed to store config: {response.text}"))
             except Exception as e:
+                # Clean up pending update on exception
+                if send_update:
+                    self._pending_updates.discard(config_name)
                 async_result.set_exception(e)
 
         gevent.spawn(store_config)
@@ -833,12 +872,17 @@ class Config:
             f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
         )
 
+        # Mark as pending BEFORE making the request to avoid race conditions
+        if send_update:
+            self._pending_updates.add(f"{config_name}_delete")
+            _log.debug(f"Pre-marked {config_name}_delete as pending: {self._pending_updates}")
+
         # Use gevent to make the HTTP request asynchronously
         def delete_config():
             try:
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
-                    # Include requesting agent identity for access control
-                    params = {"requesting_agent": self._agent.identity}
+                    # Include requesting agent identity for access control and send_update flag
+                    params = {"requesting_agent": self._agent.identity, "send_update": send_update}
                     response = client.delete(request_url, params=params)
                     if response.status_code == 200:
                         # Remove from comprehensive cache or update it to use only default values
@@ -850,18 +894,20 @@ class Config:
                             del self._config_cache[config_name]
 
                         # Trigger callbacks if requested
-                        if send_update and config_name in self._config_callbacks:
-                            for config_callback in self._config_callbacks[config_name]:
-                                try:
-                                    if "DELETE" in config_callback.actions:
-                                        config_callback.callback(config_name, "DELETE", None)
-                                except Exception as e:
-                                    _log.error(f"Error in config delete callback: {e}")
+                        if send_update:
+                            # Already marked as pending before the request
+                            self._execute_callbacks_safely(config_name, "DELETE", None)
 
                         async_result.set(True)
                     else:
+                        # Clean up pending update on failure
+                        if send_update:
+                            self._pending_updates.discard(f"{config_name}_delete")
                         async_result.set_exception(Exception(f"Failed to delete config: {response.text}"))
             except Exception as e:
+                # Clean up pending update on exception
+                if send_update:
+                    self._pending_updates.discard(f"{config_name}_delete")
                 async_result.set_exception(e)
 
         gevent.spawn(delete_config)
@@ -939,6 +985,13 @@ class Config:
 
     def handle_update(self, config_name):
         """Handle a configuration update notification from the server."""
+        # Check if this is our own update that we're being notified about
+        _log.debug(f"Checking if {config_name} in pending updates: {self._pending_updates}")
+        if config_name in self._pending_updates:
+            _log.info(f"Skipping update for {config_name} - update was initiated by this agent")
+            self._pending_updates.discard(config_name)
+            return
+
         # ALWAYS fetch and update the cache, regardless of callbacks
         try:
             request_url = (
@@ -973,14 +1026,7 @@ class Config:
                         _log.info(
                             f"Triggering {len(self._config_callbacks[config_name])} callbacks for config {config_name}"
                         )
-                        for config_callback in self._config_callbacks[config_name]:
-                            try:
-                                # Check if this action is subscribed to
-                                if "UPDATE" in config_callback.actions:
-                                    _log.info(f"Calling callback for config {config_name} with UPDATE action")
-                                    config_callback.callback(config_name, "UPDATE", self._config_cache[config_name])
-                            except Exception as e:
-                                _log.error(f"Error in config update callback: {e}")
+                        self._execute_callbacks_safely(config_name, "UPDATE", self._config_cache[config_name])
                     else:
                         _log.info(f"No callbacks registered for config {config_name}")
                         _log.info(f"Available callbacks: {list(self._config_callbacks.keys())}")
@@ -997,14 +1043,8 @@ class Config:
                         action = "DELETE"
 
                     # Notify callbacks about the deletion/reversion
-                    if config_name in self._config_callbacks:
-                        for config_callback in self._config_callbacks[config_name]:
-                            try:
-                                if action in config_callback.actions:
-                                    value = self._config_cache.get(config_name, None)
-                                    config_callback.callback(config_name, action, value)
-                            except Exception as e:
-                                _log.error(f"Error in config callback: {e}")
+                    value = self._config_cache.get(config_name, None)
+                    self._execute_callbacks_safely(config_name, action, value)
                 else:
                     _log.error(f"Failed to fetch updated config {config_name}: {response.status_code}")
         except Exception as e:
@@ -1037,18 +1077,14 @@ class Config:
         _log.info(f"Agent {self._agent.identity} received configuration update from server")
         configs = kwargs.get("configs", [])
 
-        if not self._new_default_configs_sent:
-            # Send all default configs to the server
-            for name, value in self._default_configs.items():
-                try:
-                    for callback in self._config_callbacks.get(name, []):
-                        callback(name, "NEW", value)
-                    # self._send_default_config(name, "NEW", value)
-                    _log.debug(f"Sent default config to server: {name} = {get_smaller_print(value)}")
-                except Exception as e:
-                    _log.error(f"Error sending default config {name}: {e}")
+        if not self._initial_connection_processed:
+            # Mark that we've processed the initial connection
+            self._initial_connection_processed = True
+            _log.debug(f"Initial connection established for agent {self._agent.identity}")
 
-            self._new_default_configs_sent = True
+            # Only trigger callbacks for configs that exist in the server store
+            # Defaults alone should not trigger callbacks
+            # This prevents duplicate greenlet creation in the Manager agent
 
         # Process configs from server if available
         for cfg in configs:
@@ -1609,7 +1645,7 @@ class CronTimer:
         next_time = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
 
         # Check up to 1000 minutes ahead to avoid infinite loops
-        for _ in range(10000):
+        for _ in range(1000000):
             # Check if this time matches the schedule
             if (
                 next_time.month in self.months
@@ -2082,7 +2118,6 @@ class Agent:
     def __on_ws_message__(self, ws, message):
         """Internal callback when a WebSocket message is received."""
         try:
-
             small_msg = get_smaller_print(message, '"type":"rpc","method":"set_temperature_setpoints"')
             if '"type":"rpc","method":"set_temperature_setpoints"' in message:
                 _log.debug(f"Agent {self.identity} received set_temperature_setpoints RPC call")
@@ -2112,6 +2147,12 @@ class Agent:
                 # Handle config delete notifications
                 config_name = data.get("config_name")
                 if config_name:
+                    # Check if this is our own delete that we're being notified about
+                    if f"{config_name}_delete" in self.config._pending_updates:
+                        _log.info(f"Skipping delete callbacks for {config_name} - delete was initiated by this agent")
+                        self.config._pending_updates.discard(f"{config_name}_delete")
+                        return
+
                     _log.info(f"Processing config_delete for {config_name}")
                     # Remove from cache or revert to default
                     if config_name in self.config._config_cache:
@@ -2137,9 +2178,9 @@ class Agent:
                             )
                             for config_callback in self.config._config_callbacks[config_name]:
                                 try:
-                                    if action in config_callback.actions:
-                                        _log.info(f"Calling delete callback for {config_name} with {action}")
-                                        config_callback.callback(config_name, action, value)
+                                    # Use the ConfigCallback's __call__ method which handles action filtering
+                                    _log.info(f"Calling delete callback for {config_name} with {action}")
+                                    config_callback(config_name, action, value)
                                 except Exception as e:
                                     _log.error(f"Error in config delete callback: {e}")
                         else:

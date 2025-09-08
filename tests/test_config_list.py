@@ -3,6 +3,7 @@
 Test that the config store list method correctly returns cached configurations.
 This test verifies that the list method returns configs from the cache instead of querying the server.
 """
+
 import gevent
 import pytest
 
