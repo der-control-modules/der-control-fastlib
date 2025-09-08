@@ -452,6 +452,11 @@ class TestPubSubCompatibility(VOLTTRONCompatibilityTester):
         publisher = create_test_agent("publisher")
         subscriber = create_test_agent("subscriber")
 
+        # Connect the agents
+        publisher.connect()
+        subscriber.connect()
+        time.sleep(0.5)  # Wait for connections to establish
+
         messages_received = []
 
         def message_handler(peer, sender, bus, topic, headers, message):
@@ -487,6 +492,10 @@ class TestPubSubCompatibility(VOLTTRONCompatibilityTester):
         bus, port = message_bus
 
         agent = create_test_agent("prefix_test")
+
+        # Connect the agent
+        agent.connect()
+        time.sleep(0.5)
 
         messages = []
 
