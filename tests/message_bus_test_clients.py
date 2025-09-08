@@ -3,7 +3,8 @@
 import asyncio
 import json
 import uuid
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 import websockets
 
@@ -59,7 +60,7 @@ class MessageBusTestClient:
         except Exception as e:
             print(f"Error in client {self.identity} listener: {e}")
 
-    async def subscribe_prefix(self, prefix: str, callback: Optional[Callable] = None):
+    async def subscribe_prefix(self, prefix: str, callback: Callable | None = None):
         """Subscribe to a topic prefix."""
         if not self.connected:
             raise ConnectionError("Client not connected")
@@ -72,7 +73,7 @@ class MessageBusTestClient:
         print(f"Client {self.identity} subscribed to prefix: {prefix}")
         return subscription_id
 
-    async def subscribe_pattern(self, pattern: str, callback: Optional[Callable] = None):
+    async def subscribe_pattern(self, pattern: str, callback: Callable | None = None):
         """Subscribe to a topic pattern."""
         if not self.connected:
             raise ConnectionError("Client not connected")
@@ -86,7 +87,7 @@ class MessageBusTestClient:
         print(f"Client {self.identity} subscribed to pattern: {pattern}")
         return subscription_id
 
-    async def publish(self, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""):
+    async def publish(self, topic: str, message: Any, headers: dict | None = None, bus: str = ""):
         """Publish a message to a topic."""
         if not self.connected:
             raise ConnectionError("Client not connected")

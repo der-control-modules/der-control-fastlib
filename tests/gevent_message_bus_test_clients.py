@@ -9,7 +9,8 @@ monkey.patch_all()
 import json
 import ssl
 import uuid
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 import websocket
 
@@ -97,7 +98,7 @@ class GeventMessageBusTestClient:
             elif msg_type == "rpc_request":
                 # Handle RPC request
                 print(f"DEBUG: Client {self.identity} received RPC request: {data}")
-                sender = data.get("sender")
+                data.get("sender")
                 method_name = data.get("method")
                 args = data.get("args", [])
                 kwargs = data.get("kwargs", {})
@@ -247,7 +248,7 @@ class GeventMessageBusTestClient:
         self.connected = False
         print(f"Client {self.identity} connection closed: {close_status_code} {close_msg}")
 
-    def subscribe_prefix(self, prefix: str, callback: Optional[Callable] = None):
+    def subscribe_prefix(self, prefix: str, callback: Callable | None = None):
         """Subscribe to a topic prefix."""
         if not self.connected:
             raise ConnectionError("Client not connected")
@@ -260,7 +261,7 @@ class GeventMessageBusTestClient:
         print(f"Client {self.identity} subscribed to prefix: {prefix}")
         return subscription_id
 
-    def subscribe_pattern(self, pattern: str, callback: Optional[Callable] = None):
+    def subscribe_pattern(self, pattern: str, callback: Callable | None = None):
         """Subscribe to a topic pattern."""
         if not self.connected:
             raise ConnectionError("Client not connected")
@@ -274,7 +275,7 @@ class GeventMessageBusTestClient:
         print(f"Client {self.identity} subscribed to pattern: {pattern}")
         return subscription_id
 
-    def publish(self, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""):
+    def publish(self, topic: str, message: Any, headers: dict | None = None, bus: str = ""):
         """Publish a message to a topic."""
         if not self.connected:
             raise ConnectionError("Client not connected")
