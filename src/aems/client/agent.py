@@ -313,8 +313,15 @@ class PubSub:
 
         return adapter
 
-    def subscribe(self, prefix: str, callback: Callable | None = None, **kwargs):
-        """Subscribe to a topic prefix, returning an AsyncResult."""
+    def subscribe(self, peer: str, prefix: str, callback: Callable | None = None, **kwargs):
+        """Subscribe to a topic prefix, returning an AsyncResult.
+
+        Args:
+            peer: The peer to subscribe through (typically "pubsub")
+            prefix: The topic prefix to subscribe to
+            callback: Optional callback function to handle messages
+            **kwargs: Additional keyword arguments
+        """
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
 
@@ -332,9 +339,12 @@ class PubSub:
         async_result = AsyncResult()
 
         try:
-            self._agent.websocket.send(json.dumps({"type": "subscribe", "prefix": prefix, "id": subscription_id}))
+            # Include peer in the subscription message (though it might be ignored by the server)
+            self._agent.websocket.send(
+                json.dumps({"type": "subscribe", "peer": peer, "prefix": prefix, "id": subscription_id})
+            )
 
-            _log.info(f"Agent {self._agent.identity} subscribed to prefix: {prefix}")
+            _log.info(f"Agent {self._agent.identity} subscribed to prefix: {prefix} via peer: {peer}")
             async_result.set(subscription_id)  # Return the subscription ID
         except Exception as e:
             _log.error(f"Error subscribing to topic: {e}")
@@ -342,8 +352,14 @@ class PubSub:
 
         return async_result
 
-    def subscribe_regex(self, pattern: str, callback: Callable | None = None):
-        """Subscribe to a topic pattern, returning an AsyncResult."""
+    def subscribe_regex(self, peer: str, pattern: str, callback: Callable | None = None):
+        """Subscribe to a topic pattern, returning an AsyncResult.
+
+        Args:
+            peer: The peer to subscribe through (typically "pubsub")
+            pattern: The regex pattern to match topics against
+            callback: Optional callback function to handle messages
+        """
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
 
@@ -361,9 +377,12 @@ class PubSub:
         async_result = AsyncResult()
 
         try:
-            self._agent.websocket.send(json.dumps({"type": "subscribe", "pattern": pattern, "id": subscription_id}))
+            # Include peer in the subscription message
+            self._agent.websocket.send(
+                json.dumps({"type": "subscribe", "peer": peer, "pattern": pattern, "id": subscription_id})
+            )
 
-            _log.info(f"Agent {self._agent.identity} subscribed to pattern: {pattern}")
+            _log.info(f"Agent {self._agent.identity} subscribed to pattern: {pattern} via peer: {peer}")
             async_result.set(subscription_id)  # Return the subscription ID
         except Exception as e:
             _log.error(f"Error subscribing to pattern: {e}")
@@ -563,7 +582,27 @@ class Core:
 
     @dualmethod
     def periodic(self, interval_or_cron: int | str, function):
-        self._scheduler.schedule(function, interval_or_cron)
+        """Schedule a periodic function and return a greenlet that can be killed."""
+        if isinstance(interval_or_cron, numbers.Number):
+            # For interval-based tasks, create a dedicated greenlet
+            def periodic_wrapper():
+                while True:
+                    try:
+                        function()
+                        gevent.sleep(interval_or_cron)
+                    except gevent.GreenletExit:
+                        break
+                    except Exception as e:
+                        _log.error(f"Error in periodic task: {e}")
+                        gevent.sleep(interval_or_cron)
+
+            greenlet = gevent.spawn(periodic_wrapper)
+            return greenlet
+        else:
+            # For cron expressions, fall back to scheduler
+            # Note: This won't return a killable greenlet, but cron is not implemented yet
+            self._scheduler.schedule(function, interval_or_cron)
+            return None
 
     @periodic.classmethod
     def periodic(cls, interval_or_cron):
