@@ -434,7 +434,8 @@ class FastAPIMessageBus(MessageBus):
                 # For now, still enforce access control
                 raise HTTPException(
                     status_code=403,
-                    detail=f"Agent {requesting_agent} cannot update configs for agent {agent_id}. Agents can only update their own configs.",
+                    detail=f"Agent {requesting_agent} cannot update configs for agent {agent_id}. "
+                    f"Agents can only update their own configs.",
                 )
 
             content_type = request.headers.get("Content-Type", "application/json") if request else "application/json"
@@ -483,7 +484,8 @@ class FastAPIMessageBus(MessageBus):
             if requesting_agent and requesting_agent != agent_id:
                 raise HTTPException(
                     status_code=403,
-                    detail=f"Agent {requesting_agent} cannot delete configs for agent {agent_id}. Agents can only delete their own configs.",
+                    detail=f"Agent {requesting_agent} cannot delete configs for agent {agent_id}. "
+                    f"Agents can only delete their own configs.",
                 )
 
             # Determine whether to send notifications:

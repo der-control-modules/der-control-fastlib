@@ -476,7 +476,8 @@ class ConfigStore:
             # Extract agent_id from config_name (format: agent_id/config_name)
             if "/" not in config_name:
                 _log.warning(
-                    f"Config change not sent: Invalid config name format '{config_name}' (expected agent_id/config_name)"
+                    f"Config change not sent: Invalid config name format '{config_name}' "
+                    f"(expected agent_id/config_name)"
                 )
                 return
 

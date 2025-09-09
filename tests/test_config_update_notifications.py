@@ -78,7 +78,8 @@ def test_config_update_notification_sent(message_bus_manager_fixture):
 
 
 def test_config_update_notification_isolation(message_bus_manager_fixture):
-    """Test that agents only receive UPDATE notifications for their own configs, even when config names are identical."""
+    """Test that agents only receive UPDATE notifications for their own configs,
+    even when config names are identical."""
     print("\nTesting config notification isolation (agents with same config names)...")
 
     manager = message_bus_manager_fixture

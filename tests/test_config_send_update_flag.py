@@ -210,9 +210,10 @@ def test_config_delete_send_update_flag(message_bus_manager_fixture):
             and msg.get("message", {}).get("data", {}).get("method") == "config.update"
             and "DELETE" in msg.get("message", {}).get("data", {}).get("args", [])
         ]
-        assert (
-            len(delete_messages) > 0
-        ), f"Expected config.update DELETE RPC message with send_update=True, but got no delete messages. All messages: {sent_messages}"
+        assert len(delete_messages) > 0, (
+            f"Expected config.update DELETE RPC message with send_update=True, but got no delete messages. "
+            f"All messages: {sent_messages}"
+        )
 
     finally:
         agent1.disconnect()

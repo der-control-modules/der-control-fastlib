@@ -185,7 +185,8 @@ class ConnectionManager:
     async def handle_rpc(self, sender: str, peer: str, method: str, args: list, kwargs: dict, msg_id: str):
         """Handle RPC request between clients."""
         _log.debug(
-            f"RPC request from {sender} to {peer}: {method}({truncate_debug_message(args)}, {truncate_debug_message(kwargs)}) [msg_id: {msg_id}]"
+            f"RPC request from {sender} to {peer}: {method}({truncate_debug_message(args)}, "
+            f"{truncate_debug_message(kwargs)}) [msg_id: {msg_id}]"
         )
 
         if peer not in self.active_connections:

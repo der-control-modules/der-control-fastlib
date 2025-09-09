@@ -16,11 +16,12 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.8.5
     hooks:
-      # Run the linter
+      # Run the linter on all files
       - id: ruff
         args: [--fix]
-      # Run the formatter
+      # Run the formatter but exclude test files to avoid assert reformatting
       - id: ruff-format
+        exclude: ^tests/
 
   - repo: https://github.com/PyCQA/bandit
     rev: 1.7.5

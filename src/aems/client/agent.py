@@ -797,7 +797,8 @@ class Config:
         # Allow callbacks but prevent deep recursion
         if self._callback_depth > 5:  # Prevent deep recursion chains
             _log.warning(
-                f"Deep callback recursion detected: Skipping callbacks for config {config_name} during {action} (depth: {self._callback_depth})"
+                f"Deep callback recursion detected: Skipping callbacks for config {config_name} "
+                f"during {action} (depth: {self._callback_depth})"
             )
             return
 
@@ -1451,6 +1452,22 @@ class Config:
 
                             # Wait for all configs to be fetched
                             gevent.joinall(fetch_greenlets, timeout=10)
+
+                            # After fetching, trigger NEW callbacks for each fetched config
+                            # This matches VOLTTRON's behavior in _onconfig where it triggers
+                            # callbacks for all configs in _store with action="NEW"
+                            _log.info("Triggering NEW callbacks for fetched server configs")
+                            for config_entry in config_entries:
+                                if isinstance(config_entry, dict) and "name" in config_entry:
+                                    config_name = config_entry["name"]
+                                else:
+                                    config_name = config_entry
+
+                                # Only trigger callback if config was successfully fetched into cache
+                                # and it's a server config (not just a default)
+                                if config_name in self._config_cache and self._has_server_config(config_name):
+                                    _log.debug(f"Triggering NEW callback for server config: {config_name}")
+                                    self._execute_callbacks_safely(config_name, "NEW", self._config_cache[config_name])
                         else:
                             _log.info(f"No configs found for agent {self._agent.identity}")
                     else:
@@ -1982,9 +1999,11 @@ class ScheduledEvent:
 
     def __str__(self):
         if self.is_cron:
-            return f"ScheduledEvent({self.name}, cron='{self.cron_expression}', next_at={datetime.fromtimestamp(self.next_time)})"
+            next_time_str = datetime.fromtimestamp(self.next_time)
+            return f"ScheduledEvent({self.name}, cron='{self.cron_expression}', next_at={next_time_str})"
         else:
-            return f"ScheduledEvent({self.name}, interval={self.interval}, next_at={datetime.fromtimestamp(self.next_time)})"
+            next_time_str = datetime.fromtimestamp(self.next_time)
+            return f"ScheduledEvent({self.name}, interval={self.interval}, next_at={next_time_str})"
 
 
 class Scheduler:
@@ -2416,9 +2435,8 @@ class Agent:
 
                         # Notify callbacks about the deletion/reversion
                         if config_name in self.config._config_callbacks:
-                            _log.info(
-                                f"Triggering {len(self.config._config_callbacks[config_name])} delete callbacks for {config_name}"
-                            )
+                            callback_count = len(self.config._config_callbacks[config_name])
+                            _log.info(f"Triggering {callback_count} delete callbacks for {config_name}")
                             for config_callback in self.config._config_callbacks[config_name]:
                                 try:
                                     # Use the ConfigCallback's __call__ method which handles action filtering

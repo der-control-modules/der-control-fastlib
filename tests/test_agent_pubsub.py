@@ -165,6 +165,6 @@ class TestAgentPubSub:
         assert len(pubsub_messages) >= 1, "Should receive the test message"
 
         received_data = pubsub_messages[0].get("message", {})
-        assert (
-            received_data == test_data
-        ), f"Message content should be preserved: expected {test_data}, got {received_data}"
+        assert received_data == test_data, (
+            f"Message content should be preserved: expected {test_data}, got {received_data}"
+        )

@@ -148,9 +148,10 @@ class TestNoDuplicateCallbacks:
         time.sleep(1)
 
         # Verify update_default was NOT called for the default config
+        count = counter.get_count(callback_name="update_default")
         assert (
             counter.get_count(callback_name="update_default") == 0
-        ), f"update_default should not be called for defaults, got {counter.get_count(callback_name='update_default')} calls"
+        ), f"update_default should not be called for defaults, got {count} calls"
 
         # Now do an actual update
         agent.vip.config.set("config", {"new_setting": "value"})

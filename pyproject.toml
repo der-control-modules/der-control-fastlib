@@ -138,6 +138,8 @@ extend-exclude = [
     "build",
     "dist",
 ]
+# Respect existing formatting more
+respect-gitignore = true
 
 [tool.ruff.format]
 # Use double quotes for strings (like black default)
@@ -148,6 +150,11 @@ skip-magic-trailing-comma = false
 indent-style = "space"
 # Unix line endings
 line-ending = "lf"
+# Try to respect the author's line breaking decisions
+docstring-code-format = false
+preview = false
+# Exclude test files from formatting to preserve assert statement style
+exclude = ["tests/**/*.py"]
 
 [tool.ruff.lint]
 # Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
@@ -163,7 +170,7 @@ line-ending = "lf"
 # - flake8-type-checking (`TCH`) - type checking improvements
 select = [
     "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
+    "W",   # pycodestyle warnings (includes W292 for newline at end of file)
     "F",   # Pyflakes
     "I",   # isort
     "B",   # flake8-bugbear
@@ -178,7 +185,6 @@ select = [
 # Ignore specific rules that conflict with our coding standards or Black
 ignore = [
     "E203",   # whitespace before ':' (conflicts with Black)
-    "E501",   # line too long (handled by Black and line-length setting)
     "D100",   # Missing docstring in public module (not needed for all modules)
     "D101",   # Missing docstring in public class (not needed for test classes)
     "D102",   # Missing docstring in public method (not needed for test methods)
@@ -233,6 +239,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 known-first-party = ["aems"]
 force-single-line = false
 combine-as-imports = true
+split-on-trailing-comma = false  # Consistent with format.skip-magic-trailing-comma=false
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"  # Use NumPy docstring style
