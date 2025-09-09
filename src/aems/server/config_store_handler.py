@@ -10,6 +10,7 @@ class ConfigFileHandler(FileSystemEventHandler):
             name = self._get_config_name(event.src_path)
             if name:  # Only process if we got a valid config name
                 value = self._load_config_file(event.src_path)
+                # File changes should notify agents (like external vctl config operations)
                 self.config_store.notify_change(name, "NEW", value)
 
     def on_modified(self, event):
@@ -17,12 +18,14 @@ class ConfigFileHandler(FileSystemEventHandler):
             name = self._get_config_name(event.src_path)
             if name:  # Only process if we got a valid config name
                 value = self._load_config_file(event.src_path)
+                # File changes should notify agents (like external vctl config operations)
                 self.config_store.notify_change(name, "UPDATE", value)
 
     def on_deleted(self, event):
         if not event.is_directory:
             name = self._get_config_name(event.src_path)
             if name:  # Only process if we got a valid config name
+                # File deletions should notify agents (like external vctl config operations)
                 self.config_store.notify_change(name, "DELETE", None)
 
     def _get_config_name(self, path):
@@ -39,7 +42,7 @@ class ConfigFileHandler(FileSystemEventHandler):
             name_without_ext = os.path.splitext(filename)[0]
 
             # Skip metadata files
-            if name_without_ext.endswith(".meta"):
+            if filename.endswith(".metadata"):
                 return None
 
             # Get the parent directory (agent_id)

@@ -59,8 +59,8 @@ def test_config_store_isolation_summary(message_bus_manager_fixture):
         gevent.sleep(0.5)
 
         print("\n3. Agent A stores a config via agent.config.set()...")
-        # Use send_update=False to avoid duplicate notifications
-        agent_a.config.set("shared_config_name", {"owner": "agent_a", "method": "config.set"}, send_update=False)
+        # Agent A should get a notification for its own config update
+        agent_a.config.set("shared_config_name", {"owner": "agent_a", "method": "config.set"}, send_update=True)
         gevent.sleep(2)
 
         print("\n4. Agent B stores a config via REST API...")

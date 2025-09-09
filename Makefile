@@ -3,31 +3,29 @@
 # Variables
 PYTHON := .venv/bin/python
 PIP := .venv/bin/pip
-BLACK := .venv/bin/black
-ISORT := .venv/bin/isort
-FLAKE8 := .venv/bin/flake8
-PYLINT := .venv/bin/pylint
 PYTEST := .venv/bin/pytest
 PRECOMMIT := .venv/bin/pre-commit
+RUFF := .venv/bin/ruff
 
 # Formatting and linting
 .PHONY: format
-format: ## Format code with Black and isort
-	$(BLACK) --line-length=120 src/ tests/
-	$(ISORT) --profile black --line-length=120 src/ tests/
+format: ## Format code with ruff
+	$(RUFF) format src/ tests/
 
 .PHONY: format-check
 format-check: ## Check if code is formatted correctly
-	$(BLACK) --line-length=120 --check src/ tests/
-	$(ISORT) --profile black --line-length=120 --check-only src/ tests/
+	$(RUFF) format --check src/ tests/
 
 .PHONY: lint
-lint: ## Run linting with flake8 and pylint
-	$(FLAKE8) --max-line-length=120 src/ tests/
-	$(PYLINT) --max-line-length=120 src/
+lint: ## Run linting with ruff
+	$(RUFF) check src/ tests/
 
 .PHONY: lint-fix
-lint-fix: format lint ## Format code and then run linting
+lint-fix: fix format ## Fix issues and format code with ruff
+
+.PHONY: fix
+fix: ## Fix code issues automatically with ruff
+	$(RUFF) check --fix src/ tests/
 
 # Testing
 .PHONY: test

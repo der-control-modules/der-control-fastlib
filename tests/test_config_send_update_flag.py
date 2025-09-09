@@ -45,9 +45,15 @@ def test_config_send_update_true_sends_notification(message_bus_manager_fixture)
             # Give time for async WebSocket notification
             gevent.sleep(0.5)
 
-        # Check that WebSocket notification was sent
-        config_updates = [msg for _, msg in sent_messages if msg.get("type") == "config_update"]
-        assert len(config_updates) > 0, f"Expected config_update messages, but got none. All messages: {sent_messages}"
+        # Check that VOLTTRON-style RPC notification was sent
+        config_updates = [
+            msg
+            for _, msg in sent_messages
+            if msg.get("type") == "vip" and msg.get("message", {}).get("data", {}).get("method") == "config.update"
+        ]
+        assert (
+            len(config_updates) > 0
+        ), f"Expected config.update RPC messages, but got none. All messages: {sent_messages}"
 
     finally:
         agent1.disconnect()
@@ -82,9 +88,13 @@ def test_config_send_update_false_no_notification(message_bus_manager_fixture):
             # Give time to ensure no async WebSocket notification
             gevent.sleep(0.5)
 
-        # Check that NO WebSocket notification was sent for config_update
-        config_updates = [msg for _, msg in sent_messages if msg.get("type") == "config_update"]
-        assert len(config_updates) == 0, f"Expected no config_update messages, but got: {config_updates}"
+        # Check that NO VOLTTRON-style RPC notification was sent
+        config_updates = [
+            msg
+            for _, msg in sent_messages
+            if msg.get("type") == "vip" and msg.get("message", {}).get("data", {}).get("method") == "config.update"
+        ]
+        assert len(config_updates) == 0, f"Expected no config.update RPC messages, but got: {config_updates}"
 
     finally:
         agent1.disconnect()
@@ -168,11 +178,17 @@ def test_config_delete_send_update_flag(message_bus_manager_fixture):
             result.get(timeout=5.0)
             gevent.sleep(0.5)
 
-        # Check that NO WebSocket delete notification was sent
-        delete_messages = [msg for _, msg in sent_messages if msg.get("type") == "config_delete"]
+        # Check that NO VOLTTRON-style RPC delete notification was sent
+        delete_messages = [
+            msg
+            for _, msg in sent_messages
+            if msg.get("type") == "vip"
+            and msg.get("message", {}).get("data", {}).get("method") == "config.update"
+            and "DELETE" in msg.get("message", {}).get("data", {}).get("args", [])
+        ]
         assert (
             len(delete_messages) == 0
-        ), f"Expected no config_delete messages with send_update=False, but got: {delete_messages}"
+        ), f"Expected no config.update DELETE RPC messages with send_update=False, but got: {delete_messages}"
 
         # Create config again
         result = agent1.vip.config.set("test_config2", {"key": "value"})
@@ -186,11 +202,17 @@ def test_config_delete_send_update_flag(message_bus_manager_fixture):
             result.get(timeout=5.0)
             gevent.sleep(0.5)
 
-        # Check that WebSocket delete notification WAS sent
-        delete_messages = [msg for _, msg in sent_messages if msg.get("type") == "config_delete"]
+        # Check that VOLTTRON-style RPC delete notification WAS sent
+        delete_messages = [
+            msg
+            for _, msg in sent_messages
+            if msg.get("type") == "vip"
+            and msg.get("message", {}).get("data", {}).get("method") == "config.update"
+            and "DELETE" in msg.get("message", {}).get("data", {}).get("args", [])
+        ]
         assert (
             len(delete_messages) > 0
-        ), f"Expected config_delete message with send_update=True, but got no delete messages. All messages: {sent_messages}"
+        ), f"Expected config.update DELETE RPC message with send_update=True, but got no delete messages. All messages: {sent_messages}"
 
     finally:
         agent1.disconnect()

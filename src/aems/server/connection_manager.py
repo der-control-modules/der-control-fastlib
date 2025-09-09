@@ -49,6 +49,19 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket, identity: str):
         """Connect a client to the message bus."""
+        # VOLTTRON compatibility: Only one agent per identity allowed
+        if identity in self.active_connections:
+            existing_ws = self.active_connections[identity]
+            if existing_ws.client_state == WebSocketState.CONNECTED:
+                _log.warning(f"Agent {identity} already connected - rejecting new connection")
+                # Reject BEFORE accepting to prevent client from thinking it's connected
+                await websocket.close(code=4000, reason=f"Agent {identity} already connected")
+                return
+            else:
+                # Clean up stale connection
+                _log.info(f"Replacing stale connection for agent {identity}")
+                self.disconnect(identity)
+
         await websocket.accept()
         self.active_connections[identity] = websocket
         self.prefix_subscriptions[identity] = {}

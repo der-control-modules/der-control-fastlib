@@ -166,9 +166,15 @@ class RPC:
 
     def handle_request(self, sender: str, method_name: str, args: list, kwargs: dict, msg_id: str):
         """Handle an incoming RPC request."""
-        # Parse method name for potential remote calls
-        parts = method_name.split(".")
-        if len(parts) > 1:
+        # First check if this is a locally exported method (even if it has dots in the name like config.update)
+        if method_name in self._exported_methods:
+            # Handle as a local method - jump to the local method execution logic
+            # which properly uses greenlets to prevent blocking
+            pass  # Fall through to local method handling below
+
+        # Parse method name for potential remote calls (only if not a local method)
+        elif "." in method_name:
+            parts = method_name.split(".")
             # This is a remote call to another agent
             target = parts[0]
             actual_method = ".".join(parts[1:])
@@ -200,33 +206,33 @@ class RPC:
                 async_result = AsyncResult()
                 async_result.set_exception(Exception(error_msg))
                 return async_result
+
+        # This is a local method call (or falls through from local method check above)
+        async_result = AsyncResult()
+
+        if method_name in self._exported_methods:
+            # Execute RPC methods in greenlets to prevent blocking nested RPC calls
+            method = self._exported_methods[method_name]
+            _log.debug(f"Agent {self._agent.identity} executing method {method_name}")
+
+            def execute_method():
+                try:
+                    result = method(*args, **kwargs)
+                    _log.debug(f"Agent {self._agent.identity} method {method_name} result: {result}")
+                    async_result.set(result)
+                except Exception as e:
+                    error = str(e)
+                    _log.error(f"Agent {self._agent.identity} method {method_name} error: {error}")
+                    async_result.set_exception(e)
+
+            # Spawn the method execution in a greenlet to prevent blocking
+            gevent.spawn(execute_method)
         else:
-            # This is a local method call
-            async_result = AsyncResult()
+            error = f"Method {method_name} not found or not exported"
+            _log.debug(error)
+            async_result.set_exception(Exception(error))
 
-            if method_name in self._exported_methods:
-                # Execute RPC methods in greenlets to prevent blocking nested RPC calls
-                method = self._exported_methods[method_name]
-                _log.debug(f"Agent {self._agent.identity} executing method {method_name}")
-
-                def execute_method():
-                    try:
-                        result = method(*args, **kwargs)
-                        _log.debug(f"Agent {self._agent.identity} method {method_name} result: {result}")
-                        async_result.set(result)
-                    except Exception as e:
-                        error = str(e)
-                        _log.error(f"Agent {self._agent.identity} method {method_name} error: {error}")
-                        async_result.set_exception(e)
-
-                # Spawn the method execution in a greenlet to prevent blocking
-                gevent.spawn(execute_method)
-            else:
-                error = f"Method {method_name} not found or not exported"
-                _log.debug(error)
-                async_result.set_exception(Exception(error))
-
-            return async_result
+        return async_result
 
 
 class PubSub:
@@ -313,38 +319,53 @@ class PubSub:
 
         return adapter
 
-    def subscribe(self, peer: str, prefix: str, callback: Callable | None = None, **kwargs):
+    def subscribe(self, peer_or_prefix, prefix=None, callback: Callable | None = None, **kwargs):
         """Subscribe to a topic prefix, returning an AsyncResult.
 
         Args:
-            peer: The peer to subscribe through (typically "pubsub")
-            prefix: The topic prefix to subscribe to
+            peer_or_prefix: Either the peer (VOLTTRON API) or prefix (legacy API)
+            prefix: The topic prefix (VOLTTRON API) or callback (legacy API)
             callback: Optional callback function to handle messages
             **kwargs: Additional keyword arguments
         """
+        # Handle both API signatures:
+        # 1. VOLTTRON API: subscribe(peer, prefix, callback)
+        # 2. Legacy API: subscribe(prefix, callback)
+        if callback is None and prefix is not None and callable(prefix):
+            # Legacy API: subscribe(prefix, callback) where callback is in prefix parameter
+            actual_prefix = peer_or_prefix
+            actual_callback = prefix
+        elif prefix is None:
+            # Legacy API: subscribe(prefix, callback) where callback is None/default
+            actual_prefix = peer_or_prefix
+            actual_callback = callback
+        else:
+            # VOLTTRON API: subscribe(peer, prefix, callback)
+            actual_prefix = prefix
+            actual_callback = callback
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
 
         subscription_id = str(uuid.uuid4())
 
         # Store the original callback
-        actual_callback = callback or (lambda msg: _log.info(f"Subscription callback for {prefix}: {msg}"))
+        final_callback = actual_callback or (lambda msg: _log.info(f"Subscription callback for {actual_prefix}: {msg}"))
 
         # Wrap the callback with our adapter
-        adapted_callback = self._callback_adapter(actual_callback)
+        adapted_callback = self._callback_adapter(final_callback)
 
-        self._subscriptions[prefix] = adapted_callback
+        self._subscriptions[actual_prefix] = adapted_callback
 
         # Create an AsyncResult to track the subscription operation
         async_result = AsyncResult()
 
         try:
-            # Include peer in the subscription message (though it might be ignored by the server)
+            # Send subscription message
             self._agent.websocket.send(
-                json.dumps({"type": "subscribe", "peer": peer, "prefix": prefix, "id": subscription_id})
+                json.dumps({"type": "subscribe", "prefix": actual_prefix, "id": subscription_id})
             )
 
-            _log.info(f"Agent {self._agent.identity} subscribed to prefix: {prefix} via peer: {peer}")
+            _log.info(f"Agent {self._agent.identity} subscribed to prefix: {actual_prefix}")
             async_result.set(subscription_id)  # Return the subscription ID
         except Exception as e:
             _log.error(f"Error subscribing to topic: {e}")
@@ -352,37 +373,54 @@ class PubSub:
 
         return async_result
 
-    def subscribe_regex(self, peer: str, pattern: str, callback: Callable | None = None):
+    def subscribe_regex(self, peer_or_pattern, pattern=None, callback: Callable | None = None):
         """Subscribe to a topic pattern, returning an AsyncResult.
 
         Args:
-            peer: The peer to subscribe through (typically "pubsub")
-            pattern: The regex pattern to match topics against
+            peer_or_pattern: Either the peer (VOLTTRON API) or pattern (legacy API)
+            pattern: The regex pattern (VOLTTRON API) or callback (legacy API)
             callback: Optional callback function to handle messages
         """
+        # Handle both API signatures:
+        # 1. VOLTTRON API: subscribe_regex(peer, pattern, callback)
+        # 2. Legacy API: subscribe_regex(pattern, callback)
+        if callback is None and pattern is not None and callable(pattern):
+            # Legacy API: subscribe_regex(pattern, callback) where callback is in pattern parameter
+            actual_pattern = peer_or_pattern
+            actual_callback = pattern
+        elif pattern is None:
+            # Legacy API: subscribe_regex(pattern, callback) where callback is None/default
+            actual_pattern = peer_or_pattern
+            actual_callback = callback
+        else:
+            # VOLTTRON API: subscribe_regex(peer, pattern, callback)
+            actual_pattern = pattern
+            actual_callback = callback
         if not self._agent.connected:
             raise ConnectionError("Agent not connected")
 
         subscription_id = str(uuid.uuid4())
 
         # Store the original callback
-        actual_callback = callback or (lambda msg: _log.info(f"Subscription callback for {pattern}: {msg}"))
+        final_callback = actual_callback or (
+            lambda msg: _log.info(f"Subscription callback for {actual_pattern}: {msg}")
+        )
 
         # Wrap the callback with our adapter
-        adapted_callback = self._callback_adapter(actual_callback)
+        adapted_callback = self._callback_adapter(final_callback)
 
-        self._subscriptions[pattern] = adapted_callback
+        self._subscriptions[actual_pattern] = adapted_callback
 
         # Create an AsyncResult to track the subscription operation
         async_result = AsyncResult()
 
         try:
-            # Include peer in the subscription message
+            # Send subscription message with pattern
             self._agent.websocket.send(
-                json.dumps({"type": "subscribe", "peer": peer, "pattern": pattern, "id": subscription_id})
+                json.dumps({"type": "subscribe", "pattern": actual_pattern, "id": subscription_id})
             )
 
-            _log.info(f"Agent {self._agent.identity} subscribed to pattern: {pattern} via peer: {peer}")
+            _log.info(f"Agent {self._agent.identity} subscribed to pattern: {actual_pattern}")
             async_result.set(subscription_id)  # Return the subscription ID
         except Exception as e:
             _log.error(f"Error subscribing to pattern: {e}")
@@ -738,7 +776,8 @@ class Config:
         self._config_cache = {}  # Comprehensive cache of all config entries (default + server)
         self._debug_task = None  # For periodic debug output
         self._callback_depth = 0  # Track callback depth for reentrancy protection
-        self._pending_updates = set()  # Track updates we initiated to avoid double callbacks
+        # No longer need to track pending updates - server handles this properly
+        self._last_config_msg_ids = {}  # Track message IDs to prevent duplicate callbacks
 
         _log.info(f"ConfigStore created for agent {agent.identity}")
 
@@ -762,12 +801,21 @@ class Config:
             )
             return
 
-        if config_name not in self._config_callbacks:
+        # VOLTTRON-style pattern matching for callbacks
+        import fnmatch
+
+        callbacks_to_execute = []
+
+        for pattern, callbacks in self._config_callbacks.items():
+            if fnmatch.fnmatchcase(config_name, pattern):
+                callbacks_to_execute.extend(callbacks)
+
+        if not callbacks_to_execute:
             return
 
         try:
             self._callback_depth += 1
-            for config_callback in self._config_callbacks[config_name]:
+            for config_callback in callbacks_to_execute:
                 try:
                     # Use the ConfigCallback's __call__ method which handles action filtering
                     _log.info(f"Calling callback for config {config_name} with {action} action")
@@ -849,10 +897,8 @@ class Config:
             f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
         )
 
-        # Mark as pending BEFORE making the request to avoid race conditions
-        if send_update:
-            self._pending_updates.add(config_name)
-            _log.debug(f"Pre-marked {config_name} as pending update: {self._pending_updates}")
+        # No need to track pending updates anymore - server handles this properly
+        # Server will not send RPC notification when send_update=False for self-updates
 
         # Use gevent to make the HTTP request asynchronously
         def store_config():
@@ -877,20 +923,18 @@ class Config:
                         self._config_cache[config_name] = merged_config
 
                         # Trigger callbacks if requested
+                        # Note: When send_update=False, we don't execute local callbacks here,
+                        # but the server will still send an RPC notification that will trigger callbacks
                         if send_update:
-                            # Already marked as pending before the request
+                            # Execute callbacks locally for immediate notification
                             self._execute_callbacks_safely(config_name, "UPDATE", merged_config)
 
                         async_result.set(True)
                     else:
-                        # Clean up pending update on failure
-                        if send_update:
-                            self._pending_updates.discard(config_name)
+                        # No cleanup needed since we're not tracking pending updates
                         async_result.set_exception(Exception(f"Failed to store config: {response.text}"))
             except Exception as e:
-                # Clean up pending update on exception
-                if send_update:
-                    self._pending_updates.discard(config_name)
+                # No cleanup needed since we're not tracking pending updates
                 async_result.set_exception(e)
 
         gevent.spawn(store_config)
@@ -911,10 +955,8 @@ class Config:
             f"http://{self._agent._host}:{self._agent._port}/config-store/{self._agent.identity}/{config_name}"
         )
 
-        # Mark as pending BEFORE making the request to avoid race conditions
-        if send_update:
-            self._pending_updates.add(f"{config_name}_delete")
-            _log.debug(f"Pre-marked {config_name}_delete as pending: {self._pending_updates}")
+        # No need to track pending updates anymore - server handles this properly
+        # Server will not send RPC notification when send_update=False for self-updates
 
         # Use gevent to make the HTTP request asynchronously
         def delete_config():
@@ -934,19 +976,15 @@ class Config:
 
                         # Trigger callbacks if requested
                         if send_update:
-                            # Already marked as pending before the request
+                            # Execute callbacks locally for immediate notification
                             self._execute_callbacks_safely(config_name, "DELETE", None)
 
                         async_result.set(True)
                     else:
-                        # Clean up pending update on failure
-                        if send_update:
-                            self._pending_updates.discard(f"{config_name}_delete")
+                        # No cleanup needed since we're not tracking pending updates
                         async_result.set_exception(Exception(f"Failed to delete config: {response.text}"))
             except Exception as e:
-                # Clean up pending update on exception
-                if send_update:
-                    self._pending_updates.discard(f"{config_name}_delete")
+                # No cleanup needed since we're not tracking pending updates
                 async_result.set_exception(e)
 
         gevent.spawn(delete_config)
@@ -990,6 +1028,9 @@ class Config:
             if target_config not in self._config_callbacks:
                 self._config_callbacks[target_config] = []
 
+                # Note: VOLTTRON uses direct RPC calls (config.update) for config notifications,
+                # not pubsub. External changes trigger RPC calls from the platform to agents.
+
             # Add the callback if not already registered
             if callback not in self._config_callbacks[target_config]:
                 self._config_callbacks[target_config].append(ConfigCallback(callback, actions))
@@ -1018,18 +1059,179 @@ class Config:
         self._pending_subscriptions.append(subscription)
         return len(self._pending_subscriptions)
 
+    @RPC.export(name="config.update")
+    def config_update(self, action: str, config_name: str, contents=None, trigger_callback: bool = True, _msg_id=None):
+        """
+        Handle config update notifications from the platform (VOLTTRON-style RPC).
+
+        This method is called by the platform config store service when configurations
+        are modified externally (via vctl config, REST API, etc.).
+
+        Args:
+            action: The action type ("NEW", "UPDATE", "DELETE")
+            config_name: Name of the configuration
+            contents: The new configuration contents (None for DELETE)
+            trigger_callback: Whether to trigger registered callbacks
+            _msg_id: Internal message ID for deduplication
+        """
+        _log.info(f"Agent {self._agent.identity} received config update: {config_name} ({action})")
+
+        # No need to check for pending updates - server handles this properly now
+        # If we receive an RPC notification, it means we should process it
+
+        # Handle the case where contents might be a JSON string from file watcher
+        if contents is not None and isinstance(contents, str):
+            try:
+                import json
+
+                contents = json.loads(contents)
+            except (json.JSONDecodeError, ValueError):
+                # If it's not valid JSON, keep it as a string
+                pass
+
+        if not trigger_callback:
+            # Just update cache without triggering callbacks
+            if action == "DELETE":
+                if config_name in self._config_cache:
+                    # Check if we have a default to fall back to
+                    if config_name in self._default_configs:
+                        self._config_cache[config_name] = copy.deepcopy(self._default_configs[config_name])
+                    else:
+                        del self._config_cache[config_name]
+            else:
+                # Merge with defaults
+                if config_name in self._default_configs:
+                    default_config = self._default_configs[config_name]
+                    if isinstance(default_config, dict) and isinstance(contents, dict):
+                        merged_config = copy.deepcopy(default_config)
+                        merged_config.update(copy.deepcopy(contents))
+                        self._config_cache[config_name] = merged_config
+                    else:
+                        self._config_cache[config_name] = copy.deepcopy(contents)
+                else:
+                    self._config_cache[config_name] = copy.deepcopy(contents)
+            return
+
+        # Process callbacks
+        if config_name in self._config_callbacks:
+            if action == "DELETE":
+                # Handle deletion - either remove or revert to default
+                if config_name in self._config_cache:
+                    if config_name in self._default_configs:
+                        # Revert to default
+                        self._config_cache[config_name] = copy.deepcopy(self._default_configs[config_name])
+                        action = "UPDATE"  # Changed to default
+                        contents = self._config_cache[config_name]
+                    else:
+                        # Remove entirely
+                        del self._config_cache[config_name]
+                        contents = None
+            else:
+                # Update/New - merge with defaults
+                if config_name in self._default_configs:
+                    default_config = self._default_configs[config_name]
+                    if isinstance(default_config, dict) and isinstance(contents, dict):
+                        merged_config = copy.deepcopy(default_config)
+                        merged_config.update(copy.deepcopy(contents))
+                        self._config_cache[config_name] = merged_config
+                        contents = merged_config
+                    else:
+                        self._config_cache[config_name] = copy.deepcopy(contents)
+                else:
+                    self._config_cache[config_name] = copy.deepcopy(contents)
+
+            # Execute callbacks
+            self._execute_callbacks_safely(config_name, action, contents)
+
+    def _handle_config_pubsub_message(self, message_data):
+        """Handle config update notifications from pubsub (external changes like vctl config)."""
+        try:
+            # Extract data from VIP message structure
+            vip_data = message_data.get("data", message_data)  # Handle both direct and VIP wrapped
+            topic = vip_data.get("topic", "")
+            payload = vip_data.get("message", {})
+
+            # Extract config name from topic: "config/agent_id/config_name"
+            topic_parts = topic.split("/")
+            if len(topic_parts) >= 3:
+                config_name = topic_parts[2]
+                action = payload.get("action", "UPDATE")
+                value = payload.get("value")
+
+                _log.info(f"Agent {self._agent.identity} received pubsub config notification: {config_name} ({action})")
+
+                # Update cache and trigger callbacks
+                if action == "DELETE":
+                    # Remove from cache or revert to default
+                    if config_name in self._config_cache:
+                        if config_name in self._default_configs:
+                            # Restore to default
+                            self._config_cache[config_name] = copy.deepcopy(self._default_configs[config_name])
+                            action = "UPDATE"  # Reverted to default
+                            value = self._config_cache[config_name]
+                        else:
+                            # Remove entirely
+                            del self._config_cache[config_name]
+                            value = None
+                else:
+                    # Update/New - refresh from server
+                    if value is not None:
+                        # Parse JSON string if needed
+                        if isinstance(value, str):
+                            try:
+                                import json
+
+                                value = json.loads(value)
+                            except (json.JSONDecodeError, ValueError):
+                                # If it's not valid JSON, keep as string
+                                pass
+
+                        # Merge with defaults like the set() method does
+                        merged_config = {}
+                        if config_name in self._default_configs:
+                            default_config = self._default_configs[config_name]
+                            if isinstance(default_config, dict) and isinstance(value, dict):
+                                merged_config = copy.deepcopy(default_config)
+                                merged_config.update(copy.deepcopy(value))
+                            else:
+                                merged_config = copy.deepcopy(value)
+                        else:
+                            merged_config = copy.deepcopy(value)
+
+                        self._config_cache[config_name] = merged_config
+                        # Update value to be the merged config for callback
+                        value = merged_config
+                    else:
+                        # Fetch from server if value not provided
+                        try:
+                            value = self.get(config_name)
+                            self._config_cache[config_name] = value
+                        except KeyError:
+                            _log.warning(f"Could not fetch updated config {config_name} from server")
+                            return
+
+                # Trigger callbacks
+                if config_name in self._config_callbacks:
+                    _log.info(
+                        f"Triggering {len(self._config_callbacks[config_name])} pubsub callbacks for {config_name}"
+                    )
+                    for config_callback in self._config_callbacks[config_name]:
+                        try:
+                            config_callback(config_name, action, value)
+                        except Exception as e:
+                            _log.error(f"Error in config pubsub callback: {e}")
+
+        except Exception as e:
+            _log.error(f"Error handling config pubsub message: {e}")
+
     def unsubscribe(self, subscription_id):
         """Remove a configuration subscription."""
         return self._agent.vip.pubsub.unsubscribe(subscription_id)
 
     def handle_update(self, config_name):
         """Handle a configuration update notification from the server."""
-        # Check if this is our own update that we're being notified about
-        _log.debug(f"Checking if {config_name} in pending updates: {self._pending_updates}")
-        if config_name in self._pending_updates:
-            _log.info(f"Skipping update for {config_name} - update was initiated by this agent")
-            self._pending_updates.discard(config_name)
-            return
+        # No need to check for pending updates - server handles this properly now
+        # If we receive a notification, it means we should process it
 
         # ALWAYS fetch and update the cache, regardless of callbacks
         try:
@@ -2053,6 +2255,9 @@ class Agent:
         self.core._register_decorated_methods(self)
         self.vip.rpc._register_decorated_methods(self)
 
+        # Also register config store RPC methods
+        self.vip.rpc._register_decorated_methods(self.config)
+
     def connect(self):
         """Connect to the message bus."""
         self._manual_disconnect = False  # Reset the flag for fresh connections
@@ -2129,6 +2334,10 @@ class Agent:
             # TODO: Implement proper health status tracking
             # self.health.set_status(Status.WARNING, f"Config load error: {e}")
 
+    def start(self):
+        """Start the agent (alias for connect for VOLTTRON compatibility)."""
+        return self.connect()
+
     def disconnect(self):
         """Disconnect from the message bus."""
         self._manual_disconnect = True  # Mark as intentional disconnect
@@ -2186,12 +2395,7 @@ class Agent:
                 # Handle config delete notifications
                 config_name = data.get("config_name")
                 if config_name:
-                    # Check if this is our own delete that we're being notified about
-                    if f"{config_name}_delete" in self.config._pending_updates:
-                        _log.info(f"Skipping delete callbacks for {config_name} - delete was initiated by this agent")
-                        self.config._pending_updates.discard(f"{config_name}_delete")
-                        return
-
+                    # No need to check for pending updates - server handles this properly now
                     _log.info(f"Processing config_delete for {config_name}")
                     # Remove from cache or revert to default
                     if config_name in self.config._config_cache:
@@ -2348,6 +2552,12 @@ class Agent:
                         # Get the AsyncResult and set its value
                         async_result = self.rpc_responses.pop(msg_id)
                         async_result.set(args[0])  # Assuming first arg is result
+                elif subsystem == "pubsub":
+                    # This is a pubsub message via VIP
+                    _log.debug(f"Agent {self.identity} received VIP pubsub message: {message}")
+                    # Extract the pubsub data from the VIP message
+                    pubsub_data = message.get("data", {})
+                    self.vip.pubsub.handle_message(pubsub_data)
                 elif subsystem == "rpc_error":
                     # This is an RPC error via VIP
                     msg_id = message.get("msg_id")
@@ -2382,31 +2592,45 @@ class Agent:
     def _handle_vip_rpc_request(self, message):
         """Handle an incoming RPC request via VIP."""
         peer = message.get("user", "")  # Sender identity
-        msg_id = message.get("msg_id", "")
-        args = message.get("args", [])
+        data = message.get("data", {})
+        msg_id = data.get("msg_id", message.get("msg_id", ""))
 
         _log.debug(f"Agent {self.identity} received VIP RPC request: {message}")
 
-        if len(args) >= 2:
-            method_name = args[0]
-            method_args = args[1:]
+        # Handle new format: data contains {"method": "...", "args": [...], "kwargs": {...}}
+        if "method" in data:
+            method_name = data.get("method")
+            method_args = data.get("args", [])
+            method_kwargs = data.get("kwargs", {})
 
             # Process the RPC request - returns an AsyncResult
-            async_result = self.vip.rpc.handle_request(peer, method_name, method_args, {}, msg_id)
+            async_result = self.vip.rpc.handle_request(peer, method_name, method_args, method_kwargs, msg_id)
+        else:
+            # Handle old format: {"args": [method_name, arg1, arg2, ...]}
+            args = message.get("args", [])
+            if len(args) >= 2:
+                method_name = args[0]
+                method_args = args[1:]
 
-            # Wait for the result and send the response via VIP
-            def send_vip_response():
-                try:
-                    # Wait for the result (with timeout)
-                    result = async_result.get(timeout=10)
-                    # Send successful response via VIP
-                    self.vip.send_message(peer=peer, subsystem="rpc_response", args=[result, msg_id])
-                except Exception as e:
-                    # Send error response via VIP
-                    self.vip.send_message(peer=peer, subsystem="rpc_error", args=[str(e), msg_id])
+                # Process the RPC request - returns an AsyncResult
+                async_result = self.vip.rpc.handle_request(peer, method_name, method_args, {}, msg_id)
+            else:
+                _log.error(f"Invalid RPC request format: {message}")
+                return
 
-            # Spawn a greenlet to process the response asynchronously
-            gevent.spawn(send_vip_response)
+        # Wait for the result and send the response via VIP
+        def send_vip_response():
+            try:
+                # Wait for the result (with timeout)
+                result = async_result.get(timeout=10)
+                # Send successful response via VIP
+                self.vip.send_message(peer=peer, subsystem="rpc_response", args=[result, msg_id])
+            except Exception as e:
+                # Send error response via VIP
+                self.vip.send_message(peer=peer, subsystem="rpc_error", args=[str(e), msg_id])
+
+        # Spawn a greenlet to process the response asynchronously
+        gevent.spawn(send_vip_response)
 
     def __on_ws_error__(self, ws, error):
         """Callback when an error occurs."""

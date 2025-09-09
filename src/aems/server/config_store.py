@@ -7,14 +7,32 @@ import json
 import logging
 import os
 import threading
+import uuid
+from copy import deepcopy
 from typing import Any, Union
 
-from watchdog.observers import Observer
-
-from aems.server.config_store_handler import ConfigFileHandler
 from aems.server.models import Message, MessageBus
 
 _log = logging.getLogger(__name__)
+
+# Config reference resolution constants (matching VOLTTRON)
+LINK_PREFIX = "config://"
+
+
+def strip_config_name(config_name):
+    """Strip whitespace and path separators from config name."""
+    from string import whitespace
+
+    return config_name.strip(whitespace + r"\\/")
+
+
+def check_for_config_link(value):
+    """Check if a value is a config:// reference and return the referenced config name."""
+    if isinstance(value, str) and value.startswith(LINK_PREFIX):
+        config_name = value.replace(LINK_PREFIX, "", 1)
+        config_name = strip_config_name(config_name)
+        return config_name.lower()
+    return None
 
 
 class ConfigStore:
@@ -44,17 +62,19 @@ class ConfigStore:
         self.base_dir = base_dir
         self.lock = threading.RLock()  # For thread safety
         self.messagebus = messagebus
+
         # Create the base directory if it doesn't exist
         os.makedirs(base_dir, exist_ok=True)
 
-        # In ConfigStore initialization
-        observer = Observer()
-        observer.schedule(ConfigFileHandler(self), self.base_dir, recursive=True)
-        observer.start()
+        # Note: File watching removed - all changes go through API in our implementation
+        # In VOLTTRON, file watching is for external changes (manual edits, vctl config, etc.)
+        # Since our implementation only uses API endpoints, we don't need file watching
 
         _log.info(f"ConfigStore initialized with base directory: {base_dir}")
 
-    def store(self, agent_id: str, config_name: str, config_data: Any, config_type: str = "json") -> bool:
+    def store(
+        self, agent_id: str, config_name: str, config_data: Any, config_type: str = "json", send_update: bool = True
+    ) -> bool:
         """
         Store a configuration entry for an agent.
 
@@ -74,6 +94,9 @@ class ConfigStore:
             return False
 
         with self.lock:
+            # Check if config already exists before storing (to determine NEW vs UPDATE)
+            config_exists = self.exists(agent_id, config_name)
+
             agent_dir = os.path.join(self.base_dir, agent_id)
             os.makedirs(agent_dir, exist_ok=True)
 
@@ -94,11 +117,12 @@ class ConfigStore:
             if result:
                 _log.info(f"Config store updated: {agent_id}/{config_name} ({config_type})")
 
-                # Notify about the change
+                # Send notifications for API changes
+                # This emulates the behavior of vctl config and other external tools
+                # Note: send_update=True by default for external changes, but can be overridden
                 full_name = f"{agent_id}/{config_name}"
-                # Use the exists method to check if this is an update or new config
-                action = "UPDATE" if self.exists(agent_id, config_name) else "NEW"
-                self.notify_change(full_name, action, config_data)
+                action = "UPDATE" if config_exists else "NEW"
+                self.notify_change(full_name, action, config_data, send_update=send_update)
 
             return result
 
@@ -163,7 +187,9 @@ class ConfigStore:
             _log.error(f"Error storing CSV config {config_name}: {e}")
             return False
 
-    def retrieve(self, agent_id: str, config_name: str, raw: bool = False) -> Any | None:
+    def retrieve(
+        self, agent_id: str, config_name: str, raw: bool = False, resolve_references: bool = True
+    ) -> Any | None:
         """
         Retrieve a configuration entry for an agent.
 
@@ -171,6 +197,7 @@ class ConfigStore:
             agent_id: The identity of the agent
             config_name: The name of the configuration
             raw: If True, return the raw file content, otherwise parse based on type
+            resolve_references: If True, resolve config:// references (default: True)
 
         Returns
         -------
@@ -206,13 +233,20 @@ class ConfigStore:
                     _log.error(f"Error reading metadata for {config_name}: {e}")
 
             # Parse based on type
+            config_data = None
             if config_type == "json":
-                return self._retrieve_json(config_file)
+                config_data = self._retrieve_json(config_file)
             elif config_type == "csv":
-                return self._retrieve_csv(config_file)
+                config_data = self._retrieve_csv(config_file)
             else:
                 _log.error(f"Unsupported config type: {config_type}")
                 return None
+
+            # Resolve config:// references if requested and we have parsed data
+            if config_data is not None and resolve_references:
+                config_data = self._process_config_links(config_data, agent_id)
+
+            return config_data
 
     def _retrieve_json(self, config_file: str) -> Any | None:
         """Retrieve a JSON configuration."""
@@ -311,7 +345,7 @@ class ConfigStore:
 
         return configs
 
-    def delete_config(self, agent_id: str, config_name: str) -> bool:
+    def delete_config(self, agent_id: str, config_name: str, send_update: bool = True) -> bool:
         """
         Delete a configuration entry for an agent.
 
@@ -351,9 +385,9 @@ class ConfigStore:
                 # Log successful deletion at INFO level
                 _log.info(f"Config deleted from store: {agent_id}/{config_name}")
 
-                # Notify about the deletion
+                # External deletions should notify agents (emulates vctl config delete behavior)
                 full_name = f"{agent_id}/{config_name}"
-                self.notify_change(full_name, "DELETE", None)
+                self.notify_change(full_name, "DELETE", None, send_update=send_update)
 
             return success
 
@@ -411,17 +445,22 @@ class ConfigStore:
 
         return result
 
-    def notify_change(self, config_name: str, action: str, value: Any | None = None):
+    def notify_change(self, config_name: str, action: str, value: Any | None = None, send_update: bool = True):
         """
-        Notify subscribers about configuration changes using VIP messages.
+        Notify agents about configuration changes using RPC calls (VOLTTRON-style).
 
         Args:
-            config_name: Name of the configuration that changed
+            config_name: Name of the configuration that changed (format: agent_id/config_name)
             action: Type of change ('NEW', 'UPDATE', or 'DELETE')
             value: The new configuration value (None for DELETE actions)
         """
         if self.messagebus is None:
             _log.warning("Config change not published: No message bus provided")
+            return
+
+        # Respect send_update flag (matches VOLTTRON behavior)
+        if not send_update:
+            _log.debug(f"Skipping config update notification for {config_name} (send_update=False)")
             return
 
         # Ensure we have valid inputs
@@ -434,77 +473,128 @@ class ConfigStore:
             return
 
         try:
-            # Create payload
-            payload = {
-                "name": config_name,
-                "action": action,
-                "timestamp": datetime.datetime.now().isoformat(),
-            }
+            # Extract agent_id from config_name (format: agent_id/config_name)
+            if "/" not in config_name:
+                _log.warning(
+                    f"Config change not sent: Invalid config name format '{config_name}' (expected agent_id/config_name)"
+                )
+                return
 
-            # Include value for non-DELETE actions
-            if action != "DELETE" and value is not None:
-                payload["value"] = value
+            agent_id = config_name.split("/")[0]
+            config_short_name = config_name.split("/")[1]
 
-            _log.info(f"Publishing config change: {config_name} ({action})")
-
-            # Format topic for easier subscription matching
-            # Include agent_id in the topic to allow targeted subscriptions
-            agent_id = config_name.split("/")[0] if "/" in config_name else ""
-            config_short_name = config_name.split("/")[1] if "/" in config_name else config_name
-
-            # If agent_id is available, include it in the topic
-            if agent_id:
-                topic = f"config/{agent_id}/{config_short_name}"
-            else:
-                topic = f"config/{config_name}"
-
-            _log.debug(f"Publishing to topic: {topic}")
+            _log.info(f"Sending config update to agent {agent_id}: {config_short_name} ({action})")
 
             # Get all active connections from the manager
             if not hasattr(self.messagebus, "manager"):
-                _log.warning("Config change not published: Message bus has no manager attribute")
+                _log.warning("Config change not sent: Message bus has no manager attribute")
                 return
 
             if not hasattr(self.messagebus.manager, "active_connections"):
-                _log.warning("Config change not published: Manager has no active_connections attribute")
+                _log.warning("Config change not sent: Manager has no active_connections attribute")
                 return
 
             active_connections = self.messagebus.manager.active_connections
 
-            # Safety check: ensure active_connections is a dict-like object we can iterate over
-            if active_connections is None:
-                _log.warning("Config change not published: active_connections is None")
+            # Check if the target agent is connected
+            if not active_connections or agent_id not in active_connections:
+                _log.debug(f"Agent {agent_id} not currently connected. Configuration update not sent.")
                 return
 
-            if not hasattr(active_connections, "items") and not hasattr(active_connections, "__iter__"):
-                _log.warning(
-                    f"Config change not published: active_connections is not iterable: {type(active_connections)}"
-                )
-                return
-
-            # Check if we have any active connections at all
-            if not active_connections:
-                _log.warning("Config change not published: No active connections found")
-                return
-
-            # Create and send a message to each connected client
-            for client_id in active_connections:
-                message = Message(
-                    peer=client_id,  # Target specific client
-                    subsystem="pubsub",
-                    data={
-                        "topic": topic,
-                        "headers": {},
-                        "message": payload,
-                        "sender": "configstore",
+            # Create RPC message to call config.update on the target agent
+            # This matches VOLTTRON's approach: platform calls config.update RPC method on agents
+            message = Message(
+                peer=agent_id,  # Target the specific agent
+                subsystem="rpc",
+                data={
+                    "method": "config.update",
+                    "args": [action, config_short_name],
+                    "kwargs": {
+                        "contents": value,
+                        "trigger_callback": True,  # Always trigger callbacks for external changes (like vctl config)
                     },
-                )
-                self.messagebus.send_vip_message(message)
+                    "msg_id": str(uuid.uuid4()),
+                },
+            )
 
-                # Log successful notification at INFO level
-                _log.info(f"Published config change notification: {topic} ({action})")
-
-            # No else clause needed here - we've already checked if active_connections is empty
+            self.messagebus.send_vip_message(message)
+            _log.info(f"Sent config.update RPC call to agent {agent_id}: {config_short_name} ({action})")
 
         except Exception as e:
-            _log.error(f"Error publishing config change notification: {e}")
+            _log.error(f"Error sending config change notification: {e}")
+
+    def _process_config_links(self, config_contents, agent_id, already_resolved=None):
+        """
+        Process config:// references in configuration data (matching VOLTTRON behavior).
+
+        Args:
+            config_contents: Configuration data to process
+            agent_id: Agent identity for resolving references
+            already_resolved: Set of already resolved references to prevent circular references
+
+        Returns
+        -------
+            Configuration with resolved references
+        """
+        if already_resolved is None:
+            already_resolved = set()
+
+        # Work with a deep copy to avoid modifying the original
+        result = deepcopy(config_contents)
+
+        if isinstance(result, dict):
+            for key, value in result.items():
+                if isinstance(value, dict | list):
+                    result[key] = self._process_config_links(value, agent_id, already_resolved)
+                elif isinstance(value, str):
+                    config_ref = check_for_config_link(value)
+                    if config_ref is not None:
+                        resolved_config = self._resolve_config_reference(agent_id, config_ref, already_resolved)
+                        result[key] = resolved_config
+        elif isinstance(result, list):
+            for i, value in enumerate(result):
+                if isinstance(value, dict | list):
+                    result[i] = self._process_config_links(value, agent_id, already_resolved)
+                elif isinstance(value, str):
+                    config_ref = check_for_config_link(value)
+                    if config_ref is not None:
+                        resolved_config = self._resolve_config_reference(agent_id, config_ref, already_resolved)
+                        result[i] = resolved_config
+
+        return result
+
+    def _resolve_config_reference(self, agent_id, config_name, already_resolved):
+        """
+        Resolve a config:// reference to actual configuration data.
+
+        Args:
+            agent_id: Agent identity
+            config_name: Name of referenced configuration
+            already_resolved: Set of already resolved references to prevent circular references
+
+        Returns
+        -------
+            Resolved configuration data or None if not found
+        """
+        # Prevent circular references
+        if config_name in already_resolved:
+            _log.warning(f"Circular config reference detected: {config_name}")
+            return None
+
+        already_resolved.add(config_name)
+
+        try:
+            # Try to retrieve the referenced configuration
+            referenced_config = self.retrieve(agent_id, config_name)
+            if referenced_config is None:
+                _log.warning(f"Config reference not found: {config_name}")
+                return None
+
+            # Recursively process links in the referenced configuration
+            return self._process_config_links(referenced_config, agent_id, already_resolved)
+
+        except Exception as e:
+            _log.error(f"Error resolving config reference '{config_name}': {e}")
+            return None
+        finally:
+            already_resolved.discard(config_name)

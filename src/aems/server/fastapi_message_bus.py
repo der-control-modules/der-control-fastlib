@@ -13,6 +13,8 @@ from typing import Any, Union
 import jwt
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 try:
@@ -220,6 +222,23 @@ class FastAPIMessageBus(MessageBus):
         reload_delay: float = 0.25,
     ):
         self.app = FastAPI(title="AEMS MessageBus", lifespan=lifespan)
+
+        # Add custom exception handler to convert 422 validation errors to 400 bad request
+        # This matches the expected behavior for JSON-RPC validation errors
+        @self.app.exception_handler(RequestValidationError)
+        async def validation_exception_handler(request: Request, exc: RequestValidationError):
+            # For RPC endpoint, return 400 instead of 422
+            if request.url.path == "/gs":
+                detail = "Invalid JSON-RPC format"
+                if exc.errors():
+                    error = exc.errors()[0]
+                    if error.get("type") == "missing":
+                        field = error.get("loc", ["unknown"])[-1]
+                        detail = f"Missing required field: '{field}'"
+                return JSONResponse(status_code=400, content={"detail": detail})
+            # For other endpoints, use default 422 behavior
+            return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
         self.host = host
         self.port = port
         self.running = False
@@ -388,9 +407,9 @@ class FastAPIMessageBus(MessageBus):
             return {"status": "success", "data": configs}
 
         @self.app.get("/config-store/{agent_id}/{config_name}")
-        async def get_config(agent_id: str, config_name: str, raw: bool = False):
-            """Retrieve a configuration for an agent."""
-            config = self.config_store.retrieve(agent_id, config_name, raw)
+        async def get_config(agent_id: str, config_name: str, raw: bool = False, resolve_references: bool = True):
+            """Retrieve a configuration for an agent with optional config:// reference resolution."""
+            config = self.config_store.retrieve(agent_id, config_name, raw, resolve_references)
             if config is None:
                 raise HTTPException(status_code=404, detail=f"Config {config_name} not found for agent {agent_id}")
             return {"status": "success", "data": config}
@@ -402,17 +421,28 @@ class FastAPIMessageBus(MessageBus):
             config_data: Any = Body(..., description="Configuration data (JSON object, array, or primitive)"),
             request: Request = None,
             requesting_agent: str = Query(None, description="Identity of the agent making the request"),
-            send_update: bool = Query(True, description="Whether to send WebSocket notifications to the agent"),
+            send_update: bool = Query(True, description="Whether to send config.update RPC notification to the agent"),
         ):
-            """Store a configuration for an agent. Only the agent itself can update its configs."""
-            # Access control: Only allow agent to update its own configs (or admin override)
+            """Store a configuration for an agent."""
+            # Determine if this is an external update or self-update
+            is_external_update = (requesting_agent != agent_id) if requesting_agent else True
+
+            # For now, we'll keep the access control but may want to relax it for admin agents
             if requesting_agent and requesting_agent != agent_id:
+                # Log the external update attempt
+                _log.info(f"External config update attempt: {requesting_agent} trying to update {agent_id}'s config")
+                # For now, still enforce access control
                 raise HTTPException(
                     status_code=403,
                     detail=f"Agent {requesting_agent} cannot update configs for agent {agent_id}. Agents can only update their own configs.",
                 )
 
             content_type = request.headers.get("Content-Type", "application/json") if request else "application/json"
+
+            # Determine whether to send notifications:
+            # - ALWAYS send notifications for external updates (like vctl config)
+            # - For self-updates, respect the send_update flag
+            should_notify = is_external_update or send_update
 
             try:
                 if "csv" in content_type:
@@ -421,23 +451,19 @@ class FastAPIMessageBus(MessageBus):
                         raise HTTPException(status_code=400, detail="CSV content requires raw request body")
                     csv_content = await request.body()
                     csv_text = csv_content.decode("utf-8")
-                    success = self.config_store.store(agent_id, config_name, csv_text, "csv")
+                    success = self.config_store.store(agent_id, config_name, csv_text, "csv", send_update=should_notify)
                 else:
                     # Process as JSON (config_data is already parsed JSON from Body)
-                    success = self.config_store.store(agent_id, config_name, config_data, "json")
+                    success = self.config_store.store(
+                        agent_id, config_name, config_data, "json", send_update=should_notify
+                    )
             except ValueError as json_error:
                 raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(json_error)}")
             except UnicodeDecodeError as decode_error:
                 raise HTTPException(status_code=400, detail=f"Invalid text encoding: {str(decode_error)}")
 
             if success:
-                # Notify the agent of the config update if it's connected and send_update is True
-                if send_update and agent_id in self.manager.active_connections:
-                    try:
-                        await self.manager.send_message(agent_id, {"type": "config_update", "config_name": config_name})
-                    except ConnectionError:
-                        # Agent disconnected between check and notification - that's okay
-                        _log.warning(f"Agent {agent_id} disconnected during config update notification")
+                # Config store now handles RPC notifications (VOLTTRON-style) based on send_update flag
                 return {"status": "success"}
             else:
                 raise HTTPException(status_code=500, detail="Failed to store configuration")
@@ -447,24 +473,27 @@ class FastAPIMessageBus(MessageBus):
             agent_id: str,
             config_name: str,
             requesting_agent: str = Query(None, description="Identity of the agent making the request"),
-            send_update: bool = Query(True, description="Whether to send WebSocket notifications to the agent"),
+            send_update: bool = Query(True, description="Whether to send config.update RPC notification to the agent"),
         ):
-            """Delete a configuration for an agent. Only the agent itself can delete its configs."""
+            """Delete a configuration for an agent."""
+            # Determine if this is an external update or self-update
+            is_external_update = (requesting_agent != agent_id) if requesting_agent else True
+
             # Access control: Only allow agent to delete its own configs (or admin override)
             if requesting_agent and requesting_agent != agent_id:
                 raise HTTPException(
                     status_code=403,
                     detail=f"Agent {requesting_agent} cannot delete configs for agent {agent_id}. Agents can only delete their own configs.",
                 )
-            success = self.config_store.delete_config(agent_id, config_name)
+
+            # Determine whether to send notifications:
+            # - ALWAYS send notifications for external updates (like vctl config)
+            # - For self-updates, respect the send_update flag
+            should_notify = is_external_update or send_update
+
+            success = self.config_store.delete_config(agent_id, config_name, send_update=should_notify)
             if success:
-                # Notify the agent of the config deletion if it's connected and send_update is True
-                if send_update and agent_id in self.manager.active_connections:
-                    try:
-                        await self.manager.send_message(agent_id, {"type": "config_delete", "config_name": config_name})
-                    except ConnectionError:
-                        # Agent disconnected between check and notification - that's okay
-                        _log.warning(f"Agent {agent_id} disconnected during config delete notification")
+                # Config store now handles RPC notifications (VOLTTRON-style) based on send_update flag
                 return {"status": "success"}
             else:
                 raise HTTPException(status_code=404, detail=f"Config {config_name} not found for agent {agent_id}")
@@ -560,7 +589,7 @@ class FastAPIMessageBus(MessageBus):
             }
 
         @self.app.post("/authenticate", response_model=AuthResponse)
-        async def authenticate(auth_request: AuthRequest):
+        async def authenticate(request: Request):
             """Authenticate a user with username and password.
 
             Accepts username and password and returns JWT tokens for authentication.
@@ -573,12 +602,47 @@ class FastAPIMessageBus(MessageBus):
             }
             ```
             """
-            username = auth_request.username
-            password = auth_request.password
+            # Handle both JSON and form data
+            content_type = request.headers.get("content-type", "")
+
+            if "application/json" in content_type:
+                # Handle JSON request
+                try:
+                    json_data = await request.json()
+                    final_username = json_data.get("username")
+                    final_password = json_data.get("password")
+                except Exception:
+                    raise HTTPException(status_code=400, detail="Invalid JSON format")
+            elif "application/x-www-form-urlencoded" in content_type:
+                # Handle form data
+                try:
+                    form_data = await request.form()
+                    final_username = form_data.get("username")
+                    final_password = form_data.get("password")
+                except Exception:
+                    raise HTTPException(status_code=400, detail="Invalid form data")
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Unsupported content type. Use application/json or application/x-www-form-urlencoded",
+                )
+
+            # Validate required fields are present (distinguish between missing and empty)
+            if final_username is None or final_password is None:
+                missing_fields = []
+                if final_username is None:
+                    missing_fields.append("username")
+                if final_password is None:
+                    missing_fields.append("password")
+                raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing_fields)}")
+
+            # Check for empty credentials (should be 401, not 400)
+            if not final_username or not final_password:
+                raise HTTPException(status_code=401, detail="Invalid credentials")
 
             # TODO: Implement actual authentication logic here
             # For now, this is a placeholder that accepts any non-empty credentials
-            if username and password:
+            if final_username and final_password:
                 try:
                     # JWT configuration
                     secret_key = os.environ.get("JWT_SECRET_KEY", "your-secret-key-change-in-production")
@@ -589,7 +653,7 @@ class FastAPIMessageBus(MessageBus):
 
                     # Generate access token (expires in 1 hour)
                     access_token_payload = {
-                        "sub": username,  # subject (user identifier)
+                        "sub": final_username,  # subject (user identifier)
                         "iat": now,  # issued at
                         "exp": now + datetime.timedelta(hours=1),  # expires
                         "type": "access",
@@ -598,7 +662,7 @@ class FastAPIMessageBus(MessageBus):
 
                     # Generate refresh token (expires in 7 days)
                     refresh_token_payload = {
-                        "sub": username,
+                        "sub": final_username,
                         "iat": now,
                         "exp": now + datetime.timedelta(days=7),
                         "type": "refresh",
@@ -607,7 +671,7 @@ class FastAPIMessageBus(MessageBus):
 
                     return AuthResponse(
                         message="Authentication successful",
-                        username=username,
+                        username=final_username,
                         access_token=access_token,
                         refresh_token=refresh_token,
                     )

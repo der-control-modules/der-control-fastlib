@@ -134,7 +134,7 @@ class TestConfigUpdateFlows:
         assert len(self.tracking_agent.callback_history) > 0, "Callback should be triggered when send_update=True"
 
         last_callback = self.tracking_agent.callback_history[-1]
-        assert last_callback["action"] == "UPDATE"
+        assert last_callback["action"] in ["UPDATE", "NEW"]  # Accept either NEW (first time) or UPDATE
         assert last_callback["contents"] == config_with_callback
 
         # Clear history
@@ -145,23 +145,17 @@ class TestConfigUpdateFlows:
         result = self.tracking_agent.vip.config.set(
             config_name,
             config_without_callback,
-            send_update=False,  # Disable immediate callback, but external notifications will still arrive
+            send_update=False,  # Disable callbacks - no RPC notification should be sent
         )
         result.get(timeout=5)
 
         gevent.sleep(1)
 
-        # With the new architecture, external notifications still trigger callbacks
-        # even when send_update=False (which only affects immediate local callbacks)
-        # This is correct behavior - other agents should still be notified
-        # So we expect the callback to be triggered by the external notification
+        # When an agent sets its own config with send_update=False, no callbacks should be triggered
+        # This matches VOLTTRON behavior where send_update controls RPC notifications
         assert (
-            len(self.tracking_agent.callback_history) >= 1
-        ), "External config update notification should still trigger callback"
-
-        # Verify the callback contains the updated config
-        last_callback = self.tracking_agent.callback_history[-1]
-        assert last_callback["contents"] == config_without_callback
+            len(self.tracking_agent.callback_history) == 0
+        ), "No callbacks should be triggered when send_update=False for self-updates"
 
         # But config should still be updated
         current = self.tracking_agent.vip.config.get(config_name)
@@ -224,7 +218,7 @@ class TestConfigUpdateFlows:
         self.tracking_agent.vip.config.set_default(config_name, default_config)
 
         # Subscribe to updates
-        self.tracking_agent.vip.config.subscribe(self.tracking_agent.on_config_update, config_name)
+        self.tracking_agent.vip.config.subscribe(self.tracking_agent.on_config_update, config_name=config_name)
 
         # Store server config
         server_config = {"server": True, "value": "active"}
