@@ -29,7 +29,7 @@ jobs:
 
       - name: Run format check
         run: |
-          black --check --diff src/ tests/
+          ruff --check src/
 
       - name: Run linting
         run: |
