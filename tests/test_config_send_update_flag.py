@@ -128,7 +128,7 @@ def test_config_send_update_controls_local_callbacks(message_bus_manager_fixture
 
         assert len(callback_called) == 1
         assert callback_called[0][0] == "test_config"
-        assert callback_called[0][1] == "UPDATE"
+        assert callback_called[0][1] == "NEW"  # First set is NEW, not UPDATE
         assert callback_called[0][2]["key"] == "value1"
 
         # Clear callback tracking

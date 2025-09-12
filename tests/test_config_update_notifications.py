@@ -44,30 +44,38 @@ def test_config_update_notification_sent(message_bus_manager_fixture):
         )
         gevent.sleep(0.5)
 
-        print("3. Storing configuration (should trigger UPDATE notification)...")
-        # Store a config - this should trigger the UPDATE notification
+        print("3. Storing configuration (first time - should trigger NEW notification)...")
+        # Store a config - this should trigger the NEW notification
         test_config = {"test": "data", "timestamp": gevent.time.time()}
         # Use send_update=True to ensure notifications are sent
         result = agent.config.set("notification_test_config", test_config, send_update=True)
         result.get(timeout=5.0)  # Wait for the set to complete
+        
+        print("4. Updating configuration (should trigger UPDATE notification)...")
+        # Update the config - this should trigger the UPDATE notification
+        test_config_updated = {"test": "updated_data", "timestamp": gevent.time.time()}
+        result = agent.config.set("notification_test_config", test_config_updated, send_update=True)
+        result.get(timeout=5.0)  # Wait for the set to complete
 
-        print("4. Waiting for UPDATE notification...")
-        gevent.sleep(2)  # Wait for the notification to be processed
+        print("5. Waiting for notifications...")
+        gevent.sleep(2)  # Wait for the notifications to be processed
 
-        print("5. Verifying UPDATE notification was received...")
+        print("6. Verifying notifications were received...")
         print(f"Notifications received: {len(agent.update_notifications)}")
         for notification in agent.update_notifications:
             print(f"  - {notification}")
 
-        # Verify that at least one UPDATE notification was received
-        assert len(agent.update_notifications) > 0, "No UPDATE notifications received"
+        # Verify that at least one notification was received
+        assert len(agent.update_notifications) > 0, "No notifications received"
 
-        # Verify that at least one notification was for our config
+        # Verify that notifications were for our config
         our_notifications = [n for n in agent.update_notifications if n["config_name"] == "notification_test_config"]
-        assert len(our_notifications) > 0, "No notifications received for 'notification_test_config'"
+        assert len(our_notifications) >= 2, "Should have received at least 2 notifications (NEW and UPDATE)"
 
-        # Verify that at least one was an UPDATE action
+        # Verify that we got both NEW and UPDATE actions
+        new_notifications = [n for n in our_notifications if n["action"] == "NEW"]
         update_notifications = [n for n in our_notifications if n["action"] == "UPDATE"]
+        assert len(new_notifications) > 0, "No NEW action notifications received"
         assert len(update_notifications) > 0, "No UPDATE action notifications received"
 
         print("✅ SUCCESS: UPDATE notification was sent and received correctly!")
@@ -98,10 +106,10 @@ def test_config_update_notification_isolation(message_bus_manager_fixture):
         print("2. Both agents subscribing to configs with identical names (but isolated stores)...")
         # Each agent subscribes to their own isolated config with the same name
         agent1.config.subscribe(
-            callback=agent1.config_update_callback, pattern="shared_name_config", actions=["UPDATE"]
+            callback=agent1.config_update_callback, pattern="shared_name_config", actions=["NEW", "UPDATE"]
         )
         agent2.config.subscribe(
-            callback=agent2.config_update_callback, pattern="shared_name_config", actions=["UPDATE"]
+            callback=agent2.config_update_callback, pattern="shared_name_config", actions=["NEW", "UPDATE"]
         )
         gevent.sleep(0.5)
 
@@ -168,8 +176,8 @@ def test_config_update_via_rest_api_isolation(message_bus_manager_fixture):
         gevent.sleep(0.5)
 
         print("2. Both agents subscribing to config with same name...")
-        agent1.config.subscribe(callback=agent1.config_update_callback, pattern="api_test_config", actions=["UPDATE"])
-        agent2.config.subscribe(callback=agent2.config_update_callback, pattern="api_test_config", actions=["UPDATE"])
+        agent1.config.subscribe(callback=agent1.config_update_callback, pattern="api_test_config", actions=["NEW", "UPDATE"])
+        agent2.config.subscribe(callback=agent2.config_update_callback, pattern="api_test_config", actions=["NEW", "UPDATE"])
         gevent.sleep(0.5)
 
         print("3. Updating agent1's config via REST API...")

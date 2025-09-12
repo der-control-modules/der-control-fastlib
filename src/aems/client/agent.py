@@ -778,6 +778,9 @@ class Config:
         self._callback_depth = 0  # Track callback depth for reentrancy protection
         # No longer need to track pending updates - server handles this properly
         self._last_config_msg_ids = {}  # Track message IDs to prevent duplicate callbacks
+        self._ref_map = {}  # Track config references for dependency updates
+        self._reverse_ref_map = {}  # Track which configs are referenced by others
+        self._name_map = {}  # Track case-insensitive name mapping (lowercase -> actual)
 
         _log.info(f"ConfigStore created for agent {agent.identity}")
 
@@ -807,8 +810,12 @@ class Config:
 
         callbacks_to_execute = []
 
+        # Convert config name to lowercase for case-insensitive matching
+        config_name_lower = config_name.lower()
+
         for pattern, callbacks in self._config_callbacks.items():
-            if fnmatch.fnmatchcase(config_name, pattern):
+            # Convert pattern to lowercase for case-insensitive matching
+            if fnmatch.fnmatchcase(config_name_lower, pattern.lower()):
                 callbacks_to_execute.extend(callbacks)
 
         if not callbacks_to_execute:
@@ -819,8 +826,12 @@ class Config:
             for config_callback in callbacks_to_execute:
                 try:
                     # Use the ConfigCallback's __call__ method which handles action filtering
-                    _log.info(f"Calling callback for config {config_name} with {action} action")
-                    config_callback(config_name, action, config_value)
+                    _log.debug(f"About to check if action {action} is in callback actions {config_callback.actions}")
+                    if action in config_callback.actions:
+                        _log.info(f"Calling callback for config {config_name} with {action} action")
+                        config_callback(config_name, action, config_value)
+                    else:
+                        _log.debug(f"Skipping callback for {config_name} - action {action} not in {config_callback.actions}")
                 except Exception as e:
                     _log.error(f"Error in config update callback: {e}")
         finally:
@@ -851,18 +862,172 @@ class Config:
 
         return False
 
-    def get(self, config_name: str) -> dict:
+    def _check_for_config_link(self, value: Any) -> str | None:
+        """
+        Check if a value is a config:// reference and return the referenced config name.
+        
+        Args:
+            value: The value to check
+            
+        Returns:
+            The referenced config name if it's a config:// reference, None otherwise
+        """
+        if isinstance(value, str) and value.startswith("config://"):
+            # Strip the prefix and any whitespace/path separators
+            config_name = value.replace("config://", "", 1)
+            from string import whitespace
+            config_name = config_name.strip(whitespace + r"\\/")
+            return config_name.lower()  # Return lowercase for case-insensitive matching
+        return None
+
+    def _list_unique_links(self, config_contents: Any) -> set:
+        """
+        Find all unique config:// references in a configuration.
+        
+        Args:
+            config_contents: The configuration to search
+            
+        Returns:
+            Set of referenced config names
+        """
+        refs = set()
+        
+        def find_refs(obj):
+            if isinstance(obj, dict):
+                for value in obj.values():
+                    find_refs(value)
+            elif isinstance(obj, list):
+                for item in obj:
+                    find_refs(item)
+            elif isinstance(obj, str):
+                ref = self._check_for_config_link(obj)
+                if ref:
+                    refs.add(ref)
+        
+        find_refs(config_contents)
+        return refs
+
+    def _process_config_links(self, config_contents: Any, already_gathered: dict | None = None) -> Any:
+        """
+        Process config:// references in configuration data.
+        
+        Args:
+            config_contents: The configuration to process
+            already_gathered: Dictionary of already resolved configs to prevent circular references
+            
+        Returns:
+            The configuration with all references resolved
+        """
+        if already_gathered is None:
+            already_gathered = {}
+        
+        # Deep copy to avoid modifying the original
+        result = copy.deepcopy(config_contents)
+        
+        def resolve_refs(obj):
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    obj[key] = resolve_refs(value)
+                return obj
+            elif isinstance(obj, list):
+                return [resolve_refs(item) for item in obj]
+            elif isinstance(obj, str):
+                ref = self._check_for_config_link(obj)
+                if ref:
+                    # Check for circular reference
+                    if ref in already_gathered:
+                        if already_gathered[ref] is None:  # Currently being resolved
+                            raise ValueError(f"Circular reference detected: {ref}")
+                        return already_gathered[ref]
+                    
+                    # Mark as being resolved
+                    already_gathered[ref] = None
+                    
+                    # Get the referenced config
+                    try:
+                        # Try to find the config with case-insensitive lookup
+                        found_config_name = None
+                        for cached_name in self._config_cache:
+                            if cached_name.lower() == ref:
+                                found_config_name = cached_name
+                                break
+                        
+                        if found_config_name:
+                            referenced_config = self.get(found_config_name, raw=True)  # Get raw to avoid infinite recursion
+                        else:
+                            raise KeyError(f"Config reference not found: {ref}")
+                        
+                        # Recursively resolve references in the referenced config
+                        resolved = self._process_config_links(referenced_config, already_gathered)
+                        already_gathered[ref] = resolved
+                        return resolved
+                    except KeyError:
+                        raise KeyError(f"Config reference not found: {ref}")
+                return obj
+            else:
+                return obj
+        
+        return resolve_refs(result)
+
+    def _update_refs(self, config_name: str, contents: Any):
+        """
+        Update reference tracking for a configuration.
+        
+        Args:
+            config_name: Name of the configuration
+            contents: The configuration contents
+        """
+        # Remove old references
+        old_refs = self._ref_map.get(config_name, set())
+        for ref in old_refs:
+            if ref in self._reverse_ref_map:
+                self._reverse_ref_map[ref].discard(config_name)
+                if not self._reverse_ref_map[ref]:
+                    del self._reverse_ref_map[ref]
+        
+        # Add new references
+        new_refs = self._list_unique_links(contents)
+        self._ref_map[config_name] = new_refs
+        for ref in new_refs:
+            if ref not in self._reverse_ref_map:
+                self._reverse_ref_map[ref] = set()
+            self._reverse_ref_map[ref].add(config_name)
+
+    def _gather_affected(self, config_name: str, affected: dict):
+        """
+        Gather all configs affected by a change to config_name.
+        
+        Args:
+            config_name: The config that changed
+            affected: Dictionary to populate with affected configs
+        """
+        # Find all configs that reference this one
+        referencing = self._reverse_ref_map.get(config_name, set())
+        for ref in referencing:
+            if ref not in affected:
+                affected[ref] = "UPDATE"
+                self._gather_affected(ref, affected)  # Recursive check
+
+    def get(self, config_name: str, raw: bool = False) -> dict:
         """
         Get a configuration from the config store.
         Returns a deep copy of locally cached data if available.
         Merges default config with server config, with server values taking precedence.
         Always returns a deep copy to prevent inadvertent modifications to cached data.
+        Resolves config:// references unless raw=True.
         Raises KeyError if the config is not found in the cache.
+        
+        Args:
+            config_name: Name of the configuration to get
+            raw: If True, return without resolving config:// references
         """
         # Check if we have the config in our comprehensive cache
         if config_name in self._config_cache:
-            # Return a deep copy to prevent modification of cached data
-            return copy.deepcopy(self._config_cache[config_name])
+            config = copy.deepcopy(self._config_cache[config_name])
+            # Resolve references unless raw is requested
+            if not raw:
+                config = self._process_config_links(config)
+            return config
 
         # If not in cache, build it from default and server configs
         merged_config = {}
@@ -877,6 +1042,11 @@ class Config:
 
             # Since there's no server config, use only the default
             self._config_cache[config_name] = merged_config
+            
+            # Resolve references unless raw is requested
+            if not raw:
+                merged_config = self._process_config_links(merged_config)
+            
             return copy.deepcopy(merged_config)
 
         # If we get here, there's no default and no cached server config
@@ -922,13 +1092,22 @@ class Config:
                             merged_config = copy.deepcopy(config_data)
 
                         self._config_cache[config_name] = merged_config
-
+                        
+                        # Update reference tracking
+                        self._update_refs(config_name, merged_config)
+                        
+                        # Check for affected configs (those that reference this one)
+                        affected = {}
+                        self._gather_affected(config_name, affected)
+                        
                         # Trigger callbacks if requested
                         # Note: When send_update=False, we don't execute local callbacks here,
                         # but the server will still send an RPC notification that will trigger callbacks
                         if send_update:
-                            # Execute callbacks locally for immediate notification
-                            self._execute_callbacks_safely(config_name, "UPDATE", merged_config)
+                            # The server will send the correct action (NEW/UPDATE) via RPC
+                            # For now, we don't trigger local callbacks here to avoid duplicate/wrong actions
+                            # The RPC notification will handle it with the correct action
+                            pass
 
                         async_result.set(True)
                     else:
@@ -1014,51 +1193,49 @@ class Config:
         Args:
             callback: Function to call when matching changes occur
             actions: List of action types to subscribe to ('NEW', 'UPDATE', 'DELETE')
-            pattern: Pattern to match against config names
+            pattern: Pattern to match against config names (supports fnmatch wildcards)
             config_name: Specific config name to subscribe to (takes precedence over pattern).
         """
         if actions is None:
             actions = ["NEW", "UPDATE", "DELETE"]
 
-        # If a specific config_name is provided, use that directly
-        target_config = config_name if config_name else pattern
+        # If a specific config_name is provided, use that as the pattern
+        target_pattern = config_name if config_name else pattern
+        
+        # Default to "*" (match all) if no pattern specified
+        if not target_pattern:
+            target_pattern = "*"
 
-        if target_config:
-            # Register this callback for the specific config
-            # TODO: pattern should allow a regular expression or wildcard matching, but is not at present
-            if target_config not in self._config_callbacks:
-                self._config_callbacks[target_config] = []
+        # Store the pattern (all subscriptions use pattern matching now)
+        if target_pattern not in self._config_callbacks:
+            self._config_callbacks[target_pattern] = []
 
-                # Note: VOLTTRON uses direct RPC calls (config.update) for config notifications,
-                # not pubsub. External changes trigger RPC calls from the platform to agents.
+        # Add the callback if not already registered
+        callback_obj = ConfigCallback(callback, actions)
+        if callback_obj not in self._config_callbacks[target_pattern]:
+            self._config_callbacks[target_pattern].append(callback_obj)
+            _log.info(
+                f"Registered callback for pattern: {target_pattern} with actions {actions} "
+                f"(total patterns: {len(self._config_callbacks)})"
+            )
 
-            # Add the callback if not already registered
-            if callback not in self._config_callbacks[target_config]:
-                self._config_callbacks[target_config].append(ConfigCallback(callback, actions))
-                _log.info(
-                    f"Registered callback for config: {target_config} (total callbacks: {len(self._config_callbacks)})"
-                )
-
-            # If we already have this config, notify immediately
-            if target_config in self._config_cache:
-                value = self._config_cache[target_config]
+        # Check existing configs against the pattern and notify immediately
+        import fnmatch
+        pattern_lower = target_pattern.lower()
+        for existing_config in self._config_cache:
+            if fnmatch.fnmatchcase(existing_config.lower(), pattern_lower):
                 try:
-                    callback(target_config, value)
-                    _log.debug(f"Called callback with existing config: {target_config}")
+                    value = self.get(existing_config)  # Will resolve references
+                    # Determine action based on whether this is new to the callback
+                    action = "NEW" if existing_config not in self._default_configs else "UPDATE"
+                    if action in actions:
+                        callback(existing_config, action, value)
+                        _log.debug(f"Called callback with existing config: {existing_config}")
                 except Exception as e:
-                    _log.error(f"Error calling callback for config {target_config}: {e}")
+                    _log.error(f"Error calling callback for config {existing_config}: {e}")
 
-            # Return some identifier for this subscription
-            return f"{target_config}:{len(self._config_callbacks[target_config])}"
-
-        # For pattern-based subscriptions, use the old mechanism with the server
-        subscription = {"callback": callback, "actions": actions, "pattern": pattern}
-
-        if self._connected:
-            return self._setup_subscription(subscription)
-
-        self._pending_subscriptions.append(subscription)
-        return len(self._pending_subscriptions)
+        # Return some identifier for this subscription
+        return f"{target_pattern}:{len(self._config_callbacks[target_pattern])}"
 
     @RPC.export(name="config.update")
     def config_update(self, action: str, config_name: str, contents=None, trigger_callback: bool = True, _msg_id=None):
@@ -1113,8 +1290,32 @@ class Config:
                     self._config_cache[config_name] = copy.deepcopy(contents)
             return
 
-        # Process callbacks
-        if config_name in self._config_callbacks:
+        # Process callbacks - check if any patterns match this config
+        import fnmatch
+        has_matching_callbacks = False
+        config_name_lower = config_name.lower()
+        for pattern in self._config_callbacks:
+            if fnmatch.fnmatchcase(config_name_lower, pattern.lower()):
+                has_matching_callbacks = True
+                break
+        
+        if has_matching_callbacks:
+            # Check for case conflicts before processing (VOLTTRON behavior)
+            config_name_lower = config_name.lower()
+            if action != "DELETE":
+                # Check if there's already a config with same lowercase name but different case
+                if config_name_lower in self._name_map:
+                    existing_name = self._name_map[config_name_lower]
+                    if existing_name != config_name and existing_name in self._config_cache:
+                        _log.error(
+                            f"Conflicting config names detected: '{config_name}' conflicts with "
+                            f"existing '{existing_name}'. Dropping new config."
+                        )
+                        return  # Drop the conflicting config per VOLTTRON behavior
+                
+                # Update name map
+                self._name_map[config_name_lower] = config_name
+            
             if action == "DELETE":
                 # Handle deletion - either remove or revert to default
                 if config_name in self._config_cache:
@@ -1127,6 +1328,9 @@ class Config:
                         # Remove entirely
                         del self._config_cache[config_name]
                         contents = None
+                        # Remove from name map
+                        if config_name_lower in self._name_map:
+                            del self._name_map[config_name_lower]
             else:
                 # Update/New - merge with defaults
                 if config_name in self._default_configs:
@@ -1140,9 +1344,45 @@ class Config:
                         self._config_cache[config_name] = copy.deepcopy(contents)
                 else:
                     self._config_cache[config_name] = copy.deepcopy(contents)
+            
+            # Update reference tracking
+            if action != "DELETE":
+                self._update_refs(config_name, contents)
+            else:
+                # Clear references for deleted config
+                if config_name in self._ref_map:
+                    old_refs = self._ref_map[config_name]
+                    for ref in old_refs:
+                        if ref in self._reverse_ref_map:
+                            self._reverse_ref_map[ref].discard(config_name)
+                    del self._ref_map[config_name]
+            
+            # Check for affected configs
+            affected = {config_name: action}
+            self._gather_affected(config_name, affected)
 
-            # Execute callbacks
-            self._execute_callbacks_safely(config_name, action, contents)
+            # Execute callbacks for this config and all affected
+            # VOLTTRON processes "config" first
+            _log.debug(f"Processing affected configs: {affected}")
+            
+            # Process "config" first if it's in the affected set
+            if "config" in affected:
+                config_action = affected["config"]
+                if "config" in self._config_cache:
+                    config_value = self.get("config")  # Will resolve references
+                else:
+                    config_value = contents if config_name == "config" else None
+                self._execute_callbacks_safely("config", config_action, config_value)
+            
+            # Then process all other configs
+            for affected_name, affected_action in affected.items():
+                if affected_name == "config":
+                    continue  # Already processed
+                if affected_name in self._config_cache:
+                    affected_value = self.get(affected_name)  # Will resolve references
+                else:
+                    affected_value = contents if affected_name == config_name else None
+                self._execute_callbacks_safely(affected_name, affected_action, affected_value)
 
     def _handle_config_pubsub_message(self, message_data):
         """Handle config update notifications from pubsub (external changes like vctl config)."""
