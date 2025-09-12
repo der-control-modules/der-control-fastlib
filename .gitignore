@@ -1,3 +1,4 @@
+.volttron_home/
 poetry.lock
 .*.sw?
 *.py[co]
