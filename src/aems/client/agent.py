@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import calendar
 import contextlib
 import copy
 import heapq
@@ -19,9 +20,15 @@ from typing import Any
 
 import gevent
 import httpx
+import pytz
 import websocket
+from colorama import Back, Fore, Style, init
+from dateutil.tz import gettz
 from gevent import monkey
 from gevent.event import AsyncResult
+
+# Initialize colorama
+init(autoreset=True)
 
 from aems.client import dualmethod
 
@@ -43,6 +50,103 @@ monkey.patch_all()
 _log = logging.getLogger(__name__)
 
 SIZE_OUTPUT = 100
+
+
+def get_utc_seconds_from_epoch(timestamp=None):
+    """
+    Convert a given timestamp to seconds from epoch based on UTC time.
+    If given time is naive datetime it is considered to be local to where this
+    code is running.
+
+    This function replicates VOLTTRON's utils.get_utc_seconds_from_epoch()
+    to ensure consistent timezone handling between our implementation and VOLTTRON.
+
+    @param timestamp: datetime object or None
+    @return: seconds from epoch as float
+    """
+    if timestamp is None:
+        timestamp = datetime.now(tz=pytz.UTC)
+
+    if timestamp.tzinfo is None:
+        # Naive datetime - assume local timezone
+        local_tz = gettz()
+        # Use pytz to localize the naive datetime to local timezone
+        if hasattr(local_tz, "localize"):
+            timestamp = local_tz.localize(timestamp)
+        else:
+            # Fallback for non-pytz timezones
+            timestamp = timestamp.replace(tzinfo=local_tz)
+
+    # Convert to UTC seconds from epoch
+    # utctimetuple() converts aware timestamps to UTC first
+    seconds_from_epoch = calendar.timegm(timestamp.utctimetuple())
+    # Add back microsecond precision that timetuple() loses
+    seconds_from_epoch += timestamp.microsecond / 1000000.0
+    return seconds_from_epoch
+
+
+def scheduler_trace(message: str, **kwargs):
+    """
+    Print scheduler trace messages with yellow background and black text.
+    Includes timestamp and optional metadata.
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]  # Include milliseconds
+
+    # Format the base message
+    trace_msg = f"[{timestamp}] SCHEDULER: {message}"
+
+    # Add metadata if provided
+    if kwargs:
+        metadata_parts = []
+        for key, value in kwargs.items():
+            if isinstance(value, datetime):
+                value = value.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            elif isinstance(value, float):
+                value = f"{value:.6f}"
+            metadata_parts.append(f"{key}={value}")
+
+        if metadata_parts:
+            trace_msg += f" | {', '.join(metadata_parts)}"
+
+    # Print with yellow background and black text
+    print(f"{Back.YELLOW}{Fore.BLACK}{trace_msg}{Style.RESET_ALL}")
+
+    # Also log to the regular logger for file logging
+    _log.info(f"SCHEDULER_TRACE: {message} | {kwargs if kwargs else 'no metadata'}")
+
+
+def occupancy_override_trace(message: str, **kwargs):
+    """
+    Print occupancy override trace messages with blue background and black text.
+    Includes timestamp and optional metadata.
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]  # Include milliseconds
+
+    # Format the base message
+    trace_msg = f"[{timestamp}] OCCUPANCY: {message}"
+
+    # Add metadata if provided
+    if kwargs:
+        metadata_parts = []
+        for key, value in kwargs.items():
+            if isinstance(value, datetime):
+                value = value.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            elif isinstance(value, float):
+                value = f"{value:.6f}"
+            elif value is True:
+                value = "OCCUPIED"
+            elif value is False:
+                value = "UNOCCUPIED"
+            metadata_parts.append(f"{key}={value}")
+
+        if metadata_parts:
+            trace_msg += f" | {', '.join(metadata_parts)}"
+
+    # Print with blue background and black text
+    print(f"{Back.BLUE}{Fore.BLACK}{trace_msg}{Style.RESET_ALL}")
+
+    # Also log to the regular logger for file logging
+    _log.info(f"OCCUPANCY_TRACE: {message} | {kwargs if kwargs else 'no metadata'}")
 
 
 def get_smaller_print(data, in_str_full_value: str | None = None):
@@ -522,40 +626,74 @@ class Core:
         # Register any methods decorated with @Core.periodic
         self._register_periodic_methods(agent)
 
-    def schedule(self, interval_or_cron, function, *args, **kwargs):
+    def schedule(self, when, function, *args, **kwargs):
         """
-        Schedule a periodic function.
+        Schedule a function to run.
 
         Args:
             function: The function to call
-            interval_or_cron: Either a number of seconds (interval), a cron expression,
-                             a datetime object, or a datetime string
+            when: Can be:
+                - A number (seconds) for periodic execution
+                - A datetime object for one-time execution at that specific time
+                - A cron expression string for cron-based scheduling
             *args: Positional arguments to pass to the function
             **kwargs: Keyword arguments to pass to the function
 
         Returns
         -------
-            The name of the scheduled event
+            The scheduler object
         """
-        # Convert datetime (object or string) to cron expression if needed
-        if isinstance(interval_or_cron, datetime):
-            # Convert datetime object to cron expression: minute hour day month dayofweek
-            cron_expr = (
-                f"{interval_or_cron.minute} {interval_or_cron.hour} {interval_or_cron.day} {interval_or_cron.month} *"
-            )
-            interval_or_cron = cron_expr
-        elif isinstance(interval_or_cron, str) and not self._is_cron_expression(interval_or_cron):
-            # Try to parse as datetime string
-            try:
-                # Parse common datetime string formats
-                dt = self._parse_datetime_string(interval_or_cron)
-                cron_expr = f"{dt.minute} {dt.hour} {dt.day} {dt.month} *"
-                interval_or_cron = cron_expr
-            except ValueError:
-                # If parsing fails, assume it's already a cron expression
-                pass
+        # Check if this is an occupancy override scheduling
+        function_name = getattr(function, "__name__", str(function))
+        is_occupancy_override = "_do_control_action" in function_name or "control_action" in function_name.lower()
 
-        return self._scheduler.schedule(function, interval_or_cron, args, kwargs)
+        # Trace the schedule call
+        call_time = datetime.now()
+
+        if is_occupancy_override and args:
+            # Special blue/black tracing for occupancy overrides
+            gid = args[0] if args else kwargs.get("gid", "unknown")
+            occupied = args[1] if len(args) > 1 else kwargs.get("occupied")
+            occupancy_override_trace(
+                "OVERRIDE SCHEDULED",
+                gid=gid,
+                occupied=occupied,
+                scheduled_for=when,
+                agent_id=getattr(self._agent, "identity", "unknown"),
+                is_past_event=isinstance(when, datetime) and when < call_time,
+            )
+        else:
+            # Regular yellow/black scheduler tracing
+            scheduler_trace(
+                "SCHEDULE CALLED",
+                agent_id=getattr(self._agent, "identity", "unknown"),
+                function_name=function_name,
+                when=when,
+                when_type=type(when).__name__,
+                call_time=call_time,
+                args_count=len(args) if args else 0,
+                kwargs_keys=list(kwargs.keys()) if kwargs else [],
+            )
+
+        # Datetime objects should be scheduled as one-time events, not converted to cron
+        # This matches VOLTTRON's behavior where datetime schedules a single execution
+        result = self._scheduler.schedule(function, when, args, kwargs)
+
+        # Trace successful scheduling
+        if is_occupancy_override and args:
+            gid = args[0] if args else kwargs.get("gid", "unknown")
+            occupancy_override_trace(
+                "OVERRIDE QUEUED", gid=gid, queue_size=len(self._scheduler._event_queue), next_fire=when
+            )
+        else:
+            scheduler_trace(
+                "SCHEDULE COMPLETED",
+                agent_id=getattr(self._agent, "identity", "unknown"),
+                function_name=function_name,
+                queue_size=len(self._scheduler._event_queue),
+            )
+
+        return result
 
     def _is_cron_expression(self, expr):
         """Check if a string looks like a cron expression."""
@@ -587,7 +725,26 @@ class Core:
 
     def cancel(self, name):
         """Cancel a scheduled event."""
-        return self._scheduler.cancel()
+        # Trace cancel request
+        scheduler_trace(
+            "CANCEL REQUESTED",
+            agent_id=getattr(self._agent, "identity", "unknown"),
+            event_name=name,
+            queue_size=len(self._scheduler._event_queue),
+        )
+
+        result = self._scheduler.cancel()
+
+        # Trace cancel result
+        scheduler_trace(
+            "CANCEL COMPLETED",
+            agent_id=getattr(self._agent, "identity", "unknown"),
+            event_name=name,
+            success=result,
+            queue_size=len(self._scheduler._event_queue),
+        )
+
+        return result
 
     def update_interval(self, name, interval):
         """Update the interval of a scheduled event."""
@@ -691,6 +848,7 @@ class Core:
 
     def start_periodic_tasks(self):
         """Start running periodic tasks."""
+        _log.debug(f"Starting periodic tasks for agent {self._agent.identity}")
         self._scheduler.start()
 
     def identity(self):
@@ -743,6 +901,7 @@ class ConfigCallback:
     def __call__(self, config_name: str, action: str, value: Any):
         """Call the callback with the config name, action, and value."""
         if action in self.actions:
+            # Special logging for occupancy_overrides
             try:
                 self.callback(config_name, action, value)
             except Exception as e:
@@ -797,6 +956,8 @@ class Config:
             action: Action type (UPDATE, DELETE, etc.)
             config_value: The configuration value
         """
+        # Special logging for occupancy_overrides
+
         # Allow callbacks but prevent deep recursion
         if self._callback_depth > 5:  # Prevent deep recursion chains
             _log.warning(
@@ -831,7 +992,9 @@ class Config:
                         _log.info(f"Calling callback for config {config_name} with {action} action")
                         config_callback(config_name, action, config_value)
                     else:
-                        _log.debug(f"Skipping callback for {config_name} - action {action} not in {config_callback.actions}")
+                        _log.debug(
+                            f"Skipping callback for {config_name} - action {action} not in {config_callback.actions}"
+                        )
                 except Exception as e:
                     _log.error(f"Error in config update callback: {e}")
         finally:
@@ -865,17 +1028,19 @@ class Config:
     def _check_for_config_link(self, value: Any) -> str | None:
         """
         Check if a value is a config:// reference and return the referenced config name.
-        
+
         Args:
             value: The value to check
-            
-        Returns:
+
+        Returns
+        -------
             The referenced config name if it's a config:// reference, None otherwise
         """
         if isinstance(value, str) and value.startswith("config://"):
             # Strip the prefix and any whitespace/path separators
             config_name = value.replace("config://", "", 1)
             from string import whitespace
+
             config_name = config_name.strip(whitespace + r"\\/")
             return config_name.lower()  # Return lowercase for case-insensitive matching
         return None
@@ -883,15 +1048,16 @@ class Config:
     def _list_unique_links(self, config_contents: Any) -> set:
         """
         Find all unique config:// references in a configuration.
-        
+
         Args:
             config_contents: The configuration to search
-            
-        Returns:
+
+        Returns
+        -------
             Set of referenced config names
         """
         refs = set()
-        
+
         def find_refs(obj):
             if isinstance(obj, dict):
                 for value in obj.values():
@@ -903,27 +1069,28 @@ class Config:
                 ref = self._check_for_config_link(obj)
                 if ref:
                     refs.add(ref)
-        
+
         find_refs(config_contents)
         return refs
 
     def _process_config_links(self, config_contents: Any, already_gathered: dict | None = None) -> Any:
         """
         Process config:// references in configuration data.
-        
+
         Args:
             config_contents: The configuration to process
             already_gathered: Dictionary of already resolved configs to prevent circular references
-            
-        Returns:
+
+        Returns
+        -------
             The configuration with all references resolved
         """
         if already_gathered is None:
             already_gathered = {}
-        
+
         # Deep copy to avoid modifying the original
         result = copy.deepcopy(config_contents)
-        
+
         def resolve_refs(obj):
             if isinstance(obj, dict):
                 for key, value in obj.items():
@@ -939,10 +1106,10 @@ class Config:
                         if already_gathered[ref] is None:  # Currently being resolved
                             raise ValueError(f"Circular reference detected: {ref}")
                         return already_gathered[ref]
-                    
+
                     # Mark as being resolved
                     already_gathered[ref] = None
-                    
+
                     # Get the referenced config
                     try:
                         # Try to find the config with case-insensitive lookup
@@ -951,12 +1118,14 @@ class Config:
                             if cached_name.lower() == ref:
                                 found_config_name = cached_name
                                 break
-                        
+
                         if found_config_name:
-                            referenced_config = self.get(found_config_name, raw=True)  # Get raw to avoid infinite recursion
+                            referenced_config = self.get(
+                                found_config_name, raw=True
+                            )  # Get raw to avoid infinite recursion
                         else:
                             raise KeyError(f"Config reference not found: {ref}")
-                        
+
                         # Recursively resolve references in the referenced config
                         resolved = self._process_config_links(referenced_config, already_gathered)
                         already_gathered[ref] = resolved
@@ -966,13 +1135,13 @@ class Config:
                 return obj
             else:
                 return obj
-        
+
         return resolve_refs(result)
 
     def _update_refs(self, config_name: str, contents: Any):
         """
         Update reference tracking for a configuration.
-        
+
         Args:
             config_name: Name of the configuration
             contents: The configuration contents
@@ -984,7 +1153,7 @@ class Config:
                 self._reverse_ref_map[ref].discard(config_name)
                 if not self._reverse_ref_map[ref]:
                     del self._reverse_ref_map[ref]
-        
+
         # Add new references
         new_refs = self._list_unique_links(contents)
         self._ref_map[config_name] = new_refs
@@ -996,7 +1165,7 @@ class Config:
     def _gather_affected(self, config_name: str, affected: dict):
         """
         Gather all configs affected by a change to config_name.
-        
+
         Args:
             config_name: The config that changed
             affected: Dictionary to populate with affected configs
@@ -1016,7 +1185,7 @@ class Config:
         Always returns a deep copy to prevent inadvertent modifications to cached data.
         Resolves config:// references unless raw=True.
         Raises KeyError if the config is not found in the cache.
-        
+
         Args:
             config_name: Name of the configuration to get
             raw: If True, return without resolving config:// references
@@ -1042,11 +1211,11 @@ class Config:
 
             # Since there's no server config, use only the default
             self._config_cache[config_name] = merged_config
-            
+
             # Resolve references unless raw is requested
             if not raw:
                 merged_config = self._process_config_links(merged_config)
-            
+
             return copy.deepcopy(merged_config)
 
         # If we get here, there's no default and no cached server config
@@ -1092,14 +1261,14 @@ class Config:
                             merged_config = copy.deepcopy(config_data)
 
                         self._config_cache[config_name] = merged_config
-                        
+
                         # Update reference tracking
                         self._update_refs(config_name, merged_config)
-                        
+
                         # Check for affected configs (those that reference this one)
                         affected = {}
                         self._gather_affected(config_name, affected)
-                        
+
                         # Trigger callbacks if requested
                         # Note: When send_update=False, we don't execute local callbacks here,
                         # but the server will still send an RPC notification that will trigger callbacks
@@ -1201,7 +1370,7 @@ class Config:
 
         # If a specific config_name is provided, use that as the pattern
         target_pattern = config_name if config_name else pattern
-        
+
         # Default to "*" (match all) if no pattern specified
         if not target_pattern:
             target_pattern = "*"
@@ -1221,6 +1390,7 @@ class Config:
 
         # Check existing configs against the pattern and notify immediately
         import fnmatch
+
         pattern_lower = target_pattern.lower()
         for existing_config in self._config_cache:
             if fnmatch.fnmatchcase(existing_config.lower(), pattern_lower):
@@ -1292,13 +1462,14 @@ class Config:
 
         # Process callbacks - check if any patterns match this config
         import fnmatch
+
         has_matching_callbacks = False
         config_name_lower = config_name.lower()
         for pattern in self._config_callbacks:
             if fnmatch.fnmatchcase(config_name_lower, pattern.lower()):
                 has_matching_callbacks = True
                 break
-        
+
         if has_matching_callbacks:
             # Check for case conflicts before processing (VOLTTRON behavior)
             config_name_lower = config_name.lower()
@@ -1312,10 +1483,10 @@ class Config:
                             f"existing '{existing_name}'. Dropping new config."
                         )
                         return  # Drop the conflicting config per VOLTTRON behavior
-                
+
                 # Update name map
                 self._name_map[config_name_lower] = config_name
-            
+
             if action == "DELETE":
                 # Handle deletion - either remove or revert to default
                 if config_name in self._config_cache:
@@ -1344,7 +1515,7 @@ class Config:
                         self._config_cache[config_name] = copy.deepcopy(contents)
                 else:
                     self._config_cache[config_name] = copy.deepcopy(contents)
-            
+
             # Update reference tracking
             if action != "DELETE":
                 self._update_refs(config_name, contents)
@@ -1356,7 +1527,7 @@ class Config:
                         if ref in self._reverse_ref_map:
                             self._reverse_ref_map[ref].discard(config_name)
                     del self._ref_map[config_name]
-            
+
             # Check for affected configs
             affected = {config_name: action}
             self._gather_affected(config_name, affected)
@@ -1364,7 +1535,9 @@ class Config:
             # Execute callbacks for this config and all affected
             # VOLTTRON processes "config" first
             _log.debug(f"Processing affected configs: {affected}")
-            
+
+            # Special logging for occupancy_overrides
+
             # Process "config" first if it's in the affected set
             if "config" in affected:
                 config_action = affected["config"]
@@ -1373,7 +1546,7 @@ class Config:
                 else:
                     config_value = contents if config_name == "config" else None
                 self._execute_callbacks_safely("config", config_action, config_value)
-            
+
             # Then process all other configs
             for affected_name, affected_action in affected.items():
                 if affected_name == "config":
@@ -2192,13 +2365,16 @@ class Peerlist:
 class ScheduledEvent:
     """A scheduled periodic event."""
 
-    def __init__(self, function, interval_or_cron, args=None, kwargs=None, name=None):
+    def __init__(self, function, when, args=None, kwargs=None, name=None):
         """
         Initialize a scheduled event.
 
         Args:
             function: The function to call
-            interval_or_cron: Either a number of seconds (interval) or a cron expression
+            when: Can be:
+                - A number (seconds) for periodic execution
+                - A datetime object for one-time execution
+                - A cron expression string for cron-based scheduling
             args: Positional arguments to pass to the function
             kwargs: Keyword arguments to pass to the function
             name: Name of the event (defaults to function name)
@@ -2208,22 +2384,62 @@ class ScheduledEvent:
         self.kwargs = kwargs or {}
         self.name = name or function.__name__
         self.running = True
-        self.periodic = True
         self.greenlet = None
 
-        # Check if we have a cron expression or an interval
-        self.is_cron = isinstance(interval_or_cron, str)
+        # Determine the type of schedule
+        if isinstance(when, datetime):
+            # One-time execution at a specific datetime (VOLTTRON compatibility)
+            self.is_cron = False
+            self.is_one_time = True
+            self.periodic = False
+            # Use VOLTTRON's UTC conversion for consistent behavior
+            self.next_time = get_utc_seconds_from_epoch(when)
 
-        if self.is_cron:
-            # Cron schedule
-            self.cron_expression = interval_or_cron
-            self.cron_timer = CronTimer(interval_or_cron)
+            # Trace one-time event creation
+            scheduler_trace(
+                "ONE-TIME EVENT CREATED",
+                event_name=self.name,
+                original_datetime=when,
+                utc_timestamp=self.next_time,
+                scheduled_for=datetime.fromtimestamp(self.next_time),
+                has_timezone=when.tzinfo is not None if hasattr(when, "tzinfo") else False,
+            )
+
+            _log.debug(f"Created one-time event '{name}' for {when} (UTC timestamp: {self.next_time})")
+        elif isinstance(when, str):
+            # Cron expression for recurring events
+            self.is_cron = True
+            self.is_one_time = False
+            self.periodic = True
+            self.cron_expression = when
+            self.cron_timer = CronTimer(when)
             next_time = self.cron_timer.get_next()
-            self.next_time = time.mktime(next_time.timetuple())
+            self.next_time = get_utc_seconds_from_epoch(next_time)
+
+            # Trace cron event creation
+            scheduler_trace(
+                "CRON EVENT CREATED",
+                event_name=self.name,
+                cron_expression=when,
+                next_execution=next_time,
+                utc_timestamp=self.next_time,
+            )
         else:
-            # Interval schedule
-            self.interval = interval_or_cron
-            self.next_time = time.time() + interval_or_cron
+            # Numeric interval for periodic execution
+            self.is_cron = False
+            self.is_one_time = False
+            self.periodic = True
+            self.interval = when
+            self.next_time = time.time() + when
+
+            # Trace periodic event creation
+            scheduler_trace(
+                "PERIODIC EVENT CREATED",
+                event_name=self.name,
+                interval_seconds=when,
+                next_execution=datetime.fromtimestamp(self.next_time),
+                utc_timestamp=self.next_time,
+            )
 
     def __lt__(self, other):
         """Compare based on next scheduled time."""
@@ -2231,18 +2447,22 @@ class ScheduledEvent:
 
     def compute_next_time(self):
         """Compute the next execution time."""
-        if self.is_cron:
+        if hasattr(self, "is_one_time") and self.is_one_time:
+            # One-time events don't reschedule
+            self.running = False
+        elif self.is_cron:
             next_time = self.cron_timer.get_next(datetime.fromtimestamp(time.time()))
-            self.next_time = time.mktime(next_time.timetuple())
+            self.next_time = get_utc_seconds_from_epoch(next_time)
         else:
             self.next_time = time.time() + self.interval
 
     def __str__(self):
-        if self.is_cron:
-            next_time_str = datetime.fromtimestamp(self.next_time)
+        next_time_str = datetime.fromtimestamp(self.next_time)
+        if hasattr(self, "is_one_time") and self.is_one_time:
+            return f"ScheduledEvent({self.name}, one_time={next_time_str})"
+        elif self.is_cron:
             return f"ScheduledEvent({self.name}, cron='{self.cron_expression}', next_at={next_time_str})"
         else:
-            next_time_str = datetime.fromtimestamp(self.next_time)
             return f"ScheduledEvent({self.name}, interval={self.interval}, next_at={next_time_str})"
 
 
@@ -2256,19 +2476,55 @@ class Scheduler:
         self._events = {}  # Map of event names to event objects
         self._scheduler_greenlet = None
         self._stop_event = gevent.event.Event()
+        self._schedule_event = gevent.event.Event()  # Event to wake up scheduler for new events
 
     def start(self):
         """Start the scheduler."""
         if self._scheduler_greenlet is None or self._scheduler_greenlet.dead:
+            # Trace scheduler start
+            scheduler_trace(
+                "SCHEDULER STARTING",
+                agent_id=self._agent.identity,
+                queue_size=len(self._event_queue),
+                events_count=len(self._events),
+            )
+
+            _log.info(f"Starting scheduler for agent {self._agent.identity}")
             self._stop_event.clear()
             self._scheduler_greenlet = gevent.spawn(self._scheduler_loop)
+
+            # Trace scheduler started
+            scheduler_trace(
+                "SCHEDULER STARTED", agent_id=self._agent.identity, greenlet_id=id(self._scheduler_greenlet)
+            )
+        else:
+            _log.debug(f"Scheduler already running for agent {self._agent.identity}")
+
+            # Trace scheduler already running
+            scheduler_trace(
+                "SCHEDULER ALREADY RUNNING",
+                agent_id=self._agent.identity,
+                greenlet_id=id(self._scheduler_greenlet),
+                greenlet_dead=self._scheduler_greenlet.dead,
+            )
 
     def stop(self):
         """Stop the scheduler."""
         if self._scheduler_greenlet:
+            # Trace scheduler stop
+            scheduler_trace(
+                "SCHEDULER STOPPING",
+                agent_id=self._agent.identity,
+                greenlet_id=id(self._scheduler_greenlet),
+                queue_size=len(self._event_queue),
+            )
+
             self._stop_event.set()
             self._scheduler_greenlet.join(timeout=2)
             self._scheduler_greenlet = None
+
+            # Trace scheduler stopped
+            scheduler_trace("SCHEDULER STOPPED", agent_id=self._agent.identity, remaining_events=len(self._event_queue))
 
     @staticmethod
     def cron(cronstring: str) -> str:
@@ -2291,13 +2547,16 @@ class Scheduler:
 
         return cronstring
 
-    def schedule(self, function, interval_or_cron, args=None, kwargs=None, name=None):
+    def schedule(self, function, when, args=None, kwargs=None, name=None):
         """
-        Schedule a periodic function.
+        Schedule a function.
 
         Args:
             function: The function to call
-            interval_or_cron: Either a number of seconds (interval) or a cron expression
+            when: Can be:
+                - A number (seconds) for periodic execution
+                - A datetime object for one-time execution
+                - A cron expression string for cron-based scheduling
             args: Positional arguments to pass to the function
             kwargs: Keyword arguments to pass to the function
             name: Name of the event (defaults to function name)
@@ -2306,20 +2565,102 @@ class Scheduler:
         -------
             The name of the scheduled event
         """
-        if isinstance(interval_or_cron, numbers.Number):
-            if interval_or_cron <= 0:
+        if isinstance(when, numbers.Number):
+            if when <= 0:
                 raise ValueError("Interval must be a positive number")
-        elif not isinstance(interval_or_cron, str):
-            raise ValueError("Schedule must be either a positive number (interval) or a cron expression")
+        elif not isinstance(when, str | datetime):
+            raise ValueError(
+                "Schedule must be either a positive number (interval), a datetime object, or a cron expression"
+            )
 
         name = name or function.__name__
 
+        # Ensure scheduler is running before adding events
+        if self._scheduler_greenlet is None or self._scheduler_greenlet.dead:
+            _log.warning(f"Scheduler not running for agent {self._agent.identity}, starting it now")
+            self.start()
+
+        # Trace event creation start
+        scheduler_trace(
+            "EVENT CREATION START",
+            event_name=name,
+            when=when,
+            when_type=type(when).__name__,
+            args_count=len(args) if args else 0,
+            kwargs_count=len(kwargs) if kwargs else 0,
+        )
+
         # Create a new event
-        event = ScheduledEvent(function, interval_or_cron, args, kwargs, name)
+        event = ScheduledEvent(function, when, args, kwargs, name)
 
         # Add to the event queue and map
         self._events[name] = event
         heapq.heappush(self._event_queue, event)
+
+        # Check if this is a past event that should fire immediately
+        now = time.time()
+        is_past_event = event.next_time <= now
+
+        # After adding, check if this event is now the earliest in the queue
+        # This is critical because heappush maintains heap order
+        is_earliest = self._event_queue[0] == event if self._event_queue else False
+
+        if is_past_event:
+            scheduler_trace(
+                "PAST EVENT SCHEDULED - WILL FIRE IMMEDIATELY",
+                event_name=name,
+                scheduled_for=datetime.fromtimestamp(event.next_time),
+                current_time=datetime.fromtimestamp(now),
+                time_diff_seconds=now - event.next_time,
+                is_earliest_in_queue=is_earliest,
+                queue_position=self._event_queue.index(event) if event in self._event_queue else -1,
+            )
+
+        # Wake up the scheduler if this is a past event OR if it's now the earliest event
+        # This ensures past events are processed even if they're not at position 0
+        should_wake = is_past_event or is_earliest
+
+        if should_wake:
+            # Check if scheduler is actually running
+            scheduler_is_running = self._scheduler_greenlet is not None and not self._scheduler_greenlet.dead
+
+            scheduler_trace(
+                "WAKING SCHEDULER FOR NEW EVENT",
+                event_name=name,
+                is_past=is_past_event,
+                is_earliest=is_earliest,
+                scheduler_running=scheduler_is_running,
+                queue_size=len(self._event_queue),
+            )
+
+            # If scheduler isn't running and we have a past event, start it now
+            if not scheduler_is_running and is_past_event:
+                _log.warning(f"Past event '{name}' added but scheduler not running, starting scheduler now")
+                self.start()
+
+            # Signal the scheduler to wake up
+            self._schedule_event.set()
+        else:
+            scheduler_trace(
+                "NOT WAKING SCHEDULER - EVENT NOT URGENT",
+                event_name=name,
+                next_time=datetime.fromtimestamp(event.next_time),
+                queue_position=self._event_queue.index(event) if event in self._event_queue else -1,
+            )
+
+        # Trace event added to queue
+        scheduler_trace(
+            "EVENT ADDED TO QUEUE",
+            event_name=name,
+            next_time=event.next_time,
+            scheduled_for=datetime.fromtimestamp(event.next_time) if hasattr(event, "next_time") else None,
+            queue_size=len(self._event_queue),
+            is_one_time=getattr(event, "is_one_time", False),
+            is_cron=getattr(event, "is_cron", False),
+            periodic=getattr(event, "periodic", False),
+        )
+
+        _log.info(f"Scheduled event '{name}' for {event}, queue size: {len(self._event_queue)}")
 
         return self
 
@@ -2408,10 +2749,35 @@ class Scheduler:
 
     def _scheduler_loop(self):
         """Main scheduler loop."""
+        _log.info(f"Scheduler loop started for agent {self._agent.identity}, {len(self._event_queue)} events in queue")
+        iteration = 0
         while not self._stop_event.is_set():
+            iteration += 1
             now = time.time()
 
-            # Process events that are due
+            # Trace loop iteration
+            if iteration % 100 == 1:  # Log every 100th iteration to avoid spam
+                scheduler_trace(
+                    "SCHEDULER LOOP ITERATION",
+                    iteration=iteration,
+                    current_time=datetime.fromtimestamp(now),
+                    queue_size=len(self._event_queue),
+                    next_event_time=datetime.fromtimestamp(self._event_queue[0].next_time)
+                    if self._event_queue
+                    else None,
+                )
+
+            # Process ALL events that are due (including past events)
+            events_processed = 0
+            # if self._event_queue:
+            #     scheduler_trace(
+            #         "CHECKING FOR DUE EVENTS",
+            #         iteration=iteration,
+            #         queue_size=len(self._event_queue),
+            #         next_event_time=datetime.fromtimestamp(self._event_queue[0].next_time),
+            #         current_time=datetime.fromtimestamp(now),
+            #         is_due=self._event_queue[0].next_time <= now
+            #     )
             while self._event_queue and self._event_queue[0].next_time <= now:
                 event = heapq.heappop(self._event_queue)
 
@@ -2421,23 +2787,145 @@ class Scheduler:
 
                 # Execute the function in a new greenlet
                 try:
-                    gevent.spawn(event.function, *event.args, **event.kwargs)
+                    execution_time = datetime.fromtimestamp(now)
+
+                    # Check if this is an occupancy override event
+                    is_occupancy_override = "_do_control_action" in event.name or "control_action" in event.name.lower()
+
+                    if is_occupancy_override and event.args:
+                        # Blue/black tracing for occupancy override execution
+                        gid = event.args[0] if event.args else "unknown"
+                        occupied = event.args[1] if len(event.args) > 1 else None
+                        occupancy_override_trace(
+                            "OVERRIDE FIRING",
+                            gid=gid,
+                            occupied=occupied,
+                            execution_time=execution_time,
+                            scheduled_time=datetime.fromtimestamp(event.next_time),
+                            delay_ms=int((now - event.next_time) * 1000),
+                        )
+                    else:
+                        # Regular scheduler tracing
+                        scheduler_trace(
+                            "EVENT EXECUTION START",
+                            event_name=event.name,
+                            execution_time=execution_time,
+                            scheduled_time=datetime.fromtimestamp(event.next_time),
+                            delay_ms=int((now - event.next_time) * 1000),
+                            is_one_time=getattr(event, "is_one_time", False),
+                            is_cron=getattr(event, "is_cron", False),
+                            args_count=len(event.args),
+                            kwargs_count=len(event.kwargs),
+                        )
+
+                    _log.debug(f"Executing scheduled event {event.name} at {execution_time}")
+                    greenlet = gevent.spawn(event.function, *event.args, **event.kwargs)
+
+                    # Trace greenlet spawn success
+                    if is_occupancy_override and event.args:
+                        gid = event.args[0] if event.args else "unknown"
+                        occupancy_override_trace("OVERRIDE EXECUTED", gid=gid, greenlet_id=id(greenlet))
+                    else:
+                        scheduler_trace("EVENT GREENLET SPAWNED", event_name=event.name, greenlet_id=id(greenlet))
+
                 except Exception as e:
                     _log.error(f"Error spawning periodic task {event.name}: {e}")
 
+                    # Trace execution error
+                    scheduler_trace(
+                        "EVENT EXECUTION ERROR", event_name=event.name, error=str(e), error_type=type(e).__name__
+                    )
+
                 # Compute the next execution time
+                old_next_time = event.next_time
                 event.compute_next_time()
 
-                # Reschedule the event
-                heapq.heappush(self._event_queue, event)
+                # Reschedule the event only if it's still running (not a one-time event)
+                if event.running:
+                    heapq.heappush(self._event_queue, event)
 
-            # Sleep until the next event or a short timeout
+                    # Trace event rescheduled
+                    scheduler_trace(
+                        "EVENT RESCHEDULED",
+                        event_name=event.name,
+                        old_next_time=datetime.fromtimestamp(old_next_time),
+                        new_next_time=datetime.fromtimestamp(event.next_time),
+                        queue_size=len(self._event_queue),
+                    )
+                else:
+                    # Check if this is an occupancy override for completion tracing
+                    is_occupancy_override = "_do_control_action" in event.name or "control_action" in event.name.lower()
+
+                    if is_occupancy_override and event.args:
+                        gid = event.args[0] if event.args else "unknown"
+                        occupied = event.args[1] if len(event.args) > 1 else None
+                        occupancy_override_trace(
+                            "OVERRIDE COMPLETED", gid=gid, occupied=occupied, queue_size=len(self._event_queue)
+                        )
+                    else:
+                        # Trace one-time event completion
+                        scheduler_trace(
+                            "ONE-TIME EVENT COMPLETED", event_name=event.name, queue_size=len(self._event_queue)
+                        )
+
+                events_processed += 1
+                # Update now after processing each event to avoid drift
+                now = time.time()
+
+            if events_processed > 0:
+                scheduler_trace("EVENTS PROCESSED IN ITERATION", count=events_processed, iteration=iteration)
+
+            # Calculate sleep time until next event
             sleep_time = 0.1  # Default sleep time
             if self._event_queue:
-                next_time = self._event_queue[0].next_time
-                sleep_time = max(0, min(next_time - time.time(), 0.5))
+                next_event = self._event_queue[0]
+                next_time = next_event.next_time
+                # Recalculate now for accurate sleep time
+                now = time.time()
+                time_until_next = next_time - now
 
-            gevent.sleep(sleep_time)
+                if time_until_next <= 0:
+                    # Event is already due, don't sleep
+                    sleep_time = 0
+                else:
+                    # Sleep until the next event, but cap at 0.5 seconds
+                    sleep_time = min(time_until_next, 0.5)
+
+                # Log upcoming events periodically
+                if iteration % 100 == 1:
+                    scheduler_trace(
+                        "NEXT EVENT SCHEDULED",
+                        event_name=next_event.name,
+                        scheduled_for=datetime.fromtimestamp(next_time),
+                        seconds_until=time_until_next,
+                        will_sleep=sleep_time,
+                    )
+
+            # Wait for either the next event time or a signal that a new event was added
+            if sleep_time > 0:
+                # scheduler_trace(
+                #     "SCHEDULER SLEEPING",
+                #     sleep_time=sleep_time,
+                #     iteration=iteration,
+                #     queue_size=len(self._event_queue)
+                # )
+                woken_by_event = self._schedule_event.wait(sleep_time)
+                self._schedule_event.clear()
+
+                # If we were woken by a new event being added, immediately check for due events
+                if woken_by_event:
+                    # Trace that we were woken by a new event
+                    scheduler_trace(
+                        "SCHEDULER WOKEN BY NEW EVENT", iteration=iteration, queue_size=len(self._event_queue)
+                    )
+                    # Continue immediately to process any past events
+                    continue
+                # else:
+                #     scheduler_trace(
+                #         "SCHEDULER WOKE FROM TIMEOUT",
+                #         iteration=iteration,
+                #         queue_size=len(self._event_queue)
+                #     )
 
 
 class Signal:

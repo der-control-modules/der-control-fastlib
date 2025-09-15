@@ -122,6 +122,7 @@ class ConfigStore:
                 # Note: send_update=True by default for external changes, but can be overridden
                 full_name = f"{agent_id}/{config_name}"
                 action = "UPDATE" if config_exists else "NEW"
+
                 self.notify_change(full_name, action, config_data, send_update=send_update)
 
             return result

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Development Helper Script for ANY python Library
+Development Helper Script for ANY python Library.
 
 This script provides a set of command-line utilities for managing the AEMS library
 development lifecycle. It aims to provide Poetry-like functionality while using pip
@@ -50,10 +50,12 @@ def trigger_update(server_url=None, token=None):
         server_url (str): The URL of the webhook endpoint to call
         token (str, optional): Authentication token to include in the request
 
-    Returns:
+    Returns
+    -------
         bool: True if the update was successfully triggered, False otherwise
 
-    Examples:
+    Examples
+    --------
         >>> trigger_update("https://test-server.com/webhook")
         >>> trigger_update("https://test-server.com/webhook", "secret-token")
     """
@@ -125,7 +127,8 @@ def get_current_version():
     Retrieves the most recent version tag from git and returns it in a format
     suitable for semantic versioning. If no tags are found, defaults to '0.0.0'.
 
-    Returns:
+    Returns
+    -------
         str: The current version string without the 'v' prefix
     """
     # Get all tags sorted by version
@@ -150,13 +153,16 @@ def parse_version(version_str):
     Args:
         version_str (str): Version string to parse (e.g., '1.2.3', '1.2.3-alpha.1')
 
-    Returns:
+    Returns
+    -------
         tuple: (major, minor, patch, prerelease_type, prerelease_num)
 
-    Raises:
+    Raises
+    ------
         ValueError: If the version string format is invalid
 
-    Examples:
+    Examples
+    --------
         >>> parse_version('1.2.3')
         (1, 2, 3, None, None)
         >>> parse_version('1.2.3-alpha.1')
@@ -189,10 +195,12 @@ def increment_version(version_str, bump_type):
                         'major', 'minor', 'patch', 'alpha', 'beta',
                         'rc', or 'release'
 
-    Returns:
+    Returns
+    -------
         str: New version string after applying the bump
 
-    Raises:
+    Raises
+    ------
         ValueError: If the bump type is invalid or if trying to promote
                     a release version with 'release' bump type
 
@@ -266,10 +274,12 @@ def version(version_arg=None):
             - "release": Promote pre-release to final release
             - Any other string: Treated as an explicit version number
 
-    Returns:
+    Returns
+    -------
         bool: True if the operation was successful, False otherwise
 
-    Examples:
+    Examples
+    --------
         >>> version()               # Display current version
         >>> version("minor")        # Bump minor version (1.0.0 -> 1.1.0)
         >>> version("beta")         # Create beta (1.0.0 -> 1.0.1-beta.1)
@@ -336,7 +346,8 @@ def get_dev_dependencies():
     If tomllib/tomli is not available or the file cannot be read, falls
     back to a hardcoded list of common development dependencies.
 
-    Returns:
+    Returns
+    -------
         list: A list of development dependency package names (without version specifiers)
     """
     if tomllib is None:
@@ -374,10 +385,12 @@ def run_command(cmd, description=None):
         cmd (str): The shell command to execute
         description (str, optional): A description of what the command does
 
-    Returns:
+    Returns
+    -------
         bool: True if the command executed successfully (returncode 0), False otherwise
 
-    Notes:
+    Notes
+    -----
         - Stdout is printed if available
         - Error messages with stderr are printed if the command fails
     """
@@ -385,7 +398,7 @@ def run_command(cmd, description=None):
         print(f"🔄 {description}...")
 
     # Run the command and capture output
-    process = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    process = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
     if process.returncode != 0:
         print("❌ Error:")
@@ -410,10 +423,12 @@ def setup_upstream(upstream_url=None):
     Args:
         upstream_url (str): The URL of the original repository to set as upstream
 
-    Returns:
+    Returns
+    -------
         bool: True if the upstream was configured successfully, False otherwise
 
-    Examples:
+    Examples
+    --------
         >>> setup_upstream("https://github.com/VOLTTRON/aems-lib-fastapi.git")
     """
     if not upstream_url:
@@ -448,10 +463,12 @@ def sync_fork():
     changes from upstream and merging them into your local branches.
     Automatically handles syncing both main and develop branches if they exist.
 
-    Returns:
+    Returns
+    -------
         bool: True if the sync was successful, False otherwise
 
-    Notes:
+    Notes
+    -----
         - Requires upstream remote to be configured first
         - Syncs main branch and develop branch (if it exists)
         - Returns to the original branch after syncing
@@ -522,10 +539,12 @@ def create_pr_branch(branch_name=None):
     Args:
         branch_name (str): Name for the new branch (e.g., 'feature/new-feature')
 
-    Returns:
+    Returns
+    -------
         bool: True if the branch was created successfully, False otherwise
 
-    Examples:
+    Examples
+    --------
         >>> create_pr_branch("feature/add-new-api")
         >>> create_pr_branch("fix/issue-123")
     """
@@ -569,10 +588,12 @@ def prepare_pr():
     and pushes the branch to the remote repository if needed.
     This helps ensure the branch is ready for a pull request.
 
-    Returns:
+    Returns
+    -------
         bool: True if the branch is ready for PR, False otherwise
 
-    Notes:
+    Notes
+    -----
         - Won't allow preparing main or develop branches
         - Runs quality checks (format, lint, test)
         - Verifies there are commits on the branch
@@ -646,7 +667,8 @@ def install():
     Installs the package using pip's editable mode (-e) with development
     dependencies included. This is equivalent to `pip install -e .[dev]`.
 
-    Returns:
+    Returns
+    -------
         bool: True if installation was successful, False otherwise
     """
     return run_command("pip install -e .[dev]", "Installing development dependencies")
@@ -660,7 +682,8 @@ def install_prod():
     dependencies. This is useful for testing a clean production environment
     or preparing for deployment.
 
-    Returns:
+    Returns
+    -------
         bool: True if installation was successful, False otherwise
     """
     print("🔄 Installing production dependencies and cleaning dev tools...")
@@ -682,7 +705,8 @@ def update():
     Iterates through the development dependencies and updates each one
     to the latest version compatible with the specified constraints.
 
-    Returns:
+    Returns
+    -------
         bool: True if all updates were successful, False otherwise
     """
     print("🔄 Updating dependencies...")
@@ -705,7 +729,8 @@ def format_code():
     Runs the Black code formatter on the source and test directories to
     ensure consistent code style across the project.
 
-    Returns:
+    Returns
+    -------
         bool: True if formatting was successful, False otherwise
     """
     return run_command("black src/ tests/", "Formatting code")
@@ -718,7 +743,8 @@ def lint():
     Executes both Pylint and flake8 on the source code to identify
     potential issues, bugs, and stylistic problems.
 
-    Returns:
+    Returns
+    -------
         bool: True if all linting checks passed, False otherwise
     """
     print("🔍 Running linting checks...")
@@ -746,7 +772,8 @@ def test():
     Executes the project's test suite using pytest to verify that
     the code functions correctly.
 
-    Returns:
+    Returns
+    -------
         bool: True if all tests passed, False otherwise
     """
     return run_command("pytest", "Running tests")
@@ -759,7 +786,8 @@ def coverage():
     Executes the project's test suite using pytest with the coverage plugin
     to measure code coverage and generate a detailed report with visual progress.
 
-    Returns:
+    Returns
+    -------
         bool: True if all tests passed, False otherwise
     """
     print("🔄 Running tests with coverage and visual progress...")
@@ -786,10 +814,12 @@ def security():
     Performs security scanning on both the code and dependencies to
     identify potential security vulnerabilities.
 
-    Returns:
+    Returns
+    -------
         bool: True if all security checks passed, False otherwise
 
-    Notes:
+    Notes
+    -----
         - Uses pip-audit to scan dependencies for vulnerabilities
         - Uses bandit to scan the codebase for security issues
         - Generates a JSON report in bandit-report.json
@@ -818,7 +848,8 @@ def build():
     running the build process. The resulting wheel is placed in the
     dist/ directory.
 
-    Returns:
+    Returns
+    -------
         bool: True if the build was successful, False otherwise
     """
     print("🔨 Building wheel package...")
@@ -844,7 +875,8 @@ def check():
     linting, and tests in sequence. This is useful before
     committing code or preparing a pull request.
 
-    Returns:
+    Returns
+    -------
         bool: True if all checks passed, False otherwise
     """
     print("🧪 Running full check suite...")

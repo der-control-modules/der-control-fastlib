@@ -50,7 +50,7 @@ def test_config_update_notification_sent(message_bus_manager_fixture):
         # Use send_update=True to ensure notifications are sent
         result = agent.config.set("notification_test_config", test_config, send_update=True)
         result.get(timeout=5.0)  # Wait for the set to complete
-        
+
         print("4. Updating configuration (should trigger UPDATE notification)...")
         # Update the config - this should trigger the UPDATE notification
         test_config_updated = {"test": "updated_data", "timestamp": gevent.time.time()}
@@ -176,8 +176,12 @@ def test_config_update_via_rest_api_isolation(message_bus_manager_fixture):
         gevent.sleep(0.5)
 
         print("2. Both agents subscribing to config with same name...")
-        agent1.config.subscribe(callback=agent1.config_update_callback, pattern="api_test_config", actions=["NEW", "UPDATE"])
-        agent2.config.subscribe(callback=agent2.config_update_callback, pattern="api_test_config", actions=["NEW", "UPDATE"])
+        agent1.config.subscribe(
+            callback=agent1.config_update_callback, pattern="api_test_config", actions=["NEW", "UPDATE"]
+        )
+        agent2.config.subscribe(
+            callback=agent2.config_update_callback, pattern="api_test_config", actions=["NEW", "UPDATE"]
+        )
         gevent.sleep(0.5)
 
         print("3. Updating agent1's config via REST API...")
