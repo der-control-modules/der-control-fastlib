@@ -1,0 +1,1537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AEMS Config Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 300px;
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .sidebar h2 {
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            border-bottom: 2px solid #34495e;
+            padding-bottom: 10px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .section h3 {
+            font-size: 0.9em;
+            text-transform: uppercase;
+            color: #95a5a6;
+            margin-bottom: 10px;
+        }
+
+        select, input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        select {
+            background: white;
+            cursor: pointer;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 10px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+
+        .btn-secondary {
+            background: #95a5a6;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #7f8c8d;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #229954;
+        }
+
+        /* Main content area */
+        .main-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .header h1 {
+            font-size: 2em;
+            color: #2c3e50;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #95a5a6;
+        }
+
+        .status-indicator.connected {
+            background: #27ae60;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .content-area {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            min-height: 500px;
+        }
+
+        .editor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .editor-header h2 {
+            color: #2c3e50;
+            font-size: 1.5em;
+        }
+
+        .editor-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .editor-actions button {
+            width: auto;
+            padding: 8px 20px;
+            margin: 0;
+        }
+
+        /* File upload area */
+        .upload-area {
+            border: 2px dashed #3498db;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            background: #f8f9fa;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 20px;
+        }
+
+        .upload-area:hover {
+            background: #e8f4f8;
+            border-color: #2980b9;
+        }
+
+        .upload-area.dragover {
+            background: #d6eaf8;
+            border-color: #2980b9;
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            color: #3498db;
+            margin-bottom: 10px;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        /* Editor */
+        .editor {
+            width: 100%;
+            min-height: 400px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            resize: vertical;
+        }
+
+        .editor:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .editor.view-mode {
+            background: #f8f9fa;
+            cursor: not-allowed;
+        }
+
+        /* CSV Table */
+        .csv-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .csv-table th,
+        .csv-table td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+
+        .csv-table th {
+            background: #34495e;
+            color: white;
+            font-weight: bold;
+        }
+
+        .csv-table tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        .csv-table input {
+            width: 100%;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+
+        /* Alert messages */
+        .alert {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .alert.show {
+            display: block;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #95a5a6;
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        .empty-state h3 {
+            font-size: 1.5em;
+            margin-bottom: 10px;
+        }
+
+        .empty-state p {
+            font-size: 1.1em;
+        }
+
+        /* New config form */
+        .new-config-form {
+            background: #f8f9fa;
+            border: 2px solid #3498db;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .new-config-form.show {
+            display: block;
+        }
+
+        .new-config-form h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #2c3e50;
+            font-size: 14px;
+        }
+
+        .form-group input,
+        .form-group select {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .form-group select {
+            cursor: pointer;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .form-actions button {
+            width: auto;
+            padding: 10px 20px;
+            margin: 0;
+        }
+
+        /* Mode toggle */
+        .mode-toggle {
+            display: flex;
+            gap: 5px;
+            background: #ecf0f1;
+            padding: 5px;
+            border-radius: 4px;
+        }
+
+        .mode-toggle button {
+            flex: 1;
+            padding: 8px 16px;
+            margin: 0;
+            background: transparent;
+            color: #7f8c8d;
+        }
+
+        .mode-toggle button.active {
+            background: white;
+            color: #2c3e50;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .format-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        .format-json {
+            background: #3498db;
+            color: white;
+        }
+
+        .format-csv {
+            background: #27ae60;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <h2>AEMS Config Manager</h2>
+
+            <!-- Quick Actions -->
+            <div class="section">
+                <button class="btn-success" id="newBtn">➕ New Config</button>
+            </div>
+
+            <!-- Browse Configurations -->
+            <div class="section">
+                <h3>Browse Existing</h3>
+                <label style="font-size: 12px; color: #95a5a6; margin-bottom: 5px;">Identity</label>
+                <select id="agentSelect">
+                    <option value="">Select identity...</option>
+                </select>
+
+                <label style="font-size: 12px; color: #95a5a6; margin-bottom: 5px; margin-top: 10px; display: block;">Configuration</label>
+                <select id="configSelect">
+                    <option value="">Select configuration...</option>
+                </select>
+                <p style="font-size: 11px; color: #7f8c8d; margin-top: 5px; font-style: italic;">Auto-loads when selected</p>
+            </div>
+
+            <!-- Config Actions -->
+            <div class="section">
+                <h3>Actions</h3>
+                <button class="btn-secondary" id="copyBtn">📋 Copy</button>
+                <button class="btn-secondary" id="renameBtn">✏️ Rename</button>
+                <button class="btn-danger" id="deleteBtn">🗑️ Delete</button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="header">
+                <h1>Configuration Editor</h1>
+                <div class="status">
+                    <div class="status-indicator" id="statusIndicator"></div>
+                    <span id="statusText">Disconnected</span>
+                </div>
+            </div>
+
+            <!-- Alerts -->
+            <div class="alert alert-success" id="alertSuccess"></div>
+            <div class="alert alert-error" id="alertError"></div>
+            <div class="alert alert-info" id="alertInfo"></div>
+
+            <!-- Content Area -->
+            <div class="content-area">
+                <!-- Editor Header -->
+                <div class="editor-header">
+                    <div>
+                        <h2 id="editorTitle">No Configuration Loaded</h2>
+                    </div>
+                    <div class="editor-actions">
+                        <div class="mode-toggle">
+                            <button class="active" id="viewModeBtn">View</button>
+                            <button id="editModeBtn">Edit</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- New Config Form -->
+                <div class="new-config-form" id="newConfigForm">
+                    <h3>📝 Create New Configuration</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="newConfigAgent">Target Identity *</label>
+                            <select id="newConfigAgentSelect">
+                                <option value="">Select existing...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="newConfigAgentInput">Or Enter New Identity</label>
+                            <input type="text" id="newConfigAgentInput" placeholder="e.g., platform.driver">
+                        </div>
+                        <div class="form-group">
+                            <label for="newConfigFormat">Format *</label>
+                            <select id="newConfigFormat">
+                                <option value="json">JSON</option>
+                                <option value="csv">CSV</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="newConfigName">Configuration Name *</label>
+                            <input type="text" id="newConfigName" placeholder="e.g., config, schedule, devices.csv">
+                        </div>
+                        <div class="form-group" style="grid-column: span 2; align-items: flex-end;">
+                            <div class="form-actions">
+                                <button class="btn-secondary" id="cancelNewConfigBtn">Cancel</button>
+                                <button class="btn-success" id="confirmNewConfigBtn">Create & Edit</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Upload Area -->
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📁</div>
+                    <h3>Drop a JSON or CSV file here</h3>
+                    <p>or click to browse</p>
+                    <input type="file" id="fileInput">
+                </div>
+
+                <!-- Editor Area -->
+                <div id="editorContainer" style="display: none;">
+                    <!-- Editor Metadata Form (for new configs) -->
+                    <div class="new-config-form" id="editorMetadataForm" style="margin-bottom: 20px; display: none;">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="editorIdentitySelect">Target Identity *</label>
+                                <select id="editorIdentitySelect">
+                                    <option value="">Select existing...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="editorIdentityInput">Or Enter New Identity</label>
+                                <input type="text" id="editorIdentityInput" placeholder="e.g., platform.driver">
+                            </div>
+                            <div class="form-group">
+                                <label for="editorConfigName">Configuration Name *</label>
+                                <input type="text" id="editorConfigName" placeholder="e.g., config, schedule">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="editorFormat">Format *</label>
+                                <select id="editorFormat">
+                                    <option value="json">JSON</option>
+                                    <option value="csv">CSV</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="grid-column: span 2; align-items: flex-end;">
+                                <div class="form-actions">
+                                    <button class="btn-success" id="saveConfigBtn">💾 Save Configuration</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Compact Editor Actions (for loaded configs) -->
+                    <div id="compactEditorActions" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <div class="mode-toggle">
+                                <button class="active" id="viewModeBtn2">View</button>
+                                <button id="editModeBtn2">Edit</button>
+                            </div>
+                        </div>
+                        <div>
+                            <button class="btn-success" id="saveConfigBtn2" style="width: auto; padding: 10px 20px; margin: 0;">💾 Save</button>
+                        </div>
+                    </div>
+
+                    <textarea class="editor view-mode" id="editor" placeholder="Load or upload a configuration to begin..."></textarea>
+                    <div id="csvTableContainer"></div>
+                </div>
+
+                <!-- Empty State -->
+                <div class="empty-state" id="emptyState">
+                    <div class="empty-state-icon">📝</div>
+                    <h3>Welcome to AEMS Config Manager</h3>
+                    <p>Select an identity and configuration from the sidebar to get started</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Application state
+        const state = {
+            mode: 'view',
+            currentAgent: null,
+            currentConfig: null,
+            wsConnection: null,
+            configData: null,
+            allConfigs: null,
+            hasUnsavedChanges: false,
+            originalContent: null
+        };
+
+        // DOM elements
+        const elements = {
+            agentSelect: document.getElementById('agentSelect'),
+            configSelect: document.getElementById('configSelect'),
+            newBtn: document.getElementById('newBtn'),
+            copyBtn: document.getElementById('copyBtn'),
+            renameBtn: document.getElementById('renameBtn'),
+            deleteBtn: document.getElementById('deleteBtn'),
+            uploadArea: document.getElementById('uploadArea'),
+            fileInput: document.getElementById('fileInput'),
+            editor: document.getElementById('editor'),
+            editorContainer: document.getElementById('editorContainer'),
+            csvTableContainer: document.getElementById('csvTableContainer'),
+            emptyState: document.getElementById('emptyState'),
+            editorTitle: document.getElementById('editorTitle'),
+            viewModeBtn: document.getElementById('viewModeBtn'),
+            editModeBtn: document.getElementById('editModeBtn'),
+            statusIndicator: document.getElementById('statusIndicator'),
+            statusText: document.getElementById('statusText'),
+            alertSuccess: document.getElementById('alertSuccess'),
+            alertError: document.getElementById('alertError'),
+            alertInfo: document.getElementById('alertInfo'),
+            newConfigForm: document.getElementById('newConfigForm'),
+            newConfigAgentSelect: document.getElementById('newConfigAgentSelect'),
+            newConfigAgentInput: document.getElementById('newConfigAgentInput'),
+            newConfigName: document.getElementById('newConfigName'),
+            newConfigFormat: document.getElementById('newConfigFormat'),
+            confirmNewConfigBtn: document.getElementById('confirmNewConfigBtn'),
+            cancelNewConfigBtn: document.getElementById('cancelNewConfigBtn'),
+            editorMetadataForm: document.getElementById('editorMetadataForm'),
+            editorIdentitySelect: document.getElementById('editorIdentitySelect'),
+            editorIdentityInput: document.getElementById('editorIdentityInput'),
+            editorConfigName: document.getElementById('editorConfigName'),
+            editorFormat: document.getElementById('editorFormat'),
+            saveConfigBtn: document.getElementById('saveConfigBtn'),
+            compactEditorActions: document.getElementById('compactEditorActions'),
+            viewModeBtn2: document.getElementById('viewModeBtn2'),
+            editModeBtn2: document.getElementById('editModeBtn2'),
+            saveConfigBtn2: document.getElementById('saveConfigBtn2')
+        };
+
+        // Initialize the application
+        async function init() {
+            setupEventListeners();
+            await loadAllConfigs(); // Load configs first to get all identities
+            await loadConnectedAgents(); // Then load connected agents
+            connectWebSocket();
+        }
+
+        // Setup event listeners
+        function setupEventListeners() {
+            // Agent/Config selection - auto-load when both selected
+            elements.agentSelect.addEventListener('change', handleAgentChange);
+            elements.configSelect.addEventListener('change', handleConfigAutoLoad);
+
+            // Detect changes in editor for unsaved changes warning
+            elements.editor.addEventListener('input', markAsChanged);
+
+            // Sidebar Buttons
+            elements.newBtn.addEventListener('click', handleNewConfig);
+            elements.copyBtn.addEventListener('click', handleCopyConfig);
+            elements.renameBtn.addEventListener('click', handleRenameConfig);
+            elements.deleteBtn.addEventListener('click', handleDeleteConfig);
+
+            // Editor metadata form
+            elements.saveConfigBtn.addEventListener('click', handleSaveConfig);
+            elements.editorIdentitySelect.addEventListener('change', () => {
+                if (elements.editorIdentitySelect.value) {
+                    elements.editorIdentityInput.value = '';
+                }
+                updateEditorTitle();
+            });
+            elements.editorIdentityInput.addEventListener('input', () => {
+                if (elements.editorIdentityInput.value) {
+                    elements.editorIdentitySelect.value = '';
+                }
+                updateEditorTitle();
+            });
+            elements.editorConfigName.addEventListener('input', updateEditorTitle);
+            elements.editorFormat.addEventListener('change', updateEditorTitle);
+
+            // File upload
+            elements.uploadArea.addEventListener('click', () => elements.fileInput.click());
+            elements.uploadArea.addEventListener('dragover', handleDragOver);
+            elements.uploadArea.addEventListener('dragleave', handleDragLeave);
+            elements.uploadArea.addEventListener('drop', handleFileDrop);
+            elements.fileInput.addEventListener('change', handleFileSelect);
+
+            // Mode toggle (main editor header)
+            elements.viewModeBtn.addEventListener('click', () => setMode('view'));
+            elements.editModeBtn.addEventListener('click', () => setMode('edit'));
+
+            // Mode toggle (compact mode)
+            elements.viewModeBtn2.addEventListener('click', () => setMode('view'));
+            elements.editModeBtn2.addEventListener('click', () => setMode('edit'));
+            elements.saveConfigBtn2.addEventListener('click', handleSaveConfig);
+
+            // New config form
+            elements.confirmNewConfigBtn.addEventListener('click', handleConfirmNewConfig);
+            elements.cancelNewConfigBtn.addEventListener('click', handleCancelNewConfig);
+            elements.newConfigAgentSelect.addEventListener('change', () => {
+                if (elements.newConfigAgentSelect.value) {
+                    elements.newConfigAgentInput.value = '';
+                }
+            });
+            elements.newConfigAgentInput.addEventListener('input', () => {
+                if (elements.newConfigAgentInput.value) {
+                    elements.newConfigAgentSelect.value = '';
+                }
+            });
+        }
+
+        // Load connected agents and combine with config store identities
+        async function loadConnectedAgents() {
+            try {
+                // Get connected agents
+                const response = await fetch('/connections');
+                const data = await response.json();
+
+                // Collect all unique identities
+                const allIdentities = new Set();
+
+                // Add identities from config store (loaded in loadAllConfigs)
+                if (state.allConfigs) {
+                    Object.keys(state.allConfigs).forEach(identity => {
+                        allIdentities.add(identity);
+                    });
+                }
+
+                // Add connected agents (filter out config-ui which is this web interface)
+                if (data.connections) {
+                    Object.keys(data.connections).forEach(identity => {
+                        if (identity !== 'config-ui') {
+                            allIdentities.add(identity);
+                        }
+                    });
+                }
+
+                // Save current selections before rebuilding dropdowns
+                const currentAgentSelect = elements.agentSelect.value;
+                const currentNewConfigAgentSelect = elements.newConfigAgentSelect.value;
+                const currentEditorIdentitySelect = elements.editorIdentitySelect.value;
+
+                // Populate dropdowns
+                elements.agentSelect.innerHTML = '<option value="">Select identity...</option>';
+                elements.newConfigAgentSelect.innerHTML = '<option value="">Select existing...</option>';
+                elements.editorIdentitySelect.innerHTML = '<option value="">Select existing...</option>';
+
+                // Sort identities and add to all dropdowns
+                Array.from(allIdentities).sort().forEach(identity => {
+                    const isConnected = data.connections && data.connections[identity];
+                    const text = isConnected ? `${identity} ●` : identity;
+
+                    // Sidebar dropdown
+                    const option1 = document.createElement('option');
+                    option1.value = identity;
+                    option1.textContent = text;
+                    elements.agentSelect.appendChild(option1);
+
+                    // New config form dropdown
+                    const option2 = document.createElement('option');
+                    option2.value = identity;
+                    option2.textContent = text;
+                    elements.newConfigAgentSelect.appendChild(option2);
+
+                    // Editor metadata form dropdown
+                    const option3 = document.createElement('option');
+                    option3.value = identity;
+                    option3.textContent = text;
+                    elements.editorIdentitySelect.appendChild(option3);
+                });
+
+                // Restore previous selections
+                if (currentAgentSelect) elements.agentSelect.value = currentAgentSelect;
+                if (currentNewConfigAgentSelect) elements.newConfigAgentSelect.value = currentNewConfigAgentSelect;
+                if (currentEditorIdentitySelect) elements.editorIdentitySelect.value = currentEditorIdentitySelect;
+            } catch (error) {
+                console.error('Error loading agents:', error);
+            }
+        }
+
+        // Load all configs
+        async function loadAllConfigs() {
+            try {
+                const response = await fetch('/config-store/list');
+                const data = await response.json();
+
+                if (data.status === 'success' && data.data) {
+                    // Store for later use when agent is selected
+                    state.allConfigs = data.data;
+                }
+            } catch (error) {
+                console.error('Error loading configs:', error);
+            }
+        }
+
+        // Update config dropdown based on selected agent
+        function updateConfigDropdown() {
+            const agentId = getCurrentAgent();
+            elements.configSelect.innerHTML = '<option value="">Select configuration...</option>';
+
+            if (agentId && state.allConfigs && state.allConfigs[agentId]) {
+                state.allConfigs[agentId].forEach(config => {
+                    const option = document.createElement('option');
+                    option.value = config.name;
+                    option.textContent = `${config.name} (${config.type})`;
+                    elements.configSelect.appendChild(option);
+                });
+            }
+        }
+
+        // Get current agent (from dropdown)
+        function getCurrentAgent() {
+            return elements.agentSelect.value;
+        }
+
+        // Get current config (from dropdown)
+        function getCurrentConfig() {
+            return elements.configSelect.value;
+        }
+
+        // Handle agent change
+        function handleAgentChange() {
+            updateConfigDropdown();
+        }
+
+        // Handle config selection and auto-load
+        async function handleConfigAutoLoad() {
+            const agentId = getCurrentAgent();
+            const configName = getCurrentConfig();
+
+            // Only auto-load if both are selected
+            if (agentId && configName) {
+                // Check for unsaved changes
+                if (state.hasUnsavedChanges) {
+                    const confirmDiscard = confirm(
+                        'You have unsaved changes. Do you want to discard them and load the selected configuration?'
+                    );
+                    if (!confirmDiscard) {
+                        // Revert selection to previous config
+                        elements.configSelect.value = state.currentConfig || '';
+                        return;
+                    }
+                }
+
+                // Auto-load the selected configuration
+                await handleLoadConfig();
+            }
+        }
+
+        // Mark content as changed
+        function markAsChanged() {
+            if (state.mode === 'edit' && state.originalContent !== null) {
+                state.hasUnsavedChanges = (elements.editor.value !== state.originalContent);
+            }
+        }
+
+        // Check for unsaved changes before action
+        function checkUnsavedChanges() {
+            if (state.hasUnsavedChanges) {
+                return confirm('You have unsaved changes. Do you want to discard them?');
+            }
+            return true;
+        }
+
+        // Handle new configuration - show the form
+        function handleNewConfig() {
+            // Check for unsaved changes
+            if (!checkUnsavedChanges()) {
+                return;
+            }
+
+            // Hide other sections
+            elements.emptyState.style.display = 'none';
+            elements.uploadArea.style.display = 'none';
+            elements.editorContainer.style.display = 'none';
+
+            // Show and reset the form
+            elements.newConfigForm.classList.add('show');
+            elements.newConfigAgentSelect.value = '';
+            elements.newConfigAgentInput.value = '';
+            elements.newConfigName.value = '';
+            elements.newConfigFormat.value = 'json';
+        }
+
+        // Handle confirm new config - create and show editor
+        function handleConfirmNewConfig() {
+            const agentId = elements.newConfigAgentInput.value.trim() || elements.newConfigAgentSelect.value;
+            const configName = elements.newConfigName.value.trim();
+            const format = elements.newConfigFormat.value;
+
+            if (!agentId || !configName) {
+                showAlert('error', 'Please provide both identity and configuration name');
+                return;
+            }
+
+            // Update state
+            state.currentAgent = agentId;
+            state.currentConfig = configName;
+            state.configData = null;
+
+            // Populate editor metadata form
+            if (elements.newConfigAgentInput.value.trim()) {
+                elements.editorIdentityInput.value = agentId;
+                elements.editorIdentitySelect.value = '';
+            } else {
+                elements.editorIdentitySelect.value = agentId;
+                elements.editorIdentityInput.value = '';
+            }
+            elements.editorConfigName.value = configName;
+            elements.editorFormat.value = format;
+
+            // Hide form, show editor with metadata form
+            elements.newConfigForm.classList.remove('show');
+            elements.uploadArea.style.display = 'none';
+            elements.emptyState.style.display = 'none';
+            elements.editorContainer.style.display = 'block';
+            elements.csvTableContainer.innerHTML = '';
+
+            // Show metadata form for new config, hide compact actions
+            elements.editorMetadataForm.style.display = 'block';
+            elements.compactEditorActions.style.display = 'none';
+
+            // Set initial content based on format
+            if (format === 'json') {
+                elements.editor.value = '{\n  \n}';
+            } else {
+                elements.editor.value = '';
+            }
+
+            elements.editor.style.display = 'block';
+            setMode('edit');
+            updateEditorTitle();
+
+            showAlert('info', 'New configuration created. Edit and click Save when ready.');
+        }
+
+        // Handle cancel new config
+        function handleCancelNewConfig() {
+            elements.newConfigForm.classList.remove('show');
+            elements.emptyState.style.display = 'block';
+        }
+
+        // Load configuration
+        async function handleLoadConfig() {
+            const agentId = getCurrentAgent();
+            const configName = getCurrentConfig();
+
+            if (!agentId || !configName) {
+                showAlert('error', 'Please select or enter both an agent identity and configuration name');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/config-store/${agentId}/${configName}`);
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    state.currentAgent = agentId;
+                    state.currentConfig = configName;
+                    state.configData = data.data;
+
+                    // Populate editor metadata form
+                    elements.editorIdentitySelect.value = agentId;
+                    elements.editorIdentityInput.value = '';
+                    elements.editorConfigName.value = configName;
+
+                    // Detect format from loaded data
+                    const metadata = state.allConfigs[agentId]?.find(c => c.name === configName);
+                    if (metadata) {
+                        elements.editorFormat.value = metadata.type || 'json';
+                    }
+
+                    displayConfig(data.data);
+
+                    // Show compact editor actions, hide metadata form
+                    elements.editorMetadataForm.style.display = 'none';
+                    elements.compactEditorActions.style.display = 'flex';
+
+                    // Reset unsaved changes tracking
+                    state.originalContent = elements.editor.value;
+                    state.hasUnsavedChanges = false;
+
+                    showAlert('success', `Loaded ${configName} for ${agentId}`);
+                } else {
+                    showAlert('error', 'Configuration not found');
+                }
+            } catch (error) {
+                showAlert('error', `Error loading configuration: ${error.message}`);
+            }
+        }
+
+        // Save configuration
+        async function handleSaveConfig() {
+            // Get values from editor metadata form
+            const agentId = elements.editorIdentityInput.value.trim() || elements.editorIdentitySelect.value;
+            const configName = elements.editorConfigName.value.trim();
+            const format = elements.editorFormat.value;
+
+            if (!agentId || !configName) {
+                showAlert('error', 'Please provide both identity and configuration name');
+                return;
+            }
+
+            try {
+                let configData;
+
+                if (format === 'csv') {
+                    configData = elements.editor.value;
+                } else {
+                    configData = JSON.parse(elements.editor.value);
+                }
+
+                const response = await fetch(`/config-store/${agentId}/${configName}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': format === 'csv' ? 'text/csv' : 'application/json'
+                    },
+                    body: format === 'csv' ? configData : JSON.stringify(configData)
+                });
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    state.currentAgent = agentId;
+                    state.currentConfig = configName;
+                    showAlert('success', `Saved ${configName} for ${agentId}`);
+                    await loadAllConfigs();
+                    await loadConnectedAgents(); // Refresh identity lists
+                    updateConfigDropdown();
+
+                    // Reset unsaved changes flag after successful save
+                    state.originalContent = elements.editor.value;
+                    state.hasUnsavedChanges = false;
+
+                    setMode('view');
+                } else {
+                    showAlert('error', 'Failed to save configuration');
+                }
+            } catch (error) {
+                showAlert('error', `Error saving configuration: ${error.message}`);
+            }
+        }
+
+        // Copy configuration
+        async function handleCopyConfig() {
+            const sourceAgentId = getCurrentAgent();
+            const sourceConfigName = getCurrentConfig();
+
+            if (!sourceAgentId || !sourceConfigName || !state.configData) {
+                showAlert('error', 'Please load a configuration first');
+                return;
+            }
+
+            // Prompt for destination identity
+            const destAgentId = prompt(
+                `Copy "${sourceConfigName}" from "${sourceAgentId}"\n\nEnter destination identity:`,
+                sourceAgentId
+            );
+            if (!destAgentId || !destAgentId.trim()) return;
+
+            // Prompt for destination config name
+            const destConfigName = prompt(
+                `Destination identity: ${destAgentId}\n\nEnter configuration name:`,
+                sourceConfigName
+            );
+            if (!destConfigName || !destConfigName.trim()) return;
+
+            try {
+                // Check if destination already exists
+                const checkResponse = await fetch(`/config-store/${destAgentId}/${destConfigName}`);
+                const checkData = await checkResponse.json();
+
+                if (checkData.status === 'success') {
+                    // Destination exists - ask for confirmation to overwrite
+                    const confirmOverwrite = confirm(
+                        `Configuration "${destConfigName}" already exists for "${destAgentId}".\n\nDo you want to overwrite it?`
+                    );
+                    if (!confirmOverwrite) {
+                        showAlert('info', 'Copy cancelled');
+                        return;
+                    }
+                }
+
+                // Perform the copy
+                const format = elements.editorFormat.value;
+                const response = await fetch(`/config-store/${destAgentId}/${destConfigName}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': format === 'csv' ? 'text/csv' : 'application/json'
+                    },
+                    body: format === 'csv' ? elements.editor.value : JSON.stringify(state.configData)
+                });
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    showAlert('success', `Copied to ${destAgentId}/${destConfigName}`);
+                    await loadAllConfigs();
+                    await loadConnectedAgents(); // Refresh identity lists in case new identity was created
+
+                    // If copied to the same identity, update dropdown
+                    if (destAgentId === sourceAgentId) {
+                        updateConfigDropdown();
+                    }
+                } else {
+                    showAlert('error', 'Failed to copy configuration');
+                }
+            } catch (error) {
+                showAlert('error', `Error copying configuration: ${error.message}`);
+            }
+        }
+
+        // Rename configuration
+        async function handleRenameConfig() {
+            const agentId = getCurrentAgent();
+            const oldName = getCurrentConfig();
+
+            if (!agentId || !oldName) {
+                showAlert('error', 'Please select a configuration to rename');
+                return;
+            }
+
+            const newName = prompt('Enter new configuration name:', oldName);
+            if (!newName || newName === oldName) return;
+
+            try {
+                // Copy to new name
+                const format = elements.editorFormat.value;
+                const copyResponse = await fetch(`/config-store/${agentId}/${newName}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': format === 'csv' ? 'text/csv' : 'application/json'
+                    },
+                    body: format === 'csv' ? elements.editor.value : JSON.stringify(state.configData)
+                });
+
+                if (copyResponse.ok) {
+                    // Delete old name
+                    const deleteResponse = await fetch(`/config-store/${agentId}/${oldName}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (deleteResponse.ok) {
+                        showAlert('success', `Renamed ${oldName} to ${newName}`);
+                        await loadAllConfigs();
+                        updateConfigDropdown();
+                        // Select the new config in dropdown
+                        elements.configSelect.value = newName;
+                    }
+                }
+            } catch (error) {
+                showAlert('error', `Error renaming configuration: ${error.message}`);
+            }
+        }
+
+        // Delete configuration
+        async function handleDeleteConfig() {
+            const agentId = getCurrentAgent();
+            const configName = getCurrentConfig();
+
+            if (!agentId || !configName) {
+                showAlert('error', 'Please select a configuration to delete');
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to delete ${configName}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/config-store/${agentId}/${configName}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    showAlert('success', `Deleted ${configName}`);
+                    elements.editor.value = '';
+                    elements.editorContainer.style.display = 'none';
+                    elements.emptyState.style.display = 'block';
+                    elements.configSelect.value = '';
+                    await loadAllConfigs();
+                    updateConfigDropdown();
+                } else {
+                    showAlert('error', 'Failed to delete configuration');
+                }
+            } catch (error) {
+                showAlert('error', `Error deleting configuration: ${error.message}`);
+            }
+        }
+
+        // File upload handlers
+        function handleDragOver(e) {
+            e.preventDefault();
+            elements.uploadArea.classList.add('dragover');
+        }
+
+        function handleDragLeave(e) {
+            e.preventDefault();
+            elements.uploadArea.classList.remove('dragover');
+        }
+
+        function handleFileDrop(e) {
+            e.preventDefault();
+            elements.uploadArea.classList.remove('dragover');
+
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                processFile(files[0]);
+            }
+        }
+
+        function handleFileSelect(e) {
+            const files = e.target.files;
+            if (files.length > 0) {
+                processFile(files[0]);
+            }
+        }
+
+        // Detect file type by content analysis
+        function detectFileType(content) {
+            // Try to parse as JSON first
+            try {
+                JSON.parse(content);
+                return { type: 'json', isValid: true };
+            } catch (e) {
+                // Not JSON, check if it looks like CSV
+            }
+
+            // Check for CSV characteristics
+            const lines = content.trim().split('\n');
+            if (lines.length === 0 || content.trim().length === 0) {
+                return { type: 'unknown', isValid: false };
+            }
+
+            // Check if content has commas - strong indicator of CSV
+            const hasCommas = content.includes(',');
+
+            if (hasCommas) {
+                // Check if first line has commas (header row)
+                const firstLine = lines[0];
+                const commaCount = firstLine.split(',').length;
+
+                if (commaCount > 1) {
+                    // Multi-column CSV - check consistency
+                    let isConsistent = true;
+                    const sampleSize = Math.min(5, lines.length);
+
+                    for (let i = 1; i < sampleSize; i++) {
+                        if (!lines[i].trim()) continue; // Skip empty lines
+                        const lineCommaCount = lines[i].split(',').length;
+                        // Allow some variance for quoted fields
+                        if (Math.abs(lineCommaCount - commaCount) > 1) {
+                            isConsistent = false;
+                            break;
+                        }
+                    }
+
+                    if (isConsistent) {
+                        return { type: 'csv', isValid: true };
+                    }
+                }
+            }
+
+            // If no commas found, it's likely a plain text list, not CSV
+            // Return as plain text type which we'll treat as CSV for storage
+            return { type: 'text', isValid: true };
+        }
+
+        function processFile(file) {
+            const reader = new FileReader();
+
+            reader.onload = (e) => {
+                const content = e.target.result;
+
+                // Detect file type by analyzing content
+                const detection = detectFileType(content);
+
+                if (!detection.isValid) {
+                    showAlert('error', 'Unable to detect file type. Please ensure the file is valid JSON or CSV.');
+                    return;
+                }
+
+                if (detection.type === 'json') {
+                    try {
+                        const jsonData = JSON.parse(content);
+                        state.configData = jsonData;
+
+                        // Set format and clear identity/config from state
+                        elements.editorFormat.value = 'json';
+                        state.currentAgent = null;
+                        state.currentConfig = null;
+
+                        // Clear metadata form inputs
+                        elements.editorIdentitySelect.value = '';
+                        elements.editorIdentityInput.value = '';
+                        elements.editorConfigName.value = '';
+
+                        // Suggest config name from filename (remove any extension)
+                        const suggestedName = file.name.replace(/\.[^/.]+$/, '');
+                        elements.editorConfigName.value = suggestedName;
+
+                        // Show editor with metadata form
+                        elements.uploadArea.style.display = 'none';
+                        elements.emptyState.style.display = 'none';
+                        elements.editorContainer.style.display = 'block';
+                        elements.editorMetadataForm.style.display = 'block';
+                        elements.compactEditorActions.style.display = 'none';
+
+                        // Display the content in editor
+                        elements.editor.value = JSON.stringify(jsonData, null, 2);
+                        elements.editor.style.display = 'block';
+                        setMode('edit');
+                        updateEditorTitle();
+
+                        showAlert('info', `Loaded ${file.name} as JSON - Enter identity and config name, then save!`);
+                    } catch (error) {
+                        showAlert('error', `Invalid JSON file: ${error.message}`);
+                    }
+                } else if (detection.type === 'csv') {
+                    state.configData = content;
+
+                    // Set format and clear identity/config from state
+                    elements.editorFormat.value = 'csv';
+                    state.currentAgent = null;
+                    state.currentConfig = null;
+
+                    // Clear metadata form inputs
+                    elements.editorIdentitySelect.value = '';
+                    elements.editorIdentityInput.value = '';
+                    elements.editorConfigName.value = '';
+
+                    // Suggest config name from filename (remove any extension)
+                    const suggestedName = file.name.replace(/\.[^/.]+$/, '');
+                    elements.editorConfigName.value = suggestedName;
+
+                    // Show editor with metadata form
+                    elements.uploadArea.style.display = 'none';
+                    elements.emptyState.style.display = 'none';
+                    elements.editorContainer.style.display = 'block';
+                    elements.editorMetadataForm.style.display = 'block';
+                    elements.compactEditorActions.style.display = 'none';
+
+                    // Display the content in editor
+                    elements.editor.value = content;
+                    elements.editor.style.display = 'block';
+                    setMode('edit');
+                    updateEditorTitle();
+
+                    showAlert('info', `Loaded ${file.name} as CSV - Enter identity and config name, then save!`);
+                } else if (detection.type === 'text') {
+                    // Plain text file (no commas) - treat as CSV for storage
+                    state.configData = content;
+
+                    // Set format and clear identity/config from state
+                    elements.editorFormat.value = 'csv';
+                    state.currentAgent = null;
+                    state.currentConfig = null;
+
+                    // Clear metadata form inputs
+                    elements.editorIdentitySelect.value = '';
+                    elements.editorIdentityInput.value = '';
+                    elements.editorConfigName.value = '';
+
+                    // Suggest config name from filename (remove any extension)
+                    const suggestedName = file.name.replace(/\.[^/.]+$/, '');
+                    elements.editorConfigName.value = suggestedName;
+
+                    // Show editor with metadata form
+                    elements.uploadArea.style.display = 'none';
+                    elements.emptyState.style.display = 'none';
+                    elements.editorContainer.style.display = 'block';
+                    elements.editorMetadataForm.style.display = 'block';
+                    elements.compactEditorActions.style.display = 'none';
+
+                    // Display the content in editor - PRESERVE original format
+                    elements.editor.value = content;
+                    elements.editor.style.display = 'block';
+                    setMode('edit');
+                    updateEditorTitle();
+
+                    showAlert('info', `Loaded ${file.name} as text - Enter identity and config name, then save!`);
+                }
+            };
+
+            reader.readAsText(file);
+        }
+
+        // Display configuration
+        function displayConfig(data) {
+            elements.emptyState.style.display = 'none';
+            elements.editorContainer.style.display = 'block';
+            elements.csvTableContainer.innerHTML = '';
+
+            const format = elements.editorFormat.value;
+            let displayText = '';
+
+            if (format === 'json') {
+                displayText = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+                elements.editor.style.display = 'block';
+            } else if (format === 'csv') {
+                displayText = typeof data === 'string' ? data : data;
+                elements.editor.style.display = 'block';
+            }
+
+            elements.editor.value = displayText;
+            updateEditorTitle();
+        }
+
+        // Update editor title
+        function updateEditorTitle() {
+            const agentId = elements.editorIdentityInput.value.trim() || elements.editorIdentitySelect.value || state.currentAgent;
+            const configName = elements.editorConfigName.value.trim() || state.currentConfig;
+            const format = elements.editorFormat.value;
+
+            if (agentId && configName) {
+                const badge = `<span class="format-badge format-${format}">${format.toUpperCase()}</span>`;
+                elements.editorTitle.innerHTML = `${agentId} / ${configName} ${badge}`;
+            } else {
+                elements.editorTitle.textContent = 'Configuration Editor';
+            }
+        }
+
+        // Set editor mode
+        function setMode(mode) {
+            state.mode = mode;
+
+            if (mode === 'view') {
+                elements.editor.classList.add('view-mode');
+                elements.editor.readOnly = true;
+                elements.viewModeBtn.classList.add('active');
+                elements.editModeBtn.classList.remove('active');
+                elements.viewModeBtn2.classList.add('active');
+                elements.editModeBtn2.classList.remove('active');
+                // Reset unsaved changes when switching to view mode
+                state.hasUnsavedChanges = false;
+            } else {
+                elements.editor.classList.remove('view-mode');
+                elements.editor.readOnly = false;
+                elements.viewModeBtn.classList.remove('active');
+                elements.editModeBtn.classList.add('active');
+                elements.viewModeBtn2.classList.remove('active');
+                elements.editModeBtn2.classList.add('active');
+                // Track original content when entering edit mode
+                state.originalContent = elements.editor.value;
+                state.hasUnsavedChanges = false;
+            }
+        }
+
+        // WebSocket connection for real-time updates
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/config-ui`;
+
+            state.wsConnection = new WebSocket(wsUrl);
+
+            state.wsConnection.onopen = () => {
+                elements.statusIndicator.classList.add('connected');
+                elements.statusText.textContent = 'Connected';
+            };
+
+            state.wsConnection.onclose = () => {
+                elements.statusIndicator.classList.remove('connected');
+                elements.statusText.textContent = 'Disconnected';
+
+                // Reconnect after 5 seconds
+                setTimeout(connectWebSocket, 5000);
+            };
+
+            state.wsConnection.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+        }
+
+        // Handle WebSocket messages
+        function handleWebSocketMessage(data) {
+            if (data.type === 'config_update' && state.mode === 'view') {
+                // Reload the current config if it matches
+                if (data.agent === state.currentAgent && data.config === state.currentConfig) {
+                    showAlert('info', 'Configuration updated externally. Reloading...');
+                    handleLoadConfig();
+                }
+            }
+        }
+
+        // Show alert
+        function showAlert(type, message) {
+            const alertElement = type === 'success' ? elements.alertSuccess :
+                                type === 'error' ? elements.alertError :
+                                elements.alertInfo;
+
+            alertElement.textContent = message;
+            alertElement.classList.add('show');
+
+            setTimeout(() => {
+                alertElement.classList.remove('show');
+            }, 5000);
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', init);
+
+        // Refresh agent list periodically
+        setInterval(loadConnectedAgents, 10000);
+    </script>
+</body>
+</html>

@@ -15,6 +15,8 @@ import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 try:
@@ -222,6 +224,15 @@ class FastAPIMessageBus(MessageBus):
         reload_delay: float = 0.25,
     ):
         self.app = FastAPI(title="AEMS MessageBus", lifespan=lifespan)
+
+        # Setup templates directory
+        templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+        self.templates = Jinja2Templates(directory=templates_dir)
+
+        # Setup static files directory
+        static_dir = os.path.join(os.path.dirname(__file__), "static")
+        if os.path.exists(static_dir):
+            self.app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
         # Add custom exception handler to convert 422 validation errors to 400 bad request
         # This matches the expected behavior for JSON-RPC validation errors
@@ -499,6 +510,31 @@ class FastAPIMessageBus(MessageBus):
                 return {"status": "success"}
             else:
                 raise HTTPException(status_code=404, detail=f"Config {config_name} not found for agent {agent_id}")
+
+        @self.app.get("/")
+        async def root(request: Request):
+            """Serve the config manager web interface."""
+            return self.templates.TemplateResponse("config_manager.html", {"request": request})
+
+        @self.app.websocket("/ws/config-ui")
+        async def websocket_config_ui(websocket: WebSocket):
+            """WebSocket endpoint for config UI real-time updates."""
+            await websocket.accept()
+
+            try:
+                # Keep connection alive and listen for messages
+                while True:
+                    # Wait for messages from client
+                    data = await websocket.receive_json()
+
+                    # Handle ping/keepalive
+                    if data.get("type") == "ping":
+                        await websocket.send_json({"type": "pong"})
+
+            except WebSocketDisconnect:
+                _log.debug("Config UI WebSocket disconnected")
+            except Exception as e:
+                _log.error(f"Error in config UI websocket: {e}")
 
         @self.app.get("/version")
         async def get_version():
