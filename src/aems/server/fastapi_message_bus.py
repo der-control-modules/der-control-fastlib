@@ -417,7 +417,7 @@ class FastAPIMessageBus(MessageBus):
             configs = self.config_store.list_configs(agent_id)
             return {"status": "success", "data": configs}
 
-        @self.app.get("/config-store/{agent_id}/{config_name}")
+        @self.app.get("/config-store/{agent_id}/{config_name:path}")
         async def get_config(agent_id: str, config_name: str, raw: bool = False, resolve_references: bool = True):
             """Retrieve a configuration for an agent with optional config:// reference resolution."""
             config = self.config_store.retrieve(agent_id, config_name, raw, resolve_references)
@@ -425,7 +425,7 @@ class FastAPIMessageBus(MessageBus):
                 raise HTTPException(status_code=404, detail=f"Config {config_name} not found for agent {agent_id}")
             return {"status": "success", "data": config}
 
-        @self.app.put("/config-store/{agent_id}/{config_name}")
+        @self.app.put("/config-store/{agent_id}/{config_name:path}")
         async def store_config(
             agent_id: str,
             config_name: str,
@@ -480,7 +480,7 @@ class FastAPIMessageBus(MessageBus):
             else:
                 raise HTTPException(status_code=500, detail="Failed to store configuration")
 
-        @self.app.delete("/config-store/{agent_id}/{config_name}")
+        @self.app.delete("/config-store/{agent_id}/{config_name:path}")
         async def delete_config(
             agent_id: str,
             config_name: str,

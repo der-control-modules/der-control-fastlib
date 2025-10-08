@@ -130,6 +130,10 @@ class ConfigStore:
     def _store_metadata(self, agent_dir: str, config_name: str, config_type: str):
         """Store metadata about a configuration."""
         metadata_file = os.path.join(agent_dir, f"{config_name}.metadata")
+        # Create parent directories if config_name contains slashes
+        metadata_dir = os.path.dirname(metadata_file)
+        if metadata_dir and metadata_dir != agent_dir:
+            os.makedirs(metadata_dir, exist_ok=True)
         metadata = {
             "type": config_type,
             "created": datetime.datetime.now().isoformat(),
@@ -156,6 +160,10 @@ class ConfigStore:
         config_file = os.path.join(agent_dir, f"{config_name}")
 
         try:
+            # Create parent directories if config_name contains slashes
+            config_dir = os.path.dirname(config_file)
+            if config_dir and config_dir != agent_dir:
+                os.makedirs(config_dir, exist_ok=True)
             with open(config_file, "w") as f:
                 json.dump(config_data, f, indent=2)
             self._update_metadata(agent_dir, config_name)
@@ -169,6 +177,10 @@ class ConfigStore:
         config_file = os.path.join(agent_dir, f"{config_name}")
 
         try:
+            # Create parent directories if config_name contains slashes
+            config_dir = os.path.dirname(config_file)
+            if config_dir and config_dir != agent_dir:
+                os.makedirs(config_dir, exist_ok=True)
             # If csv_data is a string, write it directly
             if isinstance(csv_data, str):
                 with open(config_file, "w", newline="") as f:
@@ -321,28 +333,34 @@ class ConfigStore:
         """List configurations for a specific agent directory."""
         configs = []
 
-        # Get all files that don't end with .metadata
-        all_files = [
-            f
-            for f in os.listdir(agent_dir)
-            if os.path.isfile(os.path.join(agent_dir, f)) and not f.endswith(".metadata")
-        ]
+        # Recursively find all config files
+        for root, _dirs, files in os.walk(agent_dir):
+            for filename in files:
+                # Skip metadata files
+                if filename.endswith(".metadata"):
+                    continue
 
-        for filename in all_files:
-            metadata_path = os.path.join(agent_dir, f"{filename}.metadata")
+                # Get the full path and compute relative path from agent_dir
+                full_path = os.path.join(root, filename)
+                rel_path = os.path.relpath(full_path, agent_dir)
 
-            config_info = {"name": filename, "type": "json"}  # Default type
+                # The config name is the relative path
+                config_name = rel_path
 
-            # Try to get metadata if available
-            if os.path.exists(metadata_path):
-                try:
-                    with open(metadata_path) as f:
-                        metadata = json.load(f)
-                    config_info.update(metadata)
-                except Exception:
-                    pass
+                metadata_path = os.path.join(agent_dir, f"{config_name}.metadata")
 
-            configs.append(config_info)
+                config_info = {"name": config_name, "type": "json"}  # Default type
+
+                # Try to get metadata if available
+                if os.path.exists(metadata_path):
+                    try:
+                        with open(metadata_path) as f:
+                            metadata = json.load(f)
+                        config_info.update(metadata)
+                    except Exception:
+                        pass
+
+                configs.append(config_info)
 
         return configs
 
@@ -482,8 +500,8 @@ class ConfigStore:
                 )
                 return
 
-            agent_id = config_name.split("/")[0]
-            config_short_name = config_name.split("/")[1]
+            agent_id = config_name.split("/", 1)[0]
+            config_short_name = config_name.split("/", 1)[1]
 
             _log.info(f"Sending config update to agent {agent_id}: {config_short_name} ({action})")
 
