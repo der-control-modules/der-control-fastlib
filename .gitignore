@@ -40,3 +40,15 @@ rabbitmq-server.download.tar.xz
 /MagicMock/mock/
 /docs/source/volttron_api/
 /dist/
+
+# SSL/TLS Certificates and Keys (keep private!)
+certs/*.key
+certs/*.crt
+certs/*.csr
+certs/*.pem
+certs/index.txt*
+certs/serial*
+certs/crlnumber*
+certs/newcerts/
+certs/.rand
+certs/server-san.cnf
