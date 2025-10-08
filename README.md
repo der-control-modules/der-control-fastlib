@@ -41,7 +41,20 @@ aems-server
 aems-server --host 0.0.0.0 --port 9000
 ```
 
-### 3. Create a VOLTTRON-Compatible Agent
+### 3. Run an Agent
+
+**Option A: Run Existing VOLTTRON Agents (No Code Changes)**
+
+```bash
+# Run any existing VOLTTRON agent without modification
+./start-legacy.py \
+    --agent-dir /path/to/VolttronAgent \
+    --config config \
+    --identity my.agent \
+    --address ws://localhost:8000
+```
+
+**Option B: Create a New VOLTTRON-Compatible Agent**
 
 ```python
 import time
@@ -124,6 +137,56 @@ def collect_data(self):
 # Cron-based scheduling
 agent.core.schedule("0 */6 * * *", self.daily_report)  # Every 6 hours
 ```
+
+## Legacy Agent Launcher
+
+The **start-legacy.py** script enables running existing VOLTTRON agents without any code modifications. It provides a compatibility layer that transparently redirects VOLTTRON imports to AEMS equivalents.
+
+### How It Works
+
+1. **Auto-Detection**: Scans agent directory to find the module and class
+2. **Import Hooks**: Intercepts VOLTTRON imports and redirects to AEMS shims
+3. **Config Handling**: Intelligently parses configs and passes parameters to agent `__init__`
+4. **Working Directory**: Changes to agent directory before running (like `vctl start`)
+
+### Usage
+
+```bash
+./start-legacy.py \
+    --agent-dir /path/to/AgentDirectory \
+    --config config_file \
+    --identity agent.identity \
+    --address ws://localhost:8000 \
+    --volttron-home /path/to/volttron_home \
+    --debug
+```
+
+### Config Store Location
+
+The launcher shows which config store directory the agent will use:
+
+```
+VOLTTRON_HOME: /home/volttron/.volttron
+Config Store:  /home/volttron/.volttron/aems_config_store/platform.driver
+  Existing configs: devices/PNNL/SRINIVAS/SCHNEIDER, registry_configs/schneider.csv
+```
+
+This makes it easy to verify the agent is reading from the correct location.
+
+### Supported Agents
+
+Successfully tested with:
+- ✅ **ListenerAgent** - Basic agent with pub/sub
+- ✅ **PlatformDriverAgent** - Complex agent with custom `__init__` parameters
+- ✅ **Custom agents** - Any VOLTTRON agent following standard patterns
+
+### Graceful Shutdown
+
+Pressing Ctrl+C properly shuts down the agent:
+- Stops the scheduler
+- Disconnects from message bus
+- Cleans up resources
+- No zombie processes
 
 ## VOLTTRON Compatibility
 
@@ -247,7 +310,48 @@ aems-server --help
 
 ## Migration from VOLTTRON
 
-Migrating existing VOLTTRON agents is straightforward:
+### Option 1: Run Existing VOLTTRON Agents Without Modification
+
+Use the **legacy agent launcher** to run existing VOLTTRON agents with zero code changes:
+
+```bash
+# Run any existing VOLTTRON agent without modifications
+./start-legacy.py \
+    --agent-dir /path/to/your/VolttronAgent \
+    --config config \
+    --identity my.agent \
+    --address ws://localhost:8000
+```
+
+**Features:**
+- ✅ **Zero code changes** - Run existing VOLTTRON agents as-is
+- ✅ **Auto-detection** - Automatically finds agent module and class
+- ✅ **Import compatibility** - Transparent redirection of VOLTTRON imports to AEMS
+- ✅ **Config support** - Loads agent configs and intelligently passes parameters
+- ✅ **Graceful shutdown** - Ctrl+C properly stops agents and cleans up
+- ✅ **Config store integration** - Shows which config store directory is being used
+
+**Example:**
+```bash
+# Run PlatformDriverAgent with existing config
+./start-legacy.py \
+    --agent-dir $HOME/volttron/services/core/PlatformDriverAgent \
+    --config config \
+    --identity platform.driver \
+    --address ws://localhost:8000 \
+    --volttron-home /home/volttron/.volttron
+
+# Output shows:
+# VOLTTRON_HOME: /home/volttron/.volttron
+# Config Store:  /home/volttron/.volttron/aems_config_store/platform.driver
+# ✓ PlatformDriverAgent is running
+```
+
+See `./start-legacy.py --help` for all options.
+
+### Option 2: Migrate Agent Code
+
+For new development or when you want to fully migrate, update your agent code:
 
 1. **Change imports**: `from aems.client.agent import Agent, RPC, config, periodic`
 2. **Update connection**: Use WebSocket address instead of ZMQ
