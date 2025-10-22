@@ -25,11 +25,9 @@ class OccupancyControlAgent(Agent):
     def _do_control_action(self, gid: str, state: str):
         """Handle occupancy state changes."""
         _log.info(f"OVERRIDE _do_control_action {gid} changed to {state}")
-        self.control_actions.append({
-            'gid': gid,
-            'state': state,
-            'timestamp': datetime.now()
-        })
+        self.control_actions.append(
+            {"gid": gid, "state": state, "timestamp": datetime.now()}
+        )
 
         self.occupancy_state = state
 
@@ -42,8 +40,14 @@ class OccupancyControlAgent(Agent):
             self.current_id = gid
             _log.info(f"Set current override to {gid}")
 
-    def schedule_daily_override(self, gid: str, start_hour: int, start_minute: int,
-                                end_hour: int, end_minute: int):
+    def schedule_daily_override(
+        self,
+        gid: str,
+        start_hour: int,
+        start_minute: int,
+        end_hour: int,
+        end_minute: int,
+    ):
         """
         Schedule an occupancy override for today at specific times.
 
@@ -77,7 +81,7 @@ class OccupancyControlAgent(Agent):
         # Schedule the events using datetime objects (one-time events)
         overrides = [
             self.core.schedule(start_time, self._do_control_action, gid, "OCCUPIED"),
-            self.core.schedule(end_time, self._do_control_action, gid, "UNOCCUPIED")
+            self.core.schedule(end_time, self._do_control_action, gid, "UNOCCUPIED"),
         ]
 
         self.override_greenlets[gid] = overrides
@@ -89,9 +93,9 @@ def test_8am_6pm_override_scenario(message_bus_manager_fixture):
     manager = message_bus_manager_fixture
     manager.start_bus()
 
-    agent = OccupancyControlAgent("building.occupancy",
-                                  host="127.0.0.1",
-                                  port=manager.port)
+    agent = OccupancyControlAgent(
+        "building.occupancy", host="127.0.0.1", port=manager.port
+    )
     agent.connect()
     agent.core._scheduler.start()
 
@@ -112,7 +116,7 @@ def test_8am_6pm_override_scenario(message_bus_manager_fixture):
     gid = "daily_occupancy_override"
     overrides = [
         agent.core.schedule(test_8am, agent._do_control_action, gid, "OCCUPIED"),
-        agent.core.schedule(test_6pm, agent._do_control_action, gid, "UNOCCUPIED")
+        agent.core.schedule(test_6pm, agent._do_control_action, gid, "UNOCCUPIED"),
     ]
     agent.override_greenlets[gid] = overrides
 
@@ -125,7 +129,7 @@ def test_8am_6pm_override_scenario(message_bus_manager_fixture):
 
     # Check occupancy is now OCCUPIED
     assert len(agent.control_actions) == 1
-    assert agent.control_actions[0]['state'] == "OCCUPIED"
+    assert agent.control_actions[0]["state"] == "OCCUPIED"
     assert agent.occupancy_state == "OCCUPIED"
     assert agent.current_id == gid
 
@@ -134,7 +138,7 @@ def test_8am_6pm_override_scenario(message_bus_manager_fixture):
 
     # Check occupancy is back to UNOCCUPIED
     assert len(agent.control_actions) == 2
-    assert agent.control_actions[1]['state'] == "UNOCCUPIED"
+    assert agent.control_actions[1]["state"] == "UNOCCUPIED"
     assert agent.occupancy_state == "UNOCCUPIED"
     assert agent.current_id is None
     assert gid not in agent.override_greenlets  # Should be cleaned up
@@ -151,9 +155,9 @@ def test_daily_override_helper_method(message_bus_manager_fixture):
     manager = message_bus_manager_fixture
     manager.start_bus()
 
-    agent = OccupancyControlAgent("building.occupancy2",
-                                  host="127.0.0.1",
-                                  port=manager.port)
+    agent = OccupancyControlAgent(
+        "building.occupancy2", host="127.0.0.1", port=manager.port
+    )
     agent.connect()
     agent.core._scheduler.start()
 
@@ -169,18 +173,18 @@ def test_daily_override_helper_method(message_bus_manager_fixture):
     gid = "workday_override"
     overrides = [
         agent.core.schedule(start_time, agent._do_control_action, gid, "OCCUPIED"),
-        agent.core.schedule(end_time, agent._do_control_action, gid, "UNOCCUPIED")
+        agent.core.schedule(end_time, agent._do_control_action, gid, "UNOCCUPIED"),
     ]
     agent.override_greenlets[gid] = overrides
 
     # Wait and verify
     gevent.sleep(1.5)
     assert len(agent.control_actions) == 1
-    assert agent.control_actions[0]['state'] == "OCCUPIED"
+    assert agent.control_actions[0]["state"] == "OCCUPIED"
 
     gevent.sleep(2)
     assert len(agent.control_actions) == 2
-    assert agent.control_actions[1]['state'] == "UNOCCUPIED"
+    assert agent.control_actions[1]["state"] == "UNOCCUPIED"
 
     # Verify it's a one-time event, not recurring
     gevent.sleep(5)
@@ -194,9 +198,9 @@ def test_multiple_daily_overrides(message_bus_manager_fixture):
     manager = message_bus_manager_fixture
     manager.start_bus()
 
-    agent = OccupancyControlAgent("building.occupancy3",
-                                  host="127.0.0.1",
-                                  port=manager.port)
+    agent = OccupancyControlAgent(
+        "building.occupancy3", host="127.0.0.1", port=manager.port
+    )
     agent.connect()
     agent.core._scheduler.start()
 
@@ -213,15 +217,23 @@ def test_multiple_daily_overrides(message_bus_manager_fixture):
 
     # Schedule conference room
     conf_overrides = [
-        agent.core.schedule(conf_start, agent._do_control_action, "conference_room", "OCCUPIED"),
-        agent.core.schedule(conf_end, agent._do_control_action, "conference_room", "UNOCCUPIED")
+        agent.core.schedule(
+            conf_start, agent._do_control_action, "conference_room", "OCCUPIED"
+        ),
+        agent.core.schedule(
+            conf_end, agent._do_control_action, "conference_room", "UNOCCUPIED"
+        ),
     ]
     agent.override_greenlets["conference_room"] = conf_overrides
 
     # Schedule main office
     office_overrides = [
-        agent.core.schedule(office_start, agent._do_control_action, "main_office", "OCCUPIED"),
-        agent.core.schedule(office_end, agent._do_control_action, "main_office", "UNOCCUPIED")
+        agent.core.schedule(
+            office_start, agent._do_control_action, "main_office", "OCCUPIED"
+        ),
+        agent.core.schedule(
+            office_end, agent._do_control_action, "main_office", "UNOCCUPIED"
+        ),
     ]
     agent.override_greenlets["main_office"] = office_overrides
 
@@ -234,10 +246,10 @@ def test_multiple_daily_overrides(message_bus_manager_fixture):
     # Verify the sequence
     events_by_gid = {}
     for action in agent.control_actions:
-        gid = action['gid']
+        gid = action["gid"]
         if gid not in events_by_gid:
             events_by_gid[gid] = []
-        events_by_gid[gid].append(action['state'])
+        events_by_gid[gid].append(action["state"])
 
     # Each override should have OCCUPIED followed by UNOCCUPIED
     assert events_by_gid["conference_room"] == ["OCCUPIED", "UNOCCUPIED"]
@@ -254,9 +266,9 @@ def test_immediate_execution_for_past_times(message_bus_manager_fixture):
     manager = message_bus_manager_fixture
     manager.start_bus()
 
-    agent = OccupancyControlAgent("building.occupancy4",
-                                  host="127.0.0.1",
-                                  port=manager.port)
+    agent = OccupancyControlAgent(
+        "building.occupancy4", host="127.0.0.1", port=manager.port
+    )
     agent.connect()
     agent.core._scheduler.start()
 
@@ -267,7 +279,7 @@ def test_immediate_execution_for_past_times(message_bus_manager_fixture):
     gid = "past_override"
     overrides = [
         agent.core.schedule(past_time, agent._do_control_action, gid, "OCCUPIED"),
-        agent.core.schedule(future_time, agent._do_control_action, gid, "UNOCCUPIED")
+        agent.core.schedule(future_time, agent._do_control_action, gid, "UNOCCUPIED"),
     ]
     agent.override_greenlets[gid] = overrides
 
@@ -275,14 +287,14 @@ def test_immediate_execution_for_past_times(message_bus_manager_fixture):
     gevent.sleep(0.5)
 
     assert len(agent.control_actions) >= 1
-    assert agent.control_actions[0]['state'] == "OCCUPIED"
+    assert agent.control_actions[0]["state"] == "OCCUPIED"
     assert agent.occupancy_state == "OCCUPIED"
 
     # Wait for the future event
     gevent.sleep(2)
 
     assert len(agent.control_actions) == 2
-    assert agent.control_actions[1]['state'] == "UNOCCUPIED"
+    assert agent.control_actions[1]["state"] == "UNOCCUPIED"
     assert agent.occupancy_state == "UNOCCUPIED"
 
     agent.disconnect()

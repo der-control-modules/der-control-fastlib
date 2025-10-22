@@ -52,12 +52,17 @@ def test_message_bus_manager_example(message_bus_manager_fixture):
     assert not agent.connected
 
     # Create a connected agent
-    connected_agent = message_bus_manager_fixture.create_connected_agent("connected_agent")
+    connected_agent = message_bus_manager_fixture.create_connected_agent(
+        "connected_agent"
+    )
     assert connected_agent.identity == "connected_agent"
     assert connected_agent.connected
 
     # Get URLs
-    assert message_bus_manager_fixture.get_ws_url("test_agent") == f"ws://127.0.0.1:{port}/ws/test_agent"
+    assert (
+        message_bus_manager_fixture.get_ws_url("test_agent")
+        == f"ws://127.0.0.1:{port}/ws/test_agent"
+    )
 
 
 def test_with_fixture_message_bus(message_bus, test_port):
@@ -179,7 +184,9 @@ def test_custom_agent_classes():
         assert regular_agent.connected
 
         # Create custom agent
-        custom_agent = manager.create_connected_agent("custom_agent", agent_class=ExampleAgent)
+        custom_agent = manager.create_connected_agent(
+            "custom_agent", agent_class=ExampleAgent
+        )
         assert isinstance(custom_agent, ExampleAgent)
         assert custom_agent.connected
 
@@ -192,7 +199,9 @@ def test_custom_agent_classes():
         assert custom_agent.message_count == 0
 
         # Create another custom agent with convenience function
-        custom_agent2 = create_connected_test_agent("custom_agent2", agent_class=ExampleAgent)
+        custom_agent2 = create_connected_test_agent(
+            "custom_agent2", agent_class=ExampleAgent
+        )
         assert isinstance(custom_agent2, ExampleAgent)
         assert custom_agent2.connected
 

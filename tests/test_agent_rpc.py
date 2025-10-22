@@ -45,7 +45,9 @@ class TestAgentRPC:
         result = self.client_agent.vip.rpc.call("rpc_server", "echo", "Hello World")
         response = result.get(timeout=5)
 
-        assert response == "Echo: Hello World", f"Expected 'Echo: Hello World', got '{response}'"
+        assert (
+            response == "Echo: Hello World"
+        ), f"Expected 'Echo: Hello World', got '{response}'"
 
     def test_rpc_with_multiple_parameters(self):
         """Test RPC call with multiple parameters."""
@@ -90,23 +92,31 @@ class TestAgentRPC:
             result2.get(timeout=5)
             assert False, "Should have raised an exception"
         except Exception as e:
-            assert "Cannot divide by zero" in str(e), f"Expected division error, got {e}"
+            assert "Cannot divide by zero" in str(
+                e
+            ), f"Expected division error, got {e}"
 
     def test_rpc_nonexistent_method(self):
         """Test calling a non-existent RPC method."""
         # Try to call a method that doesn't exist
-        result = self.client_agent.vip.rpc.call("rpc_server", "nonexistent_method", "arg")
+        result = self.client_agent.vip.rpc.call(
+            "rpc_server", "nonexistent_method", "arg"
+        )
 
         try:
             result.get(timeout=5)
             assert False, "Should have raised an exception for non-existent method"
         except Exception as e:
             # Should get some kind of method not found error
-            assert "method" in str(e).lower() or "not found" in str(e).lower(), f"Expected method error, got {e}"
+            assert (
+                "method" in str(e).lower() or "not found" in str(e).lower()
+            ), f"Expected method error, got {e}"
 
     def test_rpc_to_nonexistent_agent(self):
         """Test RPC call to a non-existent agent."""
-        result = self.client_agent.vip.rpc.call("nonexistent_agent", "some_method", "arg")
+        result = self.client_agent.vip.rpc.call(
+            "nonexistent_agent", "some_method", "arg"
+        )
 
         try:
             result.get(timeout=5)
@@ -114,7 +124,8 @@ class TestAgentRPC:
         except Exception as e:
             # Should get some kind of agent not found or timeout error
             assert any(
-                word in str(e).lower() for word in ["timeout", "not found", "unreachable"]
+                word in str(e).lower()
+                for word in ["timeout", "not found", "unreachable"]
             ), f"Expected agent error, got {e}"
 
     def test_rpc_with_complex_data(self):
@@ -123,7 +134,10 @@ class TestAgentRPC:
         # Register method that handles complex data
         def process_data(data):
             if isinstance(data, dict):
-                return {k: v * 2 if isinstance(v, int | float) else v for k, v in data.items()}
+                return {
+                    k: v * 2 if isinstance(v, int | float) else v
+                    for k, v in data.items()
+                }
             elif isinstance(data, list):
                 return [x * 2 if isinstance(x, int | float) else x for x in data]
             else:
@@ -161,11 +175,19 @@ class TestAgentRPC:
         gevent.sleep(1)
 
         # Client calls server
-        result1 = self.client_agent.vip.rpc.call("rpc_server", "server_process", "data1")
+        result1 = self.client_agent.vip.rpc.call(
+            "rpc_server", "server_process", "data1"
+        )
         response1 = result1.get(timeout=5)
-        assert response1 == "Server processed: data1", f"Expected server response, got {response1}"
+        assert (
+            response1 == "Server processed: data1"
+        ), f"Expected server response, got {response1}"
 
         # Server calls client
-        result2 = self.server_agent.vip.rpc.call("rpc_client", "client_process", "data2")
+        result2 = self.server_agent.vip.rpc.call(
+            "rpc_client", "client_process", "data2"
+        )
         response2 = result2.get(timeout=5)
-        assert response2 == "Client processed: data2", f"Expected client response, got {response2}"
+        assert (
+            response2 == "Client processed: data2"
+        ), f"Expected client response, got {response2}"

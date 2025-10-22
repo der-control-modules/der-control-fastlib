@@ -167,7 +167,11 @@ class TestHierarchicalConfigNames:
         """Test very deeply nested hierarchical config name as requested."""
         agent_id = "test_agent"
         config_name = "devices/building/status/point/data/version"
-        config_data = {"version": "1.0.0", "timestamp": "2025-10-06", "status": "active"}
+        config_data = {
+            "version": "1.0.0",
+            "timestamp": "2025-10-06",
+            "status": "active",
+        }
 
         # Store the config
         url = f"{self.base_url}/{agent_id}/{config_name}"

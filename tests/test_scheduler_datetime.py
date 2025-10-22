@@ -37,7 +37,7 @@ class OccupancyAgent(Agent):
         # Schedule start and end events
         overrides = [
             self.core.schedule(start_time, self._do_control_action, gid, "OCCUPIED"),
-            self.core.schedule(end_time, self._do_control_action, gid, "UNOCCUPIED")
+            self.core.schedule(end_time, self._do_control_action, gid, "UNOCCUPIED"),
         ]
 
         _log.info(f"Current OVRR - {gid} -- {overrides}")
@@ -51,9 +51,7 @@ def test_datetime_one_time_scheduling(message_bus_manager_fixture):
     manager.start_bus()
 
     # Create and connect the agent
-    agent = OccupancyAgent("test.occupancy",
-                           host="127.0.0.1",
-                           port=manager.port)
+    agent = OccupancyAgent("test.occupancy", host="127.0.0.1", port=manager.port)
     agent.connect()
     agent.core._scheduler.start()  # Start the scheduler
 
@@ -102,9 +100,7 @@ def test_specific_datetime_scheduling(message_bus_manager_fixture):
     manager = message_bus_manager_fixture
     manager.start_bus()
 
-    agent = OccupancyAgent("test.occupancy2",
-                           host="127.0.0.1",
-                           port=manager.port)
+    agent = OccupancyAgent("test.occupancy2", host="127.0.0.1", port=manager.port)
     agent.connect()
     agent.core._scheduler.start()
 
@@ -144,9 +140,7 @@ def test_multiple_overrides(message_bus_manager_fixture):
     manager = message_bus_manager_fixture
     manager.start_bus()
 
-    agent = OccupancyAgent("test.occupancy3",
-                           host="127.0.0.1",
-                           port=manager.port)
+    agent = OccupancyAgent("test.occupancy3", host="127.0.0.1", port=manager.port)
     agent.connect()
     agent.core._scheduler.start()
 
@@ -154,14 +148,14 @@ def test_multiple_overrides(message_bus_manager_fixture):
 
     # Schedule multiple overrides
     gid1 = "override_1"
-    agent.schedule_override(gid1,
-                           now + timedelta(seconds=1),
-                           now + timedelta(seconds=3))
+    agent.schedule_override(
+        gid1, now + timedelta(seconds=1), now + timedelta(seconds=3)
+    )
 
     gid2 = "override_2"
-    agent.schedule_override(gid2,
-                           now + timedelta(seconds=2),
-                           now + timedelta(seconds=4))
+    agent.schedule_override(
+        gid2, now + timedelta(seconds=2), now + timedelta(seconds=4)
+    )
 
     # Wait for all events
     gevent.sleep(5)
@@ -181,9 +175,7 @@ def test_past_datetime_handling(message_bus_manager_fixture):
     manager = message_bus_manager_fixture
     manager.start_bus()
 
-    agent = OccupancyAgent("test.occupancy4",
-                           host="127.0.0.1",
-                           port=manager.port)
+    agent = OccupancyAgent("test.occupancy4", host="127.0.0.1", port=manager.port)
     agent.connect()
     agent.core._scheduler.start()
 

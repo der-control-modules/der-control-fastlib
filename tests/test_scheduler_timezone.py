@@ -38,7 +38,7 @@ def test_naive_vs_aware_datetime(message_bus_manager_fixture):
     # Get current times in different forms
     naive_now = datetime.now()
     aware_now_utc = datetime.now(timezone.utc)
-    aware_now_local = datetime.now(pytz.timezone('US/Eastern'))  # or your local TZ
+    aware_now_local = datetime.now(pytz.timezone("US/Eastern"))  # or your local TZ
 
     _log.info(f"Naive now: {naive_now}")
     _log.info(f"Aware UTC: {aware_now_utc}")
@@ -54,19 +54,25 @@ def test_naive_vs_aware_datetime(message_bus_manager_fixture):
     # Check what mktime does with each
     try:
         naive_timestamp = time.mktime(future_naive.timetuple())
-        _log.info(f"Naive -> mktime: {naive_timestamp} ({datetime.fromtimestamp(naive_timestamp)})")
+        _log.info(
+            f"Naive -> mktime: {naive_timestamp} ({datetime.fromtimestamp(naive_timestamp)})"
+        )
     except Exception as e:
         _log.error(f"Naive mktime failed: {e}")
 
     try:
         aware_utc_timestamp = time.mktime(future_aware_utc.timetuple())
-        _log.info(f"Aware UTC -> mktime: {aware_utc_timestamp} ({datetime.fromtimestamp(aware_utc_timestamp)})")
+        _log.info(
+            f"Aware UTC -> mktime: {aware_utc_timestamp} ({datetime.fromtimestamp(aware_utc_timestamp)})"
+        )
     except Exception as e:
         _log.error(f"Aware UTC mktime failed: {e}")
 
     try:
         aware_local_timestamp = time.mktime(future_aware_local.timetuple())
-        _log.info(f"Aware Local -> mktime: {aware_local_timestamp} ({datetime.fromtimestamp(aware_local_timestamp)})")
+        _log.info(
+            f"Aware Local -> mktime: {aware_local_timestamp} ({datetime.fromtimestamp(aware_local_timestamp)})"
+        )
     except Exception as e:
         _log.error(f"Aware Local mktime failed: {e}")
 
@@ -84,7 +90,9 @@ def test_naive_vs_aware_datetime(message_bus_manager_fixture):
         _log.error(f"Failed to schedule aware UTC datetime: {e}")
 
     try:
-        agent.core.schedule(future_aware_local, agent.test_callback, "aware_local_event")
+        agent.core.schedule(
+            future_aware_local, agent.test_callback, "aware_local_event"
+        )
         _log.info("✓ Scheduled aware local datetime")
     except Exception as e:
         _log.error(f"Failed to schedule aware local datetime: {e}")
@@ -104,7 +112,7 @@ def test_timezone_conversion_issue():
     naive_3pm = datetime.now().replace(hour=15, minute=0, second=0, microsecond=0)
 
     # Create the same time but timezone-aware
-    eastern = pytz.timezone('US/Eastern')
+    eastern = pytz.timezone("US/Eastern")
     aware_3pm_eastern = eastern.localize(naive_3pm)
 
     # If the server is in UTC, this could be very different!
@@ -124,12 +132,16 @@ def test_timezone_conversion_issue():
 
     # The issue: mktime() ignores timezone info!
     # It always interprets the time as local time
-    _log.warning(f"mktime ignores timezone! Both give same result: {naive_ts == aware_ts}")
+    _log.warning(
+        f"mktime ignores timezone! Both give same result: {naive_ts == aware_ts}"
+    )
 
     # Correct way to handle timezone-aware datetimes
     if aware_3pm_eastern.tzinfo:
         correct_timestamp = aware_3pm_eastern.timestamp()
-        _log.info(f"Correct timestamp() for aware: {correct_timestamp} -> {datetime.fromtimestamp(correct_timestamp)}")
+        _log.info(
+            f"Correct timestamp() for aware: {correct_timestamp} -> {datetime.fromtimestamp(correct_timestamp)}"
+        )
 
 
 def test_scheduler_timezone_fix(message_bus_manager_fixture):
@@ -141,7 +153,7 @@ def test_scheduler_timezone_fix(message_bus_manager_fixture):
     agent.connect()
 
     # Schedule something for 8am Eastern time
-    eastern = pytz.timezone('US/Eastern')
+    eastern = pytz.timezone("US/Eastern")
     now_eastern = datetime.now(eastern)
     tomorrow_8am_eastern = (now_eastern + timedelta(days=1)).replace(
         hour=8, minute=0, second=0, microsecond=0
@@ -172,9 +184,9 @@ if __name__ == "__main__":
     import pytest
 
     # Run the conversion test directly
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TIMEZONE CONVERSION ISSUE DEMONSTRATION")
-    print("="*60)
+    print("=" * 60)
     test_timezone_conversion_issue()
 
     # Run pytest tests

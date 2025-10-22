@@ -30,7 +30,9 @@ class MessageBusManager:
         self.temp_config_dir = None
         self.host = "127.0.0.1"
 
-    def start_bus(self, port: int | None = None, host: str = "127.0.0.1") -> tuple[FastAPIMessageBus, int]:
+    def start_bus(
+        self, port: int | None = None, host: str = "127.0.0.1"
+    ) -> tuple[FastAPIMessageBus, int]:
         """
         Start a message bus for testing.
 
@@ -58,9 +60,13 @@ class MessageBusManager:
         self.temp_config_dir = tempfile.mkdtemp(prefix="aems_test_config_")
 
         # Create and start the bus
-        self.bus = FastAPIMessageBus(host=host, port=port, config_store_dir=self.temp_config_dir)
+        self.bus = FastAPIMessageBus(
+            host=host, port=port, config_store_dir=self.temp_config_dir
+        )
 
-        print(f"Starting test message bus on {host}:{port} with config store: {self.temp_config_dir}")
+        print(
+            f"Starting test message bus on {host}:{port} with config store: {self.temp_config_dir}"
+        )
         self.bus.start()
 
         # Wait for server to be ready
@@ -73,8 +79,13 @@ class MessageBusManager:
             elapsed_time += check_interval
 
             if self.bus.is_running():
-                if hasattr(self.bus, "_server_thread") and self.bus._server_thread.is_alive():
-                    print(f"Test message bus started successfully after {elapsed_time} seconds")
+                if (
+                    hasattr(self.bus, "_server_thread")
+                    and self.bus._server_thread.is_alive()
+                ):
+                    print(
+                        f"Test message bus started successfully after {elapsed_time} seconds"
+                    )
                     return self.bus, port
 
         # If we get here, startup failed
@@ -93,7 +104,9 @@ class MessageBusManager:
                 shutil.rmtree(self.temp_config_dir)
                 print(f"Cleaned up test config store: {self.temp_config_dir}")
             except Exception as e:
-                print(f"Failed to clean up test config store {self.temp_config_dir}: {e}")
+                print(
+                    f"Failed to clean up test config store {self.temp_config_dir}: {e}"
+                )
 
         # Clean up environment variable
         if "AEMS_FASTAPI_TEST_PORT" in os.environ:
@@ -129,7 +142,9 @@ class MessageBusManager:
 
         return agent
 
-    def create_connected_agent(self, identity: str, agent_class=None, **kwargs) -> Agent:
+    def create_connected_agent(
+        self, identity: str, agent_class=None, **kwargs
+    ) -> Agent:
         """
         Create an agent and establish WebSocket connection to the test message bus.
 
@@ -150,7 +165,9 @@ class MessageBusManager:
 
         # Verify connection was established
         if not agent.connected:
-            raise RuntimeError(f"Failed to connect agent {identity} to test message bus")
+            raise RuntimeError(
+                f"Failed to connect agent {identity} to test message bus"
+            )
 
         print(f"Test agent {identity} connected successfully")
         return agent
@@ -183,7 +200,9 @@ class MessageBusManager:
 
 
 # Convenience functions for simple use cases
-def start_test_message_bus(port: int | None = None, host: str = "127.0.0.1") -> tuple[FastAPIMessageBus, int]:
+def start_test_message_bus(
+    port: int | None = None, host: str = "127.0.0.1"
+) -> tuple[FastAPIMessageBus, int]:
     """
     Start a test message bus (convenience function).
 
@@ -199,7 +218,11 @@ def start_test_message_bus(port: int | None = None, host: str = "127.0.0.1") -> 
 
 
 def create_test_agent(
-    identity: str, agent_class=None, port: int | None = None, host: str = "127.0.0.1", **kwargs
+    identity: str,
+    agent_class=None,
+    port: int | None = None,
+    host: str = "127.0.0.1",
+    **kwargs,
 ) -> Agent:
     """
     Create a test agent (convenience function).
@@ -227,7 +250,11 @@ def create_test_agent(
 
 
 def create_connected_test_agent(
-    identity: str, agent_class=None, port: int | None = None, host: str = "127.0.0.1", **kwargs
+    identity: str,
+    agent_class=None,
+    port: int | None = None,
+    host: str = "127.0.0.1",
+    **kwargs,
 ) -> Agent:
     """
     Create a test agent and establish WebSocket connection (convenience function).

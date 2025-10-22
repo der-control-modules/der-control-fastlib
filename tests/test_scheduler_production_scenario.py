@@ -22,15 +22,17 @@ class OccupancyOverrideAgent(Agent):
     def _do_control_action(self, gid: str, occupied: bool):
         """Simulate the control action that should fire."""
         action_time = datetime.now()
-        self.control_actions.append({
-            'gid': gid,
-            'occupied': occupied,
-            'time': action_time
-        })
+        self.control_actions.append(
+            {"gid": gid, "occupied": occupied, "time": action_time}
+        )
         _log.info(f"🏢 CONTROL ACTION: gid={gid}, occupied={occupied} at {action_time}")
-        print(f"✅ _do_control_action fired: gid={gid}, occupied={occupied} at {action_time}")
+        print(
+            f"✅ _do_control_action fired: gid={gid}, occupied={occupied} at {action_time}"
+        )
 
-    def schedule_occupancy_override(self, gid: str, start_time: datetime, end_time: datetime):
+    def schedule_occupancy_override(
+        self, gid: str, start_time: datetime, end_time: datetime
+    ):
         """Schedule occupancy override like in production."""
         print(f"\n📅 Scheduling occupancy override for {gid}:")
         print(f"   Start: {start_time} (occupied=True)")
@@ -45,9 +47,9 @@ class OccupancyOverrideAgent(Agent):
 
 def test_occupancy_override_8am_6pm(message_bus_manager_fixture):
     """Test the exact production scenario: 8am-6pm occupancy override."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🏢 TESTING PRODUCTION OCCUPANCY OVERRIDE (8AM-6PM)")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -89,7 +91,7 @@ def test_occupancy_override_8am_6pm(message_bus_manager_fixture):
     # Check if any past events fired
     past_events_fired = 0
     for action in agent.control_actions:
-        if action['time'] < now + timedelta(seconds=3):
+        if action["time"] < now + timedelta(seconds=3):
             past_events_fired += 1
             print(f"✅ Past event fired: {action}")
 
@@ -102,9 +104,9 @@ def test_occupancy_override_8am_6pm(message_bus_manager_fixture):
 
 def test_multiple_overrides_throughout_day(message_bus_manager_fixture):
     """Test multiple occupancy overrides scheduled at different times."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🏢 TESTING MULTIPLE OCCUPANCY OVERRIDES")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -118,12 +120,27 @@ def test_multiple_overrides_throughout_day(message_bus_manager_fixture):
     # Schedule multiple overrides with different timings
     overrides = [
         # Past events (should fire immediately)
-        ("zone_1", now - timedelta(hours=2), now - timedelta(hours=1)),  # Completely in past
-        ("zone_2", now - timedelta(minutes=30), now + timedelta(minutes=30)),  # Start in past, end in future
-
+        (
+            "zone_1",
+            now - timedelta(hours=2),
+            now - timedelta(hours=1),
+        ),  # Completely in past
+        (
+            "zone_2",
+            now - timedelta(minutes=30),
+            now + timedelta(minutes=30),
+        ),  # Start in past, end in future
         # Future events
-        ("zone_3", now + timedelta(seconds=1), now + timedelta(seconds=3)),  # Near future
-        ("zone_4", now + timedelta(seconds=2), now + timedelta(seconds=4)),  # Slightly later
+        (
+            "zone_3",
+            now + timedelta(seconds=1),
+            now + timedelta(seconds=3),
+        ),  # Near future
+        (
+            "zone_4",
+            now + timedelta(seconds=2),
+            now + timedelta(seconds=4),
+        ),  # Slightly later
     ]
 
     for gid, start, end in overrides:
@@ -133,13 +150,17 @@ def test_multiple_overrides_throughout_day(message_bus_manager_fixture):
     gevent.sleep(1)
 
     # Check past events fired
-    past_actions = [a for a in agent.control_actions if a['time'] < now + timedelta(seconds=2)]
+    past_actions = [
+        a for a in agent.control_actions if a["time"] < now + timedelta(seconds=2)
+    ]
     print(f"\n📊 Past events fired: {len(past_actions)}")
     for action in past_actions:
         print(f"   - {action['gid']}: occupied={action['occupied']}")
 
     # Should have 3 past events: zone_1 start, zone_1 end, zone_2 start
-    assert len(past_actions) >= 3, f"Expected at least 3 past events, got {len(past_actions)}"
+    assert (
+        len(past_actions) >= 3
+    ), f"Expected at least 3 past events, got {len(past_actions)}"
 
     # Wait for future events
     gevent.sleep(5)
@@ -147,19 +168,23 @@ def test_multiple_overrides_throughout_day(message_bus_manager_fixture):
     # Check all events fired
     print(f"\n📊 Total events fired: {len(agent.control_actions)}")
     for action in agent.control_actions:
-        print(f"   - {action['gid']}: occupied={action['occupied']} at {action['time']}")
+        print(
+            f"   - {action['gid']}: occupied={action['occupied']} at {action['time']}"
+        )
 
     # Should have 8 total events (4 zones × 2 events each)
-    assert len(agent.control_actions) == 8, f"Expected 8 total events, got {len(agent.control_actions)}"
+    assert (
+        len(agent.control_actions) == 8
+    ), f"Expected 8 total events, got {len(agent.control_actions)}"
 
     agent.disconnect()
 
 
 def test_rapid_override_updates(message_bus_manager_fixture):
     """Test rapid updates to occupancy overrides (rescheduling)."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🏢 TESTING RAPID OVERRIDE UPDATES")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -172,8 +197,8 @@ def test_rapid_override_updates(message_bus_manager_fixture):
 
     # Simulate rapid scheduling of overrides (like user changing times quickly)
     for i in range(5):
-        start = now + timedelta(seconds=1 + i*0.5)
-        end = now + timedelta(seconds=2 + i*0.5)
+        start = now + timedelta(seconds=1 + i * 0.5)
+        end = now + timedelta(seconds=2 + i * 0.5)
         agent.schedule_occupancy_override(f"room_{i}", start, end)
         gevent.sleep(0.1)  # Small delay between schedules
 
@@ -184,18 +209,22 @@ def test_rapid_override_updates(message_bus_manager_fixture):
     print(f"\n📊 Total events fired: {len(agent.control_actions)}")
 
     # Should have 10 events (5 rooms × 2 events each)
-    assert len(agent.control_actions) == 10, f"Expected 10 events, got {len(agent.control_actions)}"
+    assert (
+        len(agent.control_actions) == 10
+    ), f"Expected 10 events, got {len(agent.control_actions)}"
 
     # Verify each room has both start and end
     rooms_started = set()
     rooms_ended = set()
     for action in agent.control_actions:
-        if action['occupied']:
-            rooms_started.add(action['gid'])
+        if action["occupied"]:
+            rooms_started.add(action["gid"])
         else:
-            rooms_ended.add(action['gid'])
+            rooms_ended.add(action["gid"])
 
-    assert len(rooms_started) == 5, f"Expected 5 rooms started, got {len(rooms_started)}"
+    assert (
+        len(rooms_started) == 5
+    ), f"Expected 5 rooms started, got {len(rooms_started)}"
     assert len(rooms_ended) == 5, f"Expected 5 rooms ended, got {len(rooms_ended)}"
     assert rooms_started == rooms_ended, "Start and end rooms don't match!"
 
@@ -206,9 +235,9 @@ def test_rapid_override_updates(message_bus_manager_fixture):
 
 def test_edge_case_midnight_crossing(message_bus_manager_fixture):
     """Test occupancy override that crosses midnight."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🏢 TESTING MIDNIGHT CROSSING OVERRIDE")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -221,12 +250,18 @@ def test_edge_case_midnight_crossing(message_bus_manager_fixture):
 
     # Schedule override from 11pm today to 1am tomorrow
     today_11pm = now.replace(hour=23, minute=0, second=0, microsecond=0)
-    tomorrow_1am = (now + timedelta(days=1)).replace(hour=1, minute=0, second=0, microsecond=0)
+    tomorrow_1am = (now + timedelta(days=1)).replace(
+        hour=1, minute=0, second=0, microsecond=0
+    )
 
     # If it's already past 11pm, adjust
     if now.hour >= 23:
-        today_11pm = (now + timedelta(days=1)).replace(hour=23, minute=0, second=0, microsecond=0)
-        tomorrow_1am = (now + timedelta(days=2)).replace(hour=1, minute=0, second=0, microsecond=0)
+        today_11pm = (now + timedelta(days=1)).replace(
+            hour=23, minute=0, second=0, microsecond=0
+        )
+        tomorrow_1am = (now + timedelta(days=2)).replace(
+            hour=1, minute=0, second=0, microsecond=0
+        )
 
     print(f"📍 Current time: {now}")
     print("📅 Scheduling midnight-crossing override:")

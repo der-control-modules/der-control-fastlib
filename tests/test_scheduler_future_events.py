@@ -26,21 +26,25 @@ class FutureEventTestAgent(Agent):
         fire_time = time.time()
         self.events_fired.append(event_name)
         self.event_times[event_name] = {
-            'fired_at': fire_time,
-            'expected_at': expected_time,
-            'error': fire_time - expected_time if expected_time else None
+            "fired_at": fire_time,
+            "expected_at": expected_time,
+            "error": fire_time - expected_time if expected_time else None,
         }
-        _log.info(f"🎯 Event '{event_name}' fired at {datetime.fromtimestamp(fire_time)}")
+        _log.info(
+            f"🎯 Event '{event_name}' fired at {datetime.fromtimestamp(fire_time)}"
+        )
         if expected_time:
             error = fire_time - expected_time
-            _log.info(f"   Expected: {datetime.fromtimestamp(expected_time)}, Error: {error:.3f}s")
+            _log.info(
+                f"   Expected: {datetime.fromtimestamp(expected_time)}, Error: {error:.3f}s"
+            )
 
 
 def test_single_future_event_fires_on_time(message_bus_manager_fixture):
     """Test that a single future event fires at the correct time."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING SINGLE FUTURE EVENT TIMING")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -57,30 +61,36 @@ def test_single_future_event_fires_on_time(message_bus_manager_fixture):
     print(f"📅 Current time: {datetime.now()}")
     print(f"📅 Scheduling event for: {future_time} (2 seconds from now)")
 
-    agent.core.schedule(future_time, agent.test_callback, "future_event", expected_fire_time)
+    agent.core.schedule(
+        future_time, agent.test_callback, "future_event", expected_fire_time
+    )
 
     # Wait for the event to fire (should take ~2 seconds)
     gevent.sleep(3)
 
     # Verify the event fired
-    assert len(agent.events_fired) == 1, f"Expected 1 event, got {len(agent.events_fired)}"
+    assert (
+        len(agent.events_fired) == 1
+    ), f"Expected 1 event, got {len(agent.events_fired)}"
     assert agent.events_fired[0] == "future_event"
 
     # Verify timing accuracy (within 100ms tolerance)
     event_info = agent.event_times["future_event"]
-    timing_error = abs(event_info['error'])
+    timing_error = abs(event_info["error"])
 
     print(f"✅ Future event fired with {timing_error:.3f}s timing error")
-    assert timing_error < 0.1, f"Future event timing error too large: {timing_error:.3f}s"
+    assert (
+        timing_error < 0.1
+    ), f"Future event timing error too large: {timing_error:.3f}s"
 
     agent.disconnect()
 
 
 def test_multiple_future_events_fire_in_order(message_bus_manager_fixture):
     """Test that multiple future events fire in the correct order at the right times."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING MULTIPLE FUTURE EVENTS")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -108,27 +118,34 @@ def test_multiple_future_events_fire_in_order(message_bus_manager_fixture):
     gevent.sleep(4)
 
     # Verify all events fired
-    assert len(agent.events_fired) == 3, f"Expected 3 events, got {len(agent.events_fired)}"
+    assert (
+        len(agent.events_fired) == 3
+    ), f"Expected 3 events, got {len(agent.events_fired)}"
 
     # Verify they fired in the correct order
-    assert agent.events_fired == ["event_1s", "event_2s", "event_3s"], \
-        f"Events fired in wrong order: {agent.events_fired}"
+    assert agent.events_fired == [
+        "event_1s",
+        "event_2s",
+        "event_3s",
+    ], f"Events fired in wrong order: {agent.events_fired}"
 
     # Verify timing accuracy for each event
     for _delay, event_name in events:
         event_info = agent.event_times[event_name]
-        timing_error = abs(event_info['error'])
+        timing_error = abs(event_info["error"])
         print(f"✅ {event_name} fired with {timing_error:.3f}s timing error")
-        assert timing_error < 0.1, f"{event_name} timing error too large: {timing_error:.3f}s"
+        assert (
+            timing_error < 0.1
+        ), f"{event_name} timing error too large: {timing_error:.3f}s"
 
     agent.disconnect()
 
 
 def test_rapid_future_events(message_bus_manager_fixture):
     """Test scheduling many events in rapid succession."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING RAPID FUTURE EVENT SCHEDULING")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -155,15 +172,16 @@ def test_rapid_future_events(message_bus_manager_fixture):
     gevent.sleep(num_events * interval + 1)
 
     # Verify all events fired
-    assert len(agent.events_fired) == num_events, \
-        f"Expected {num_events} events, got {len(agent.events_fired)}"
+    assert (
+        len(agent.events_fired) == num_events
+    ), f"Expected {num_events} events, got {len(agent.events_fired)}"
 
     # Check timing accuracy
     max_error = 0
     for i in range(num_events):
         event_name = f"rapid_{i}"
         if event_name in agent.event_times:
-            error = abs(agent.event_times[event_name]['error'])
+            error = abs(agent.event_times[event_name]["error"])
             max_error = max(max_error, error)
 
     print(f"✅ All {num_events} rapid events fired, max timing error: {max_error:.3f}s")
@@ -174,9 +192,9 @@ def test_rapid_future_events(message_bus_manager_fixture):
 
 def test_far_future_event(message_bus_manager_fixture):
     """Test scheduling an event far in the future (10 seconds)."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING FAR FUTURE EVENT")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -204,11 +222,13 @@ def test_far_future_event(message_bus_manager_fixture):
     # Wait for the rest and verify it fires
     gevent.sleep(6)  # Total 11 seconds
 
-    assert len(agent.events_fired) == 1, f"Expected 1 event, got {len(agent.events_fired)}"
+    assert (
+        len(agent.events_fired) == 1
+    ), f"Expected 1 event, got {len(agent.events_fired)}"
 
     # Check timing
     event_info = agent.event_times["far_future"]
-    timing_error = abs(event_info['error'])
+    timing_error = abs(event_info["error"])
     print(f"✅ Far future event fired with {timing_error:.3f}s timing error")
     assert timing_error < 0.2, f"Timing error too large: {timing_error:.3f}s"
 
@@ -217,9 +237,9 @@ def test_far_future_event(message_bus_manager_fixture):
 
 def test_mixed_timing_events(message_bus_manager_fixture):
     """Test a mix of immediate, near, and far future events."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING MIXED TIMING EVENTS")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -232,11 +252,11 @@ def test_mixed_timing_events(message_bus_manager_fixture):
 
     # Schedule events with various timings
     events = [
-        (0.1, "immediate"),    # Almost immediate
+        (0.1, "immediate"),  # Almost immediate
         (0.5, "half_second"),  # Half second
-        (1.5, "one_half_sec"), # 1.5 seconds
-        (3.0, "three_sec"),    # 3 seconds
-        (5.0, "five_sec"),     # 5 seconds
+        (1.5, "one_half_sec"),  # 1.5 seconds
+        (3.0, "three_sec"),  # 3 seconds
+        (5.0, "five_sec"),  # 5 seconds
     ]
 
     for delay, event_name in events:
@@ -249,20 +269,24 @@ def test_mixed_timing_events(message_bus_manager_fixture):
     gevent.sleep(6)
 
     # Verify all events fired
-    assert len(agent.events_fired) == len(events), \
-        f"Expected {len(events)} events, got {len(agent.events_fired)}"
+    assert len(agent.events_fired) == len(
+        events
+    ), f"Expected {len(events)} events, got {len(agent.events_fired)}"
 
     # Verify order
     expected_order = [name for _, name in events]
-    assert agent.events_fired == expected_order, \
-        f"Events fired in wrong order. Expected: {expected_order}, Got: {agent.events_fired}"
+    assert (
+        agent.events_fired == expected_order
+    ), f"Events fired in wrong order. Expected: {expected_order}, Got: {agent.events_fired}"
 
     # Check timing for all events
     for delay, event_name in events:
         event_info = agent.event_times[event_name]
-        timing_error = abs(event_info['error'])
+        timing_error = abs(event_info["error"])
         print(f"✅ {event_name} (+{delay}s) fired with {timing_error:.3f}s error")
-        assert timing_error < 0.2, f"{event_name} timing error too large: {timing_error:.3f}s"
+        assert (
+            timing_error < 0.2
+        ), f"{event_name} timing error too large: {timing_error:.3f}s"
 
     agent.disconnect()
 

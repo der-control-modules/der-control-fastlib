@@ -127,19 +127,38 @@ class ColoredFormatter(logging.Formatter):
 
         # Pattern to match timestamp at the beginning
         timestamp_pattern = r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})"
-        formatted = re.sub(timestamp_pattern, f"{self.SECTION_COLORS['timestamp']}\\1{self.RESET}", formatted)
+        formatted = re.sub(
+            timestamp_pattern,
+            f"{self.SECTION_COLORS['timestamp']}\\1{self.RESET}",
+            formatted,
+        )
 
         # Color the log level (looks for level names in the formatted string)
         level_pattern = f"({record.levelname})"
-        formatted = re.sub(level_pattern, f"{level_color}{self.BOLD}\\1{self.RESET}", formatted, count=1)
+        formatted = re.sub(
+            level_pattern,
+            f"{level_color}{self.BOLD}\\1{self.RESET}",
+            formatted,
+            count=1,
+        )
 
         # Color the module name (looks for module:lineno pattern)
         module_pattern = f"({record.module}):"
-        formatted = re.sub(module_pattern, f"{self.SECTION_COLORS['module']}\\1{self.RESET}:", formatted, count=1)
+        formatted = re.sub(
+            module_pattern,
+            f"{self.SECTION_COLORS['module']}\\1{self.RESET}:",
+            formatted,
+            count=1,
+        )
 
         # Color the line number (looks for :number pattern after module)
         lineno_pattern = f":({record.lineno})"
-        formatted = re.sub(lineno_pattern, f":{self.SECTION_COLORS['lineno']}\\1{self.RESET}", formatted, count=1)
+        formatted = re.sub(
+            lineno_pattern,
+            f":{self.SECTION_COLORS['lineno']}\\1{self.RESET}",
+            formatted,
+            count=1,
+        )
 
         return formatted
 
@@ -299,7 +318,8 @@ class FastAPIMessageBus(MessageBus):
                                 if hasattr(message, "peer") and message.peer in self.manager.active_connections:
                                     _log.debug(f"Forwarding VIP RPC message to {message.peer}")
                                     await self.manager.send_message(
-                                        message.peer, {"type": "vip", "message": message.__dict__}
+                                        message.peer,
+                                        {"type": "vip", "message": message.__dict__},
                                     )
                             elif message.subsystem == "rpc_response":
                                 # Handle RPC response
@@ -315,7 +335,10 @@ class FastAPIMessageBus(MessageBus):
                                     if hasattr(message, "peer") and message.peer in self.manager.active_connections:
                                         await self.manager.send_message(
                                             message.peer,
-                                            {"type": "vip", "message": message.__dict__},
+                                            {
+                                                "type": "vip",
+                                                "message": message.__dict__,
+                                            },
                                         )
 
                     elif data["type"] == "subscribe":
@@ -418,11 +441,19 @@ class FastAPIMessageBus(MessageBus):
             return {"status": "success", "data": configs}
 
         @self.app.get("/config-store/{agent_id}/{config_name:path}")
-        async def get_config(agent_id: str, config_name: str, raw: bool = False, resolve_references: bool = True):
+        async def get_config(
+            agent_id: str,
+            config_name: str,
+            raw: bool = False,
+            resolve_references: bool = True,
+        ):
             """Retrieve a configuration for an agent with optional config:// reference resolution."""
             config = self.config_store.retrieve(agent_id, config_name, raw, resolve_references)
             if config is None:
-                raise HTTPException(status_code=404, detail=f"Config {config_name} not found for agent {agent_id}")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Config {config_name} not found for agent {agent_id}",
+                )
             return {"status": "success", "data": config}
 
         @self.app.put("/config-store/{agent_id}/{config_name:path}")
@@ -432,7 +463,10 @@ class FastAPIMessageBus(MessageBus):
             config_data: Any = Body(..., description="Configuration data (JSON object, array, or primitive)"),
             request: Request = None,
             requesting_agent: str = Query(None, description="Identity of the agent making the request"),
-            send_update: bool = Query(True, description="Whether to send config.update RPC notification to the agent"),
+            send_update: bool = Query(
+                True,
+                description="Whether to send config.update RPC notification to the agent",
+            ),
         ):
             """Store a configuration for an agent."""
             # Determine if this is an external update or self-update
@@ -460,19 +494,35 @@ class FastAPIMessageBus(MessageBus):
                 if "csv" in content_type:
                     # For CSV, we need the raw request body
                     if request is None:
-                        raise HTTPException(status_code=400, detail="CSV content requires raw request body")
+                        raise HTTPException(
+                            status_code=400,
+                            detail="CSV content requires raw request body",
+                        )
                     csv_content = await request.body()
                     csv_text = csv_content.decode("utf-8")
-                    success = self.config_store.store(agent_id, config_name, csv_text, "csv", send_update=should_notify)
+                    success = self.config_store.store(
+                        agent_id,
+                        config_name,
+                        csv_text,
+                        "csv",
+                        send_update=should_notify,
+                    )
                 else:
                     # Process as JSON (config_data is already parsed JSON from Body)
                     success = self.config_store.store(
-                        agent_id, config_name, config_data, "json", send_update=should_notify
+                        agent_id,
+                        config_name,
+                        config_data,
+                        "json",
+                        send_update=should_notify,
                     )
             except ValueError as json_error:
                 raise HTTPException(status_code=400, detail=f"Invalid JSON data: {str(json_error)}")
             except UnicodeDecodeError as decode_error:
-                raise HTTPException(status_code=400, detail=f"Invalid text encoding: {str(decode_error)}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid text encoding: {str(decode_error)}",
+                )
 
             if success:
                 # Config store now handles RPC notifications (VOLTTRON-style) based on send_update flag
@@ -485,7 +535,10 @@ class FastAPIMessageBus(MessageBus):
             agent_id: str,
             config_name: str,
             requesting_agent: str = Query(None, description="Identity of the agent making the request"),
-            send_update: bool = Query(True, description="Whether to send config.update RPC notification to the agent"),
+            send_update: bool = Query(
+                True,
+                description="Whether to send config.update RPC notification to the agent",
+            ),
         ):
             """Delete a configuration for an agent."""
             # Determine if this is an external update or self-update
@@ -509,7 +562,10 @@ class FastAPIMessageBus(MessageBus):
                 # Config store now handles RPC notifications (VOLTTRON-style) based on send_update flag
                 return {"status": "success"}
             else:
-                raise HTTPException(status_code=404, detail=f"Config {config_name} not found for agent {agent_id}")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Config {config_name} not found for agent {agent_id}",
+                )
 
         @self.app.get("/")
         async def root(request: Request):
@@ -540,7 +596,11 @@ class FastAPIMessageBus(MessageBus):
         async def get_version():
             """Get the current server version."""
             version_string = get_package_version()
-            return {"version": version_string, "service": "aems-server", "status": "running"}
+            return {
+                "version": version_string,
+                "service": "aems-server",
+                "status": "running",
+            }
 
         @self.app.get("/health")
         async def health_check():
@@ -560,7 +620,7 @@ class FastAPIMessageBus(MessageBus):
                 connections[identity] = {
                     "identity": identity,
                     "connected": True,
-                    "client_state": websocket.client_state.name if hasattr(websocket, "client_state") else "unknown",
+                    "client_state": (websocket.client_state.name if hasattr(websocket, "client_state") else "unknown"),
                     "connection_time": getattr(websocket, "_connection_time", "unknown"),
                 }
 
@@ -578,7 +638,7 @@ class FastAPIMessageBus(MessageBus):
                 return {
                     "identity": agent_identity,
                     "connected": True,
-                    "client_state": websocket.client_state.name if hasattr(websocket, "client_state") else "unknown",
+                    "client_state": (websocket.client_state.name if hasattr(websocket, "client_state") else "unknown"),
                     "connection_time": getattr(websocket, "_connection_time", "unknown"),
                     "pending_rpc_calls": len(
                         [msg_id for msg_id in self.manager.rpc_responses if msg_id.startswith(agent_identity)]
@@ -598,7 +658,11 @@ class FastAPIMessageBus(MessageBus):
                 ping_id = str(uuid.uuid4())
                 await self.manager.send_message(
                     agent_identity,
-                    {"type": "ping", "ping_id": ping_id, "timestamp": datetime.datetime.now().isoformat()},
+                    {
+                        "type": "ping",
+                        "ping_id": ping_id,
+                        "timestamp": datetime.datetime.now().isoformat(),
+                    },
                 )
                 return {
                     "status": "ping_sent",
@@ -617,7 +681,7 @@ class FastAPIMessageBus(MessageBus):
                 pending_calls[msg_id] = {
                     "msg_id": msg_id,
                     "done": future.done(),
-                    "cancelled": future.cancelled() if hasattr(future, "cancelled") else False,
+                    "cancelled": (future.cancelled() if hasattr(future, "cancelled") else False),
                 }
 
             return {
@@ -672,7 +736,10 @@ class FastAPIMessageBus(MessageBus):
                     missing_fields.append("username")
                 if final_password is None:
                     missing_fields.append("password")
-                raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing_fields)}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Missing required fields: {', '.join(missing_fields)}",
+                )
 
             # Check for empty credentials (should be 401, not 400)
             if not final_username or not final_password:
@@ -832,7 +899,8 @@ class FastAPIMessageBus(MessageBus):
                     self.manager.clear_rpc_response(msg_id)
                     # Return JSON-RPC 2.0 error response for timeout
                     return JsonRpcResponse(
-                        id=agent_id, error=JsonRpcError(code=-32603, message="Internal error: RPC call timed out")
+                        id=agent_id,
+                        error=JsonRpcError(code=-32603, message="Internal error: RPC call timed out"),
                     )
 
             except KeyError as key_error:
@@ -840,21 +908,24 @@ class FastAPIMessageBus(MessageBus):
                 self.manager.clear_rpc_response(msg_id)
                 _log.error(f"Missing key in RPC processing: {key_error}")
                 return JsonRpcResponse(
-                    id=agent_id, error=JsonRpcError(code=-32602, message=f"Invalid params: missing {str(key_error)}")
+                    id=agent_id,
+                    error=JsonRpcError(code=-32602, message=f"Invalid params: missing {str(key_error)}"),
                 )
             except ConnectionError as conn_error:
                 # Clean up the future
                 self.manager.clear_rpc_response(msg_id)
                 _log.error(f"Connection error during RPC: {conn_error}")
                 return JsonRpcResponse(
-                    id=agent_id, error=JsonRpcError(code=-32603, message="Internal error: Connection failed")
+                    id=agent_id,
+                    error=JsonRpcError(code=-32603, message="Internal error: Connection failed"),
                 )
             except Exception as rpc_error:
                 # Clean up the future - this is our fallback for truly unexpected errors
                 self.manager.clear_rpc_response(msg_id)
                 _log.error(f"Unexpected error in RPC processing: {type(rpc_error).__name__}: {rpc_error}")
                 return JsonRpcResponse(
-                    id=agent_id, error=JsonRpcError(code=-32603, message="Internal error: Unexpected error occurred")
+                    id=agent_id,
+                    error=JsonRpcError(code=-32603, message="Internal error: Unexpected error occurred"),
                 )
 
     def start(self):
@@ -987,8 +1058,15 @@ def _main():
     parser = argparse.ArgumentParser(description="AEMS Message Bus Server")
     parser.add_argument("--host", default="127.0.0.1", help="Host address to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
-    parser.add_argument("--volttron-home", default=os.environ.get("VOLTTRON_HOME"), help="VOLTTRON_HOME directory")
-    parser.add_argument("--config-dir", help="Config store directory (defaults to VOLTTRON_HOME/aems_config_store)")
+    parser.add_argument(
+        "--volttron-home",
+        default=os.environ.get("VOLTTRON_HOME"),
+        help="VOLTTRON_HOME directory",
+    )
+    parser.add_argument(
+        "--config-dir",
+        help="Config store directory (defaults to VOLTTRON_HOME/aems_config_store)",
+    )
     parser.add_argument(
         "--reload",
         action="store_true",
@@ -1032,7 +1110,12 @@ def _main():
         _log.info("Debugger detected - using direct uvicorn.run() for better debugging support")
 
         # Create the FastAPI app directly for uvicorn.run()
-        server = FastAPIMessageBus(host=args.host, port=args.port, config_store_dir=config_dir, reload=args.reload)
+        server = FastAPIMessageBus(
+            host=args.host,
+            port=args.port,
+            config_store_dir=config_dir,
+            reload=args.reload,
+        )
 
         # Use uvicorn.run() directly for debugging
         # Set up colored logging before starting uvicorn to avoid config issues

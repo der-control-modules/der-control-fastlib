@@ -26,14 +26,16 @@ class PastEventTestAgent(Agent):
         fire_time = time.time()
         self.events_fired.append(event_name)
         self.event_times[event_name] = fire_time
-        _log.info(f"🎯 Event '{event_name}' fired at {datetime.fromtimestamp(fire_time)}")
+        _log.info(
+            f"🎯 Event '{event_name}' fired at {datetime.fromtimestamp(fire_time)}"
+        )
 
 
 def test_past_event_fires_immediately(message_bus_manager_fixture):
     """Test that events scheduled in the past fire immediately."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING PAST EVENT IMMEDIATE FIRING")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -55,7 +57,9 @@ def test_past_event_fires_immediately(message_bus_manager_fixture):
     gevent.sleep(1)
 
     # Verify the event fired
-    assert len(agent.events_fired) == 1, f"Expected 1 event, got {len(agent.events_fired)}"
+    assert (
+        len(agent.events_fired) == 1
+    ), f"Expected 1 event, got {len(agent.events_fired)}"
     assert agent.events_fired[0] == "past_event"
 
     # Verify it fired quickly after scheduling (within 1 second)
@@ -70,9 +74,9 @@ def test_past_event_fires_immediately(message_bus_manager_fixture):
 
 def test_multiple_past_events_fire_immediately(message_bus_manager_fixture):
     """Test that multiple past events all fire immediately."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING MULTIPLE PAST EVENTS")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -98,7 +102,9 @@ def test_multiple_past_events_fire_immediately(message_bus_manager_fixture):
     gevent.sleep(1)
 
     # Verify all events fired
-    assert len(agent.events_fired) == 3, f"Expected 3 events, got {len(agent.events_fired)}"
+    assert (
+        len(agent.events_fired) == 3
+    ), f"Expected 3 events, got {len(agent.events_fired)}"
     assert set(agent.events_fired) == {"past_10s", "past_5s", "past_1s"}
 
     # Verify they all fired quickly
@@ -106,16 +112,18 @@ def test_multiple_past_events_fire_immediately(message_bus_manager_fixture):
         fire_time = agent.event_times[event_name]
         time_to_fire = fire_time - schedule_time
         print(f"✅ {event_name} fired {time_to_fire:.3f} seconds after scheduling")
-        assert time_to_fire < 1.0, f"{event_name} took too long to fire: {time_to_fire:.3f}s"
+        assert (
+            time_to_fire < 1.0
+        ), f"{event_name} took too long to fire: {time_to_fire:.3f}s"
 
     agent.disconnect()
 
 
 def test_past_event_added_after_agent_startup(message_bus_manager_fixture):
     """Test that past events added after initial agent startup still fire immediately."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING PAST EVENT AFTER AGENT STARTUP (Production Scenario)")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -139,7 +147,9 @@ def test_past_event_added_after_agent_startup(message_bus_manager_fixture):
     gevent.sleep(1)
 
     # Verify the event fired
-    assert len(agent.events_fired) == 1, f"Expected 1 event, got {len(agent.events_fired)}"
+    assert (
+        len(agent.events_fired) == 1
+    ), f"Expected 1 event, got {len(agent.events_fired)}"
     assert agent.events_fired[0] == "production_past_event"
 
     # Verify it fired quickly
@@ -147,16 +157,18 @@ def test_past_event_added_after_agent_startup(message_bus_manager_fixture):
     time_to_fire = fire_time - schedule_time
 
     print(f"✅ Production past event fired {time_to_fire:.3f} seconds after scheduling")
-    assert time_to_fire < 1.0, f"Production past event took too long: {time_to_fire:.3f}s"
+    assert (
+        time_to_fire < 1.0
+    ), f"Production past event took too long: {time_to_fire:.3f}s"
 
     agent.disconnect()
 
 
 def test_mixed_past_and_future_events(message_bus_manager_fixture):
     """Test scheduling a mix of past and future events."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING MIXED PAST AND FUTURE EVENTS")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()

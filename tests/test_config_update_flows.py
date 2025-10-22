@@ -25,7 +25,12 @@ class CallbackTrackingAgent(Agent):
     def on_config_update(self, config_name, action, contents):
         """Track config updates with timestamps."""
         self.callback_history.append(
-            {"config_name": config_name, "action": action, "contents": contents, "timestamp": time.time()}
+            {
+                "config_name": config_name,
+                "action": action,
+                "contents": contents,
+                "timestamp": time.time(),
+            }
         )
         # Store the latest value
         if action == "DELETE":
@@ -70,10 +75,14 @@ class TestConfigUpdateFlows:
         config_name = "external_test"
 
         # Create tracking agent
-        self.tracking_agent = self.manager.create_connected_agent(agent_id, agent_class=CallbackTrackingAgent)
+        self.tracking_agent = self.manager.create_connected_agent(
+            agent_id, agent_class=CallbackTrackingAgent
+        )
 
         # Subscribe to config updates - use config_name parameter
-        self.tracking_agent.vip.config.subscribe(self.tracking_agent.on_config_update, config_name=config_name)
+        self.tracking_agent.vip.config.subscribe(
+            self.tracking_agent.on_config_update, config_name=config_name
+        )
 
         # Store initial config
         initial_config = {"version": 1, "source": "internal"}
@@ -96,10 +105,14 @@ class TestConfigUpdateFlows:
 
         # Verify cache was updated automatically
         cached_value = self.tracking_agent.vip.config.get(config_name)
-        assert cached_value == updated_config, f"Cache should be updated: {cached_value}"
+        assert (
+            cached_value == updated_config
+        ), f"Cache should be updated: {cached_value}"
 
         # Verify callback was triggered
-        assert len(self.tracking_agent.callback_history) > 0, "Callback should have been triggered"
+        assert (
+            len(self.tracking_agent.callback_history) > 0
+        ), "Callback should have been triggered"
 
         last_callback = self.tracking_agent.callback_history[-1]
         assert last_callback["config_name"] == config_name
@@ -112,10 +125,14 @@ class TestConfigUpdateFlows:
         config_name = "self_update_test"
 
         # Create tracking agent
-        self.tracking_agent = self.manager.create_connected_agent(agent_id, agent_class=CallbackTrackingAgent)
+        self.tracking_agent = self.manager.create_connected_agent(
+            agent_id, agent_class=CallbackTrackingAgent
+        )
 
         # Subscribe to config updates - use config_name parameter
-        self.tracking_agent.vip.config.subscribe(self.tracking_agent.on_config_update, config_name=config_name)
+        self.tracking_agent.vip.config.subscribe(
+            self.tracking_agent.on_config_update, config_name=config_name
+        )
 
         gevent.sleep(1)
 
@@ -131,10 +148,15 @@ class TestConfigUpdateFlows:
         gevent.sleep(1)
 
         # Verify callback was triggered
-        assert len(self.tracking_agent.callback_history) > 0, "Callback should be triggered when send_update=True"
+        assert (
+            len(self.tracking_agent.callback_history) > 0
+        ), "Callback should be triggered when send_update=True"
 
         last_callback = self.tracking_agent.callback_history[-1]
-        assert last_callback["action"] in ["UPDATE", "NEW"]  # Accept either NEW (first time) or UPDATE
+        assert last_callback["action"] in [
+            "UPDATE",
+            "NEW",
+        ]  # Accept either NEW (first time) or UPDATE
         assert last_callback["contents"] == config_with_callback
 
         # Clear history
@@ -159,7 +181,9 @@ class TestConfigUpdateFlows:
 
         # But config should still be updated
         current = self.tracking_agent.vip.config.get(config_name)
-        assert current == config_without_callback, "Config should still be updated even without callback"
+        assert (
+            current == config_without_callback
+        ), "Config should still be updated even without callback"
 
     def test_flow3_pubsub_notification(self):
         """Test Flow 3: Config update via pubsub → Cache update → Callback."""
@@ -167,10 +191,14 @@ class TestConfigUpdateFlows:
         config_name = "pubsub_test"
 
         # Create tracking agent
-        self.tracking_agent = self.manager.create_connected_agent(agent_id, agent_class=CallbackTrackingAgent)
+        self.tracking_agent = self.manager.create_connected_agent(
+            agent_id, agent_class=CallbackTrackingAgent
+        )
 
         # Subscribe to config updates - use config_name parameter
-        self.tracking_agent.vip.config.subscribe(self.tracking_agent.on_config_update, config_name=config_name)
+        self.tracking_agent.vip.config.subscribe(
+            self.tracking_agent.on_config_update, config_name=config_name
+        )
 
         # Store initial config
         initial = {"pubsub": "initial", "value": 100}
@@ -200,7 +228,9 @@ class TestConfigUpdateFlows:
         assert cached == updated, f"Cache should be updated via pubsub: {cached}"
 
         # Verify callback triggered
-        assert len(self.tracking_agent.callback_history) > 0, "Callback should be triggered via pubsub"
+        assert (
+            len(self.tracking_agent.callback_history) > 0
+        ), "Callback should be triggered via pubsub"
 
         last = self.tracking_agent.callback_history[-1]
         assert last["contents"] == updated
@@ -211,14 +241,18 @@ class TestConfigUpdateFlows:
         config_name = "delete_test"
 
         # Create tracking agent
-        self.tracking_agent = self.manager.create_connected_agent(agent_id, agent_class=CallbackTrackingAgent)
+        self.tracking_agent = self.manager.create_connected_agent(
+            agent_id, agent_class=CallbackTrackingAgent
+        )
 
         # Set a default for this config
         default_config = {"default": True, "value": "fallback"}
         self.tracking_agent.vip.config.set_default(config_name, default_config)
 
         # Subscribe to updates
-        self.tracking_agent.vip.config.subscribe(self.tracking_agent.on_config_update, config_name=config_name)
+        self.tracking_agent.vip.config.subscribe(
+            self.tracking_agent.on_config_update, config_name=config_name
+        )
 
         # Store server config
         server_config = {"server": True, "value": "active"}
@@ -237,12 +271,17 @@ class TestConfigUpdateFlows:
 
         # Config should revert to default (not completely deleted)
         current = self.tracking_agent.vip.config.get(config_name)
-        assert current == default_config, f"Should revert to default after deletion: {current}"
+        assert (
+            current == default_config
+        ), f"Should revert to default after deletion: {current}"
 
         # Callback should be triggered with UPDATE (reverted to default)
         assert len(self.tracking_agent.callback_history) > 0
         last = self.tracking_agent.callback_history[-1]
-        assert last["action"] in ["UPDATE", "DELETE"], f"Action should be UPDATE or DELETE: {last['action']}"
+        assert last["action"] in [
+            "UPDATE",
+            "DELETE",
+        ], f"Action should be UPDATE or DELETE: {last['action']}"
 
         # If UPDATE, should have default value
         if last["action"] == "UPDATE":
@@ -253,13 +292,17 @@ class TestConfigUpdateFlows:
         agent_id = f"concurrent_agent_{self.test_id}"
 
         # Create tracking agent
-        self.tracking_agent = self.manager.create_connected_agent(agent_id, agent_class=CallbackTrackingAgent)
+        self.tracking_agent = self.manager.create_connected_agent(
+            agent_id, agent_class=CallbackTrackingAgent
+        )
 
         # Subscribe to multiple configs
         num_configs = 5
         for i in range(num_configs):
             config_name = f"concurrent_{i}"
-            self.tracking_agent.vip.config.subscribe(self.tracking_agent.on_config_update, config_name=config_name)
+            self.tracking_agent.vip.config.subscribe(
+                self.tracking_agent.on_config_update, config_name=config_name
+            )
 
         gevent.sleep(1)
 
@@ -276,7 +319,9 @@ class TestConfigUpdateFlows:
         gevent.sleep(2)
 
         # Should have received callbacks for all configs
-        callback_configs = {cb["config_name"] for cb in self.tracking_agent.callback_history}
+        callback_configs = {
+            cb["config_name"] for cb in self.tracking_agent.callback_history
+        }
         expected_configs = {f"concurrent_{i}" for i in range(num_configs)}
 
         assert expected_configs.issubset(
@@ -295,14 +340,23 @@ class TestConfigUpdateFlows:
         config_name = "mixed_config"
 
         # Create tracking agent
-        self.tracking_agent = self.manager.create_connected_agent(agent_id, agent_class=CallbackTrackingAgent)
+        self.tracking_agent = self.manager.create_connected_agent(
+            agent_id, agent_class=CallbackTrackingAgent
+        )
 
         # Set default
-        default = {"timeout": 30, "retries": 3, "url": "http://default.com", "features": ["basic"]}
+        default = {
+            "timeout": 30,
+            "retries": 3,
+            "url": "http://default.com",
+            "features": ["basic"],
+        }
         self.tracking_agent.vip.config.set_default(config_name, default)
 
         # Subscribe
-        self.tracking_agent.vip.config.subscribe(self.tracking_agent.on_config_update, config_name=config_name)
+        self.tracking_agent.vip.config.subscribe(
+            self.tracking_agent.on_config_update, config_name=config_name
+        )
 
         # Set server config (partial override)
         server = {"timeout": 60, "url": "http://production.com", "new_field": "added"}

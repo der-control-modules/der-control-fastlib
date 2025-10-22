@@ -46,17 +46,25 @@ class TestAgentConfigSimple:
         # Get config - should return defaults
         result = self.agent.vip.config.get("test_config")
 
-        assert result == default_config, "Should return default config when no server config exists"
+        assert (
+            result == default_config
+        ), "Should return default config when no server config exists"
 
     def test_debug_server_config_set(self):
         """Debug test to see what happens when we try to set server config."""
         # Store configuration on server using set method
-        server_config = {"timeout": 120, "retry_count": 5, "endpoints": ["server1", "server2"]}
+        server_config = {
+            "timeout": 120,
+            "retry_count": 5,
+            "endpoints": ["server1", "server2"],
+        }
 
         print(f"Attempting to set server config: {server_config}")
 
         # Store via config_agent using the set method
-        store_result = self.config_agent.vip.config.set("test_server_config", server_config)
+        store_result = self.config_agent.vip.config.set(
+            "test_server_config", server_config
+        )
         print(f"Store result type: {type(store_result)}")
 
         try:
@@ -76,7 +84,9 @@ class TestAgentConfigSimple:
             print(f"Get result type: {type(result)}")
 
             # Should return the server config since no defaults are set
-            assert result == server_config, f"Should return server config. Expected: {server_config}, Got: {result}"
+            assert (
+                result == server_config
+            ), f"Should return server config. Expected: {server_config}, Got: {result}"
         except Exception as e:
             print(f"Get error: {e}")
             assert False, f"Get should not fail: {e}"
@@ -115,4 +125,6 @@ class TestAgentConfigSimple:
         print(f"Expected: {expected}")
         print(f"Actual: {result2}")
 
-        assert result2 == expected, f"Config should be merged. Expected: {expected}, Got: {result2}"
+        assert (
+            result2 == expected
+        ), f"Config should be merged. Expected: {expected}, Got: {result2}"

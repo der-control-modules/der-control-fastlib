@@ -346,10 +346,25 @@ class PubSub:
         self._agent = agent
         self._subscriptions = {}
 
-    def publish(self, peer: str, topic: str, message: Any, headers: dict | None = None, bus: str = ""):
+    def publish(  # pylint: disable=no-value-for-parameter
+        self,
+        peer: str,
+        topic: str,
+        message: Any,
+        headers: dict | None = None,
+        bus: str = "",
+    ):
         """Publish a message to a topic, returning an AsyncResult."""
         if not self._agent.connected:
-            raise ConnectionError("Agent not connected")
+            _log.debug(f"Agent not connected yet, deferring publish to {topic}")
+            # Store pending publish to be sent after connection
+            if not hasattr(self._agent, "_pending_publishes"):
+                self._agent._pending_publishes = []
+            self._agent._pending_publishes.append((peer, topic, headers, message))
+            # Return a dummy AsyncResult that will be resolved after connection
+            async_result = AsyncResult()
+            async_result.set(True)
+            return async_result
 
         if headers is None:
             headers = {}
@@ -423,23 +438,35 @@ class PubSub:
 
         return adapter
 
-    def subscribe(self, peer_or_prefix, prefix=None, callback: Callable | None = None, **kwargs):
+    def subscribe(
+        self,
+        peer_or_prefix=None,
+        prefix=None,
+        callback: Callable | None = None,
+        peer=None,
+        **kwargs,
+    ):
         """Subscribe to a topic prefix, returning an AsyncResult.
 
         Args:
             peer_or_prefix: Either the peer (VOLTTRON API) or prefix (legacy API)
             prefix: The topic prefix (VOLTTRON API) or callback (legacy API)
             callback: Optional callback function to handle messages
+            peer: Alias for peer_or_prefix (for VOLTTRON compatibility)
             **kwargs: Additional keyword arguments
         """
+        # Handle 'peer' keyword argument as an alias for peer_or_prefix
+        if peer is not None and peer_or_prefix is None:
+            peer_or_prefix = peer
+
         # Handle both API signatures:
-        # 1. VOLTTRON API: subscribe(peer, prefix, callback)
+        # 1. VOLTTRON API: subscribe(peer, prefix, callback) or subscribe(peer="pubsub", prefix="topic", ...)
         # 2. Legacy API: subscribe(prefix, callback)
         if callback is None and prefix is not None and callable(prefix):
             # Legacy API: subscribe(prefix, callback) where callback is in prefix parameter
             actual_prefix = peer_or_prefix
             actual_callback = prefix
-        elif prefix is None:
+        elif prefix is None and peer_or_prefix is not None:
             # Legacy API: subscribe(prefix, callback) where callback is None/default
             actual_prefix = peer_or_prefix
             actual_callback = callback
@@ -447,8 +474,18 @@ class PubSub:
             # VOLTTRON API: subscribe(peer, prefix, callback)
             actual_prefix = prefix
             actual_callback = callback
+
+        # If agent is not connected yet, store the subscription to be processed after connection
         if not self._agent.connected:
-            raise ConnectionError("Agent not connected")
+            _log.debug(f"Agent not connected yet, deferring subscription to {actual_prefix}")
+            # Store pending subscription to be registered after connection
+            if not hasattr(self._agent, "_pending_subscriptions"):
+                self._agent._pending_subscriptions = []
+            self._agent._pending_subscriptions.append((actual_prefix, actual_callback))
+            # Return a dummy AsyncResult that will be resolved after connection
+            async_result = AsyncResult()
+            async_result.set(True)
+            return async_result
 
         subscription_id = str(uuid.uuid4())
 
@@ -466,7 +503,13 @@ class PubSub:
         try:
             # Send subscription message
             self._agent.websocket.send(
-                json.dumps({"type": "subscribe", "prefix": actual_prefix, "id": subscription_id})
+                json.dumps(
+                    {
+                        "type": "subscribe",
+                        "prefix": actual_prefix,
+                        "id": subscription_id,
+                    }
+                )
             )
 
             _log.info(f"Agent {self._agent.identity} subscribed to prefix: {actual_prefix}")
@@ -521,7 +564,13 @@ class PubSub:
         try:
             # Send subscription message with pattern
             self._agent.websocket.send(
-                json.dumps({"type": "subscribe", "pattern": actual_pattern, "id": subscription_id})
+                json.dumps(
+                    {
+                        "type": "subscribe",
+                        "pattern": actual_pattern,
+                        "id": subscription_id,
+                    }
+                )
             )
 
             _log.info(f"Agent {self._agent.identity} subscribed to pattern: {actual_pattern}")
@@ -683,7 +732,10 @@ class Core:
         if is_occupancy_override and args:
             gid = args[0] if args else kwargs.get("gid", "unknown")
             occupancy_override_trace(
-                "OVERRIDE QUEUED", gid=gid, queue_size=len(self._scheduler._event_queue), next_fire=when
+                "OVERRIDE QUEUED",
+                gid=gid,
+                queue_size=len(self._scheduler._event_queue),
+                next_fire=when,
             )
         else:
             scheduler_trace(
@@ -1245,7 +1297,10 @@ class Config:
             try:
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
                     # Include requesting agent identity for access control and send_update flag
-                    params = {"requesting_agent": self._agent.identity, "send_update": send_update}
+                    params = {
+                        "requesting_agent": self._agent.identity,
+                        "send_update": send_update,
+                    }
                     response = client.put(request_url, json=config_data, params=params)
                     if response.status_code == 200:
                         # Update comprehensive cache
@@ -1312,7 +1367,10 @@ class Config:
             try:
                 with httpx.Client() as client:  # Synchronous client for gevent compatibility
                     # Include requesting agent identity for access control and send_update flag
-                    params = {"requesting_agent": self._agent.identity, "send_update": send_update}
+                    params = {
+                        "requesting_agent": self._agent.identity,
+                        "send_update": send_update,
+                    }
                     response = client.delete(request_url, params=params)
                     if response.status_code == 200:
                         # Remove from comprehensive cache or update it to use only default values
@@ -1399,7 +1457,7 @@ class Config:
                     # Determine action based on whether this is new to the callback
                     action = "NEW" if existing_config not in self._default_configs else "UPDATE"
                     if action in actions:
-                        callback(existing_config, action, value)
+                        callback_obj(existing_config, action, value)
                         _log.debug(f"Called callback with existing config: {existing_config}")
                 except Exception as e:
                     _log.error(f"Error calling callback for config {existing_config}: {e}")
@@ -1408,7 +1466,14 @@ class Config:
         return f"{target_pattern}:{len(self._config_callbacks[target_pattern])}"
 
     @RPC.export(name="config.update")
-    def config_update(self, action: str, config_name: str, contents=None, trigger_callback: bool = True, _msg_id=None):
+    def config_update(
+        self,
+        action: str,
+        config_name: str,
+        contents=None,
+        trigger_callback: bool = True,
+        _msg_id=None,
+    ):
         """
         Handle config update notifications from the platform (VOLTTRON-style RPC).
 
@@ -1779,7 +1844,11 @@ class Config:
                             for callback in self._config_callbacks[config_name]:
                                 try:
                                     _log.info(f"Calling callback for config: {config_name}")
-                                    callback(config_name, "UPDATE", self._config_cache[config_name])
+                                    callback(
+                                        config_name,
+                                        "UPDATE",
+                                        self._config_cache[config_name],
+                                    )
                                 except Exception as e:
                                     _log.error(f"Error in config callback for {config_name}: {e}")
                     else:
@@ -1880,7 +1949,11 @@ class Config:
                                 # and it's a server config (not just a default)
                                 if config_name in self._config_cache and self._has_server_config(config_name):
                                     _log.debug(f"Triggering NEW callback for server config: {config_name}")
-                                    self._execute_callbacks_safely(config_name, "NEW", self._config_cache[config_name])
+                                    self._execute_callbacks_safely(
+                                        config_name,
+                                        "NEW",
+                                        self._config_cache[config_name],
+                                    )
                         else:
                             _log.info(f"No configs found for agent {self._agent.identity}")
                     else:
@@ -2115,7 +2188,11 @@ class Config:
             _log.debug(f"SERVER CONFIGS: {', '.join([n for n in self._config_cache if self._has_server_config(n)])}")
 
             # Log full config contents if even more detail is requested
-            if os.environ.get("AEMS_CONFIG_FULL_DETAIL", "").lower() in ("1", "true", "yes"):
+            if os.environ.get("AEMS_CONFIG_FULL_DETAIL", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
                 for name, value in self._config_cache.items():
                     _log.debug(f"CONFIG {name}: {safe_json_dump(value)}")
         except Exception as e:
@@ -2402,7 +2479,7 @@ class ScheduledEvent:
                 original_datetime=when,
                 utc_timestamp=self.next_time,
                 scheduled_for=datetime.fromtimestamp(self.next_time),
-                has_timezone=when.tzinfo is not None if hasattr(when, "tzinfo") else False,
+                has_timezone=(when.tzinfo is not None if hasattr(when, "tzinfo") else False),
             )
 
             _log.debug(f"Created one-time event '{name}' for {when} (UTC timestamp: {self.next_time})")
@@ -2495,7 +2572,9 @@ class Scheduler:
 
             # Trace scheduler started
             scheduler_trace(
-                "SCHEDULER STARTED", agent_id=self._agent.identity, greenlet_id=id(self._scheduler_greenlet)
+                "SCHEDULER STARTED",
+                agent_id=self._agent.identity,
+                greenlet_id=id(self._scheduler_greenlet),
             )
         else:
             _log.debug(f"Scheduler already running for agent {self._agent.identity}")
@@ -2524,7 +2603,11 @@ class Scheduler:
             self._scheduler_greenlet = None
 
             # Trace scheduler stopped
-            scheduler_trace("SCHEDULER STOPPED", agent_id=self._agent.identity, remaining_events=len(self._event_queue))
+            scheduler_trace(
+                "SCHEDULER STOPPED",
+                agent_id=self._agent.identity,
+                remaining_events=len(self._event_queue),
+            )
 
     @staticmethod
     def cron(cronstring: str) -> str:
@@ -2613,7 +2696,7 @@ class Scheduler:
                 current_time=datetime.fromtimestamp(now),
                 time_diff_seconds=now - event.next_time,
                 is_earliest_in_queue=is_earliest,
-                queue_position=self._event_queue.index(event) if event in self._event_queue else -1,
+                queue_position=(self._event_queue.index(event) if event in self._event_queue else -1),
             )
 
         # Wake up the scheduler if this is a past event OR if it's now the earliest event
@@ -2645,7 +2728,7 @@ class Scheduler:
                 "NOT WAKING SCHEDULER - EVENT NOT URGENT",
                 event_name=name,
                 next_time=datetime.fromtimestamp(event.next_time),
-                queue_position=self._event_queue.index(event) if event in self._event_queue else -1,
+                queue_position=(self._event_queue.index(event) if event in self._event_queue else -1),
             )
 
         # Trace event added to queue
@@ -2653,7 +2736,7 @@ class Scheduler:
             "EVENT ADDED TO QUEUE",
             event_name=name,
             next_time=event.next_time,
-            scheduled_for=datetime.fromtimestamp(event.next_time) if hasattr(event, "next_time") else None,
+            scheduled_for=(datetime.fromtimestamp(event.next_time) if hasattr(event, "next_time") else None),
             queue_size=len(self._event_queue),
             is_one_time=getattr(event, "is_one_time", False),
             is_cron=getattr(event, "is_cron", False),
@@ -2762,9 +2845,9 @@ class Scheduler:
                     iteration=iteration,
                     current_time=datetime.fromtimestamp(now),
                     queue_size=len(self._event_queue),
-                    next_event_time=datetime.fromtimestamp(self._event_queue[0].next_time)
-                    if self._event_queue
-                    else None,
+                    next_event_time=(
+                        datetime.fromtimestamp(self._event_queue[0].next_time) if self._event_queue else None
+                    ),
                 )
 
             # Process ALL events that are due (including past events)
@@ -2826,14 +2909,21 @@ class Scheduler:
                         gid = event.args[0] if event.args else "unknown"
                         occupancy_override_trace("OVERRIDE EXECUTED", gid=gid, greenlet_id=id(greenlet))
                     else:
-                        scheduler_trace("EVENT GREENLET SPAWNED", event_name=event.name, greenlet_id=id(greenlet))
+                        scheduler_trace(
+                            "EVENT GREENLET SPAWNED",
+                            event_name=event.name,
+                            greenlet_id=id(greenlet),
+                        )
 
                 except Exception as e:
                     _log.error(f"Error spawning periodic task {event.name}: {e}")
 
                     # Trace execution error
                     scheduler_trace(
-                        "EVENT EXECUTION ERROR", event_name=event.name, error=str(e), error_type=type(e).__name__
+                        "EVENT EXECUTION ERROR",
+                        event_name=event.name,
+                        error=str(e),
+                        error_type=type(e).__name__,
                     )
 
                 # Compute the next execution time
@@ -2860,12 +2950,17 @@ class Scheduler:
                         gid = event.args[0] if event.args else "unknown"
                         occupied = event.args[1] if len(event.args) > 1 else None
                         occupancy_override_trace(
-                            "OVERRIDE COMPLETED", gid=gid, occupied=occupied, queue_size=len(self._event_queue)
+                            "OVERRIDE COMPLETED",
+                            gid=gid,
+                            occupied=occupied,
+                            queue_size=len(self._event_queue),
                         )
                     else:
                         # Trace one-time event completion
                         scheduler_trace(
-                            "ONE-TIME EVENT COMPLETED", event_name=event.name, queue_size=len(self._event_queue)
+                            "ONE-TIME EVENT COMPLETED",
+                            event_name=event.name,
+                            queue_size=len(self._event_queue),
                         )
 
                 events_processed += 1
@@ -2873,7 +2968,11 @@ class Scheduler:
                 now = time.time()
 
             if events_processed > 0:
-                scheduler_trace("EVENTS PROCESSED IN ITERATION", count=events_processed, iteration=iteration)
+                scheduler_trace(
+                    "EVENTS PROCESSED IN ITERATION",
+                    count=events_processed,
+                    iteration=iteration,
+                )
 
             # Calculate sleep time until next event
             sleep_time = 0.1  # Default sleep time
@@ -2916,7 +3015,9 @@ class Scheduler:
                 if woken_by_event:
                     # Trace that we were woken by a new event
                     scheduler_trace(
-                        "SCHEDULER WOKEN BY NEW EVENT", iteration=iteration, queue_size=len(self._event_queue)
+                        "SCHEDULER WOKEN BY NEW EVENT",
+                        iteration=iteration,
+                        queue_size=len(self._event_queue),
                     )
                     # Continue immediately to process any past events
                     continue
@@ -3110,6 +3211,28 @@ class Agent:
         self.connected = True
         _log.debug(f"Agent {self.identity} websocket connection opened")
 
+        # Process any pending subscriptions that were deferred during initialization
+        if hasattr(self, "_pending_subscriptions") and self._pending_subscriptions:
+            _log.debug(f"Processing {len(self._pending_subscriptions)} pending subscriptions")
+            for prefix, callback in self._pending_subscriptions:
+                try:
+                    self.vip.pubsub.subscribe("pubsub", prefix, callback)
+                    _log.debug(f"Registered pending subscription for {prefix}")
+                except Exception as e:
+                    _log.error(f"Error registering pending subscription for {prefix}: {e}")
+            self._pending_subscriptions = []
+
+        # Process any pending publishes that were deferred during initialization
+        if hasattr(self, "_pending_publishes") and self._pending_publishes:
+            _log.debug(f"Processing {len(self._pending_publishes)} pending publishes")
+            for peer, topic, headers, message in self._pending_publishes:
+                try:
+                    self.vip.pubsub.publish(peer, topic, message, headers)
+                    _log.debug(f"Sent pending publish to {topic}")
+                except Exception as e:
+                    _log.error(f"Error sending pending publish to {topic}: {e}")
+            self._pending_publishes = []
+
     def __on_ws_message__(self, ws, message):
         """Internal callback when a WebSocket message is received."""
         try:
@@ -3196,7 +3319,11 @@ class Agent:
                         result = async_result.get(timeout=10)
                         # Send successful response
                         _log.debug(f"Agent {self.identity} sending RPC response for msg_id {msg_id}: {result}")
-                        response_msg = {"type": "rpc_response", "msg_id": msg_id, "result": result}
+                        response_msg = {
+                            "type": "rpc_response",
+                            "msg_id": msg_id,
+                            "result": result,
+                        }
                         self.websocket.send(json.dumps(response_msg))
                         _log.debug(f"Agent {self.identity} successfully sent RPC response for msg_id {msg_id}")
                     except Exception as e:
@@ -3204,7 +3331,11 @@ class Agent:
                         error = str(e)
                         _log.error(f"Agent {self.identity} RPC error for msg_id {msg_id}: {error}")
                         try:
-                            error_msg = {"type": "rpc_error", "msg_id": msg_id, "error": error}
+                            error_msg = {
+                                "type": "rpc_error",
+                                "msg_id": msg_id,
+                                "error": error,
+                            }
                             self.websocket.send(json.dumps(error_msg))
                             _log.debug(f"Agent {self.identity} sent RPC error response for msg_id {msg_id}")
                         except Exception as ws_error:
@@ -3219,7 +3350,13 @@ class Agent:
                     # Send error response immediately
                     try:
                         self.websocket.send(
-                            json.dumps({"type": "rpc_error", "msg_id": msg_id, "error": "Failed to process response"})
+                            json.dumps(
+                                {
+                                    "type": "rpc_error",
+                                    "msg_id": msg_id,
+                                    "error": "Failed to process response",
+                                }
+                            )
                         )
                     except Exception as ws_error:
                         _log.error(f"Failed to send error response via websocket: {ws_error}")
@@ -3572,7 +3709,11 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     parser.add_argument("--identity", help="Agent identity", default=identity)
     parser.add_argument("--host", help="Message bus host", default="127.0.0.1")
     parser.add_argument("--port", help="Message bus port", type=int, default=8000)
-    parser.add_argument("--volttron-home", help="VOLTTRON_HOME directory", default=os.environ.get("VOLTTRON_HOME"))
+    parser.add_argument(
+        "--volttron-home",
+        help="VOLTTRON_HOME directory",
+        default=os.environ.get("VOLTTRON_HOME"),
+    )
 
     args = parser.parse_args()
 
@@ -3605,7 +3746,13 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     # Create the agent
     agent_identity = args.identity or identity or agent_class.__name__.lower()
 
-    agent = agent_class(identity=agent_identity, host=args.host, port=args.port, config_path=config_path, **kwargs)
+    agent = agent_class(
+        identity=agent_identity,
+        host=args.host,
+        port=args.port,
+        config_path=config_path,
+        **kwargs,
+    )
 
     # Set initial configuration if loaded from file
     if agent_config:

@@ -17,3 +17,16 @@ __path__ = []
 __package__ = "volttron.platform"
 
 __all__ = ["agent", "vip", "messaging"]
+
+
+# AsyncCall - simplified version for AEMS
+class AsyncCall:
+    """Simplified AsyncCall for AEMS (no gevent hub needed)."""
+
+    def __init__(self, hub=None):
+        """Initialize AsyncCall."""
+        self.calls = []
+
+    def send(self, func, *args, **kwargs):
+        """Execute function (simplified - no thread switching in AEMS)."""
+        return func(*args, **kwargs)

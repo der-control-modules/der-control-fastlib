@@ -17,15 +17,18 @@ format-check: ## Check if code is formatted correctly
 	$(RUFF) format --check src/ tests/
 
 .PHONY: lint
-lint: ## Run linting with ruff
+lint: ## Check code with ruff linter
 	$(RUFF) check src/ tests/
-
-.PHONY: lint-fix
-lint-fix: fix format ## Fix issues and format code with ruff
 
 .PHONY: fix
 fix: ## Fix code issues automatically with ruff
 	$(RUFF) check --fix src/ tests/
+
+.PHONY: lint-fix
+lint-fix: fix format ## Run linter fixes and formatting (like pre-commit)
+
+.PHONY: check
+check: lint format-check test ## Run all checks (linting, formatting, tests)
 
 # Testing
 .PHONY: test

@@ -67,7 +67,9 @@ def test_config_list_from_cache(message_bus_manager_fixture):
 
         # Verify that all configurations are listed
         for config_name in list(default_configs.keys()) + list(server_configs.keys()):
-            assert config_name in config_list, f"Config '{config_name}' should be in the list but was not found"
+            assert (
+                config_name in config_list
+            ), f"Config '{config_name}' should be in the list but was not found"
 
         # Verify that the configs can be retrieved from the cache
         for config_name in config_list:
@@ -118,7 +120,11 @@ def test_merged_config_in_list(message_bus_manager_fixture):
 
         print("3. Setting a server configuration with the same name...")
         # Set a server configuration with the same name (should merge with default)
-        server_value = {"source": "server", "only_in_server": True, "shared_key": "server_value"}
+        server_value = {
+            "source": "server",
+            "only_in_server": True,
+            "shared_key": "server_value",
+        }
         agent.config.set("merged_config", server_value).get(timeout=5)
 
         # Allow time for the configurations to be processed
@@ -140,10 +146,18 @@ def test_merged_config_in_list(message_bus_manager_fixture):
 
         # The merged config should have values from both default and server,
         # with server values taking precedence for overlapping keys
-        assert merged_config["source"] == "server", "Server value should override default for 'source'"
-        assert merged_config["only_in_default"] is True, "Value from default should be present"
-        assert merged_config["only_in_server"] is True, "Value from server should be present"
-        assert merged_config["shared_key"] == "server_value", "Server value should override default for 'shared_key'"
+        assert (
+            merged_config["source"] == "server"
+        ), "Server value should override default for 'source'"
+        assert (
+            merged_config["only_in_default"] is True
+        ), "Value from default should be present"
+        assert (
+            merged_config["only_in_server"] is True
+        ), "Value from server should be present"
+        assert (
+            merged_config["shared_key"] == "server_value"
+        ), "Server value should override default for 'shared_key'"
 
         print("✅ SUCCESS: Merged configuration was correctly returned!")
 

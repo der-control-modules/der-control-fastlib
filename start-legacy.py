@@ -22,6 +22,10 @@ Examples:
 
 Arguments:
     --agent-dir PATH    Path to agent directory (required)
+    --module MODULE     Agent module path (e.g., 'listener.agent' or 'sqlhistorian.historian')
+                        If not provided, will auto-detect by searching for vip_main call
+    --class CLASS       Agent class name (e.g., 'ListenerAgent' or 'SQLHistorian')
+                        If not provided, will auto-detect from the module
     --config PATH       Path to agent configuration file (relative to agent-dir)
     --identity ID       Agent identity/name
     --address URL       AEMS message bus address (default: ws://localhost:8000)
@@ -104,10 +108,10 @@ def find_agent_module_and_class(agent_dir):
     """
     Find the agent module and class in the agent directory.
 
-    Looks for the standard VOLTTRON agent structure:
-        AgentName/
-            agent_package/
-                agent.py  (contains AgentClass)
+    Uses multiple strategies to locate the agent:
+    1. Search for files containing vip_main() call (most reliable)
+    2. Look for standard agent.py files
+    3. Parse setup.py for entry points
 
     Args:
         agent_dir: Path to agent directory
@@ -118,43 +122,108 @@ def find_agent_module_and_class(agent_dir):
     Raises:
         FileNotFoundError: If agent module not found
     """
-    agent_dir = Path(agent_dir).resolve()
+    import re
 
+    agent_dir = Path(agent_dir).resolve()
     _log.debug(f"Searching for agent in: {agent_dir}")
 
-    # Look for subdirectories (agent packages)
+    # Strategy 1: Search for files containing vip_main call
+    # This is the most reliable method as all VOLTTRON agents call vip_main
+    _log.debug("Strategy 1: Searching for vip_main() calls...")
     for item in agent_dir.iterdir():
         if item.is_dir() and not item.name.startswith(".") and not item.name.startswith("_"):
-            # Check if this directory has an agent.py file
+            # Search all Python files in this package directory
+            for py_file in item.glob("*.py"):
+                if py_file.name.startswith("_") and py_file.name != "__init__.py":
+                    continue
+
+                try:
+                    content = py_file.read_text()
+
+                    # Look for vip_main call - this indicates the entry point
+                    if "vip_main" in content and re.search(r"utils\.vip_main\s*\(", content):
+                        _log.info(f"Found vip_main call in: {py_file.relative_to(agent_dir)}")
+
+                        # Try to find the actual agent class (not factory function)
+                        # Look for class definitions that inherit from Agent, Historian, etc.
+                        class_matches = re.findall(r"class\s+(\w+)\s*\([^)]*(?:Agent|Historian)[^)]*\)", content)
+                        if class_matches:
+                            # Prefer classes with Agent/Historian suffix
+                            agent_classes = [c for c in class_matches if c.endswith(("Agent", "Historian"))]
+                            class_name = agent_classes[0] if agent_classes else class_matches[0]
+                            _log.debug(f"Found agent class from class definition: {class_name}")
+                        else:
+                            # Fallback: Extract from vip_main call (may be factory function)
+                            # Pattern: utils.vip_main(agent_class_or_factory, ...)
+                            vip_main_match = re.search(r"utils\.vip_main\s*\(\s*(\w+)", content)
+                            if vip_main_match:
+                                class_name = vip_main_match.group(1)
+                                _log.warning(
+                                    f"Using vip_main parameter '{class_name}' - this may be a factory function"
+                                )
+                            else:
+                                _log.warning(f"Could not extract class name from {py_file}")
+                                continue
+
+                        # Build module name from directory structure
+                        # e.g., sqlhistorian/historian.py -> sqlhistorian.historian
+                        module_name = f"{item.name}.{py_file.stem}"
+
+                        _log.info(f"Auto-detected agent: {module_name}:{class_name}")
+                        return module_name, class_name
+
+                except Exception as e:
+                    _log.debug(f"Error reading {py_file}: {e}")
+                    continue
+
+    # Strategy 2: Look for standard agent.py files
+    _log.debug("Strategy 2: Searching for agent.py files...")
+    for item in agent_dir.iterdir():
+        if item.is_dir() and not item.name.startswith(".") and not item.name.startswith("_"):
             agent_file = item / "agent.py"
             if agent_file.exists():
                 _log.debug(f"Found agent.py in {item.name}/")
 
-                # Read the file to find the agent class
-                with open(agent_file) as f:
-                    content = f.read()
+                try:
+                    content = agent_file.read_text()
 
-                # Look for class definitions that inherit from Agent
-                import re
+                    # Look for class definitions that inherit from Agent
+                    class_matches = re.findall(r"class\s+(\w+)\s*\([^)]*Agent[^)]*\)", content)
 
-                class_matches = re.findall(r"class\s+(\w+)\s*\([^)]*Agent[^)]*\)", content)
+                    if class_matches:
+                        class_name = class_matches[0]  # Use first match
+                        module_name = f"{item.name}.agent"
 
-                if class_matches:
-                    class_name = class_matches[0]  # Use first match
-                    module_name = f"{item.name}.agent"
+                        _log.info(f"Auto-detected agent: {module_name}:{class_name}")
+                        return module_name, class_name
+                except Exception as e:
+                    _log.debug(f"Error reading {agent_file}: {e}")
+                    continue
 
-                    _log.info(f"Auto-detected agent: {module_name}:{class_name}")
-                    return module_name, class_name
-
-    # Fallback: look for setup.py to get package name
+    # Strategy 3: Parse setup.py for entry points
     setup_file = agent_dir / "setup.py"
     if setup_file.exists():
-        _log.debug("Found setup.py, parsing for agent info")
-        # Could parse setup.py for entry points, but for now return None
+        _log.debug("Strategy 3: Parsing setup.py for entry points...")
+        try:
+            content = setup_file.read_text()
+            # Look for entry_points with console_scripts
+            entry_point_match = re.search(
+                r"entry_points\s*=\s*{[^}]*console_scripts[^}]*:\s*\[([^\]]+)\]", content, re.DOTALL
+            )
+            if entry_point_match:
+                _log.debug(f"Found entry_points in setup.py: {entry_point_match.group(1)}")
+                # Could parse this further, but it's complex
+        except Exception as e:
+            _log.debug(f"Error parsing setup.py: {e}")
 
     raise FileNotFoundError(
-        f"Could not find agent.py in any subdirectory of {agent_dir}. "
-        f"Expected structure: {agent_dir.name}/package_name/agent.py"
+        f"Could not find agent entrypoint in {agent_dir}.\n"
+        f"  Tried:\n"
+        f"    1. Searching for vip_main() call in Python files\n"
+        f"    2. Looking for agent.py files\n"
+        f"    3. Parsing setup.py\n"
+        f"  Expected structure: {agent_dir.name}/package_name/module.py (with vip_main call)\n"
+        f"  Hint: Use --module and --class to specify manually"
     )
 
 
@@ -173,6 +242,22 @@ def main():
         dest="agent_dir",
         required=True,
         help="Path to agent directory (e.g., example-from-volttron/ListenerAgent)",
+    )
+
+    parser.add_argument(
+        "--module",
+        dest="module_name",
+        help="Agent module path (e.g., 'listener.agent' or 'sqlhistorian.historian'). "
+        "If not provided, will auto-detect by searching for vip_main call",
+        default=None,
+    )
+
+    parser.add_argument(
+        "--class",
+        dest="class_name",
+        help="Agent class name (e.g., 'ListenerAgent' or 'SQLHistorian'). "
+        "If not provided, will auto-detect from the module",
+        default=None,
     )
 
     parser.add_argument(
@@ -226,12 +311,21 @@ def main():
 
     _log.info(f"Agent Directory: {agent_dir}")
 
-    # Auto-detect agent module and class
-    try:
-        module_name, class_name = find_agent_module_and_class(agent_dir)
-    except FileNotFoundError as e:
-        _log.error(str(e))
+    # Determine module and class - use manual specification if provided, otherwise auto-detect
+    if args.module_name and args.class_name:
+        module_name = args.module_name
+        class_name = args.class_name
+        _log.info(f"Using manually specified agent: {module_name}:{class_name}")
+    elif args.module_name or args.class_name:
+        _log.error("Both --module and --class must be specified together, or neither")
         sys.exit(1)
+    else:
+        # Auto-detect agent module and class
+        try:
+            module_name, class_name = find_agent_module_and_class(agent_dir)
+        except FileNotFoundError as e:
+            _log.error(str(e))
+            sys.exit(1)
 
     # Resolve config file path
     config_path_abs = None
@@ -400,7 +494,18 @@ def main():
                         if config_path_abs:
                             agent_kwargs[param_name] = str(config_path_abs)
                         else:
-                            _log.warning(f"Required parameter '{param_name}' not provided")
+                            # Create a temporary config file with empty JSON
+                            import tempfile
+
+                            with tempfile.NamedTemporaryFile(
+                                mode="w", suffix=".json", prefix=f"{identity}_config_", delete=False
+                            ) as temp_config:
+                                temp_config.write("{}")
+                                temp_config_path = temp_config.name
+
+                            agent_kwargs[param_name] = temp_config_path
+                            _log.info(f"Created temporary config file: {temp_config_path}")
+                            _log.info("  (contains empty JSON: {})")
                     else:
                         _log.warning(f"Required parameter '{param_name}' is missing and has no default!")
 

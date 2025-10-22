@@ -14,7 +14,11 @@ class TestGSEndpoint:
         base_url = f"http://{message_bus.host}:{message_bus.port}"
 
         # Test data without proper JSON-RPC format
-        rpc_data = {"id": "test_agent", "method": "test_method", "params": {"data": "test"}}
+        rpc_data = {
+            "id": "test_agent",
+            "method": "test_method",
+            "params": {"data": "test"},
+        }
 
         response = httpx.post(f"{base_url}/gs", json=rpc_data, timeout=10.0)
 
@@ -27,7 +31,11 @@ class TestGSEndpoint:
         base_url = f"http://{message_bus.host}:{message_bus.port}"
 
         # Test data without agent ID
-        rpc_data = {"jsonrpc": "2.0", "method": "test_method", "params": {"data": "test"}}
+        rpc_data = {
+            "jsonrpc": "2.0",
+            "method": "test_method",
+            "params": {"data": "test"},
+        }
 
         response = httpx.post(f"{base_url}/gs", json=rpc_data, timeout=10.0)
 
@@ -136,7 +144,12 @@ class TestGSEndpoint:
         """Test GS endpoint with various method and parameter combinations."""
         base_url = f"http://{message_bus.host}:{message_bus.port}"
 
-        rpc_data = {"jsonrpc": "2.0", "id": "test_agent", "method": method, "params": params}
+        rpc_data = {
+            "jsonrpc": "2.0",
+            "id": "test_agent",
+            "method": method,
+            "params": params,
+        }
 
         response = httpx.post(f"{base_url}/gs", json=rpc_data, timeout=10.0)
 

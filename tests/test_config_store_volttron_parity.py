@@ -126,9 +126,13 @@ class TestVOLTTRONConfigStoreBehavior:
         time.sleep(0.1)
 
         # Verify NO callbacks were triggered
-        assert len(callback_tracker.calls) == 0, "set_default() should not trigger any callbacks"
+        assert (
+            len(callback_tracker.calls) == 0
+        ), "set_default() should not trigger any callbacks"
 
-    def test_initialization_only_sends_existing_configs(self, mock_agent, callback_tracker):
+    def test_initialization_only_sends_existing_configs(
+        self, mock_agent, callback_tracker
+    ):
         """
         VOLTTRON Behavior: On agent startup, only configs that exist in the store
         should trigger callbacks, not default configs.
@@ -178,7 +182,9 @@ class TestVOLTTRONConfigStoreBehavior:
             ("DELETE", False),  # Not subscribed to DELETE
         ],
     )
-    def test_action_filtering_in_callbacks(self, callback_tracker, action, should_trigger):
+    def test_action_filtering_in_callbacks(
+        self, callback_tracker, action, should_trigger
+    ):
         """
         VOLTTRON Behavior: Callbacks should only be triggered for subscribed actions.
 
@@ -243,7 +249,9 @@ class TestVOLTTRONConfigStoreBehavior:
             # Verify correct callbacks were triggered
             triggered_callbacks = {c.callback_id for c in callback_tracker.calls}
             expected_ids = set(expected_callback_ids)
-            assert triggered_callbacks == expected_ids, f"Pattern matching failed for {config_name}"
+            assert (
+                triggered_callbacks == expected_ids
+            ), f"Pattern matching failed for {config_name}"
 
     def test_config_set_with_send_update_flag(self, callback_tracker):
         """
@@ -270,7 +278,9 @@ class TestVOLTTRONConfigStoreBehavior:
 
         All should be triggered independently.
         """
-        callbacks = [callback_tracker.create_callback(f"callback_{i}") for i in range(3)]
+        callbacks = [
+            callback_tracker.create_callback(f"callback_{i}") for i in range(3)
+        ]
 
         config_store = Mock()
 
@@ -334,7 +344,9 @@ class TestVOLTTRONConfigStoreBehavior:
         time.sleep(0.1)
 
         # Verify callback was triggered exactly once
-        assert len(callback_tracker.calls) == 1, "Single update should trigger callback exactly once"
+        assert (
+            len(callback_tracker.calls) == 1
+        ), "Single update should trigger callback exactly once"
 
     def test_initialization_sequence_detailed(self, callback_tracker):
         """
@@ -345,13 +357,22 @@ class TestVOLTTRONConfigStoreBehavior:
         events = []
 
         def log_event(event_name: str, details: dict = None):
-            events.append({"event": event_name, "timestamp": time.time(), "details": details or {}})
+            events.append(
+                {
+                    "event": event_name,
+                    "timestamp": time.time(),
+                    "details": details or {},
+                }
+            )
 
         # 1. Agent creates config store instance
         log_event("config_store_created")
 
         # 2. Agent sets default configs (no callbacks triggered)
-        default_configs = {"config": {"default_setting": "default_value"}, "device_config": {"device_default": True}}
+        default_configs = {
+            "config": {"default_setting": "default_value"},
+            "device_config": {"device_default": True},
+        }
 
         for name, _config in default_configs.items():
             log_event("set_default", {"config_name": name})
@@ -375,11 +396,15 @@ class TestVOLTTRONConfigStoreBehavior:
             callback(name, "NEW", config)
 
         # Verify the sequence
-        assert len(callback_tracker.calls) == 1, "Only server configs should trigger callbacks during initialization"
+        assert (
+            len(callback_tracker.calls) == 1
+        ), "Only server configs should trigger callbacks during initialization"
 
         # Verify no callbacks for defaults-only configs
         config_names = [c.config_name for c in callback_tracker.calls]
-        assert "device_config" not in config_names, "Default-only configs should not trigger callbacks"
+        assert (
+            "device_config" not in config_names
+        ), "Default-only configs should not trigger callbacks"
 
     def test_race_condition_config_update_during_init(self, callback_tracker):
         """
@@ -485,7 +510,9 @@ class TestConfigStoreImplementationRequirements:
         recursive_callback("config", "UPDATE", {"count": 0})
 
         # Verify recursion reached exactly the depth limit (simulating protection)
-        assert call_count == max_depth, f"Callback should reach exactly {max_depth} levels"
+        assert (
+            call_count == max_depth
+        ), f"Callback should reach exactly {max_depth} levels"
 
     def test_config_store_persistence(self):
         """

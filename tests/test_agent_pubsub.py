@@ -52,13 +52,19 @@ class TestAgentPubSub:
         gevent.sleep(1)
 
         # Publish messages
-        pub_result1 = self.publisher.vip.pubsub.publish("", "test/topic1", "Hello from topic1")
+        pub_result1 = self.publisher.vip.pubsub.publish(
+            "", "test/topic1", "Hello from topic1"
+        )
         assert pub_result1.get() is True, "Publish 1 should succeed"
 
-        pub_result2 = self.publisher.vip.pubsub.publish("", "test/special/topic2", "Hello from special topic2")
+        pub_result2 = self.publisher.vip.pubsub.publish(
+            "", "test/special/topic2", "Hello from special topic2"
+        )
         assert pub_result2.get() is True, "Publish 2 should succeed"
 
-        pub_result3 = self.publisher.vip.pubsub.publish("", "other/topic3", "Hello from other topic3")
+        pub_result3 = self.publisher.vip.pubsub.publish(
+            "", "other/topic3", "Hello from other topic3"
+        )
         assert pub_result3.get() is True, "Publish 3 should succeed"
 
         # Wait for message processing
@@ -69,10 +75,14 @@ class TestAgentPubSub:
         sub2_messages = self.subscriber2.get_received_messages()
 
         # Subscriber1 should receive messages from "test/" prefix
-        assert len(sub1_messages) >= 2, f"Subscriber1 should receive at least 2 messages, got {len(sub1_messages)}"
+        assert (
+            len(sub1_messages) >= 2
+        ), f"Subscriber1 should receive at least 2 messages, got {len(sub1_messages)}"
 
         # Subscriber2 should receive messages from "test/special/" prefix only
-        assert len(sub2_messages) >= 1, f"Subscriber2 should receive at least 1 message, got {len(sub2_messages)}"
+        assert (
+            len(sub2_messages) >= 1
+        ), f"Subscriber2 should receive at least 1 message, got {len(sub2_messages)}"
 
     def test_regex_subscription(self):
         """Test regex pattern subscription."""
@@ -88,7 +98,9 @@ class TestAgentPubSub:
 
         # Publish matching and non-matching messages
         self.publisher.vip.pubsub.publish("", "pattern/123/test", "Should match").get()
-        self.publisher.vip.pubsub.publish("", "pattern/abc/test", "Should not match").get()
+        self.publisher.vip.pubsub.publish(
+            "", "pattern/abc/test", "Should not match"
+        ).get()
         self.publisher.vip.pubsub.publish("", "pattern/456/test", "Should match").get()
 
         # Wait for message processing
@@ -99,7 +111,9 @@ class TestAgentPubSub:
 
         # Should receive messages that match the pattern
         pubsub_messages = [msg for msg in messages if msg.get("type") == "pubsub"]
-        assert len(pubsub_messages) >= 2, f"Should receive at least 2 matching messages, got {len(pubsub_messages)}"
+        assert (
+            len(pubsub_messages) >= 2
+        ), f"Should receive at least 2 matching messages, got {len(pubsub_messages)}"
 
     def test_multiple_subscriptions(self):
         """Test multiple subscriptions on the same agent."""
@@ -119,7 +133,9 @@ class TestAgentPubSub:
         # Publish to both topics
         self.publisher.vip.pubsub.publish("", "news/weather", "Sunny today").get()
         self.publisher.vip.pubsub.publish("", "alerts/emergency", "Test alert").get()
-        self.publisher.vip.pubsub.publish("", "other/random", "Should not receive").get()
+        self.publisher.vip.pubsub.publish(
+            "", "other/random", "Should not receive"
+        ).get()
 
         # Wait for message processing
         gevent.sleep(2)
@@ -129,12 +145,18 @@ class TestAgentPubSub:
         pubsub_messages = [msg for msg in messages if msg.get("type") == "pubsub"]
 
         # Should receive messages from both subscribed topics
-        assert len(pubsub_messages) >= 2, f"Should receive at least 2 messages, got {len(pubsub_messages)}"
+        assert (
+            len(pubsub_messages) >= 2
+        ), f"Should receive at least 2 messages, got {len(pubsub_messages)}"
 
         # Verify topics
         topics = [msg.get("topic", "") for msg in pubsub_messages]
-        assert any(topic.startswith("news/") for topic in topics), "Should receive news message"
-        assert any(topic.startswith("alerts/") for topic in topics), "Should receive alerts message"
+        assert any(
+            topic.startswith("news/") for topic in topics
+        ), "Should receive news message"
+        assert any(
+            topic.startswith("alerts/") for topic in topics
+        ), "Should receive alerts message"
 
     def test_message_content_integrity(self):
         """Test that message content is preserved correctly."""
@@ -165,6 +187,6 @@ class TestAgentPubSub:
         assert len(pubsub_messages) >= 1, "Should receive the test message"
 
         received_data = pubsub_messages[0].get("message", {})
-        assert received_data == test_data, (
-            f"Message content should be preserved: expected {test_data}, got {received_data}"
-        )
+        assert (
+            received_data == test_data
+        ), f"Message content should be preserved: expected {test_data}, got {received_data}"

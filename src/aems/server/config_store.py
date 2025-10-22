@@ -73,7 +73,12 @@ class ConfigStore:
         _log.info(f"ConfigStore initialized with base directory: {base_dir}")
 
     def store(
-        self, agent_id: str, config_name: str, config_data: Any, config_type: str = "json", send_update: bool = True
+        self,
+        agent_id: str,
+        config_name: str,
+        config_data: Any,
+        config_type: str = "json",
+        send_update: bool = True,
     ) -> bool:
         """
         Store a configuration entry for an agent.
@@ -201,7 +206,11 @@ class ConfigStore:
             return False
 
     def retrieve(
-        self, agent_id: str, config_name: str, raw: bool = False, resolve_references: bool = True
+        self,
+        agent_id: str,
+        config_name: str,
+        raw: bool = False,
+        resolve_references: bool = True,
     ) -> Any | None:
         """
         Retrieve a configuration entry for an agent.
@@ -464,7 +473,13 @@ class ConfigStore:
 
         return result
 
-    def notify_change(self, config_name: str, action: str, value: Any | None = None, send_update: bool = True):
+    def notify_change(
+        self,
+        config_name: str,
+        action: str,
+        value: Any | None = None,
+        send_update: bool = True,
+    ):
         """
         Notify agents about configuration changes using RPC calls (VOLTTRON-style).
 

@@ -4,6 +4,17 @@
 
 AEMS FastAPI provides a **100% VOLTTRON-compatible agent communication library** built on modern FastAPI and WebSocket technology. This library enables Python applications to use VOLTTRON's proven agent patterns (RPC, PubSub, Config Store, Scheduling) without requiring the full VOLTTRON platform infrastructure.
 
+> **⚠️ Important for Legacy Agent Users:**
+>
+> To run existing VOLTTRON agents with the legacy launcher (`start-legacy.py`), you **must have a local clone of VOLTTRON**. The launcher provides the runtime platform, but the agent source code comes from the VOLTTRON repository.
+>
+> ```bash
+> # Clone VOLTTRON before using legacy agent launcher
+> git clone https://github.com/VOLTTRON/volttron.git ~/volttron
+> # For PNNL applications (ILCAgent, etc.)
+> git clone https://github.com/VOLTTRON/volttron-pnnl-applications.git ~/volttron-pnnl-applications
+> ```
+
 **Key Benefits:**
 - ✅ **Drop-in VOLTTRON compatibility** - Use familiar `@RPC.export`, `@config.subscribe`, `@periodic` decorators
 - ✅ **Modern FastAPI backend** - WebSocket-based communication, REST APIs, automatic OpenAPI docs
@@ -28,8 +39,27 @@ AEMS FastAPI provides a **100% VOLTTRON-compatible agent communication library**
 ### 1. Installation
 
 ```bash
+# Basic installation
 pip install aems-lib-fastapi
+
+# Or install with optional dependencies for specific agent types
+pip install -e ".[historians]"  # For SQLHistorian, MQTTHistorian, etc.
+pip install -e ".[drivers]"     # For PlatformDriverAgent with device interfaces
+pip install -e ".[ilc]"          # For ILCAgent (Intelligent Load Control)
+
+# Install multiple at once
+pip install -e ".[historians,drivers,ilc]"
 ```
+
+#### Optional Dependencies
+
+- **historians**: Required for VOLTTRON historian agents (SQLHistorian, MQTTHistorian)
+  - `python-dateutil`, `ply`
+  - Optional database drivers: MySQL, PostgreSQL, MQTT
+- **drivers**: Required for PlatformDriverAgent with hardware interfaces
+  - `bacpypes`, `pymodbus`, `modbus-tk`, `pyserial`
+- **ilc**: Required for ILCAgent (demand response control)
+  - `sympy` (symbolic math), `transitions` (state machines)
 
 ### 2. Start the Message Bus Server
 
@@ -45,14 +75,24 @@ aems-server --host 0.0.0.0 --port 9000
 
 **Option A: Run Existing VOLTTRON Agents (No Code Changes)**
 
+> **⚠️ Important:** You must have a local clone of VOLTTRON to use the legacy agent launcher. The launcher runs agents from the VOLTTRON source code repository.
+
 ```bash
+# First, clone VOLTTRON if you don't have it
+git clone https://github.com/VOLTTRON/volttron.git ~/volttron
+
 # Run any existing VOLTTRON agent without modification
 ./start-legacy.py \
-    --agent-dir /path/to/VolttronAgent \
+    --agent-dir ~/volttron/examples/ListenerAgent \
     --config config \
-    --identity my.agent \
+    --identity listener \
     --address ws://localhost:8000
 ```
+
+**Why VOLTTRON clone is needed:**
+- Agent source code lives in the VOLTTRON repository
+- Some agents depend on VOLTTRON helper modules (e.g., `BaseHistorian`)
+- AEMS provides the runtime platform, but agents come from VOLTTRON source
 
 **Option B: Create a New VOLTTRON-Compatible Agent**
 
@@ -142,12 +182,25 @@ agent.core.schedule("0 */6 * * *", self.daily_report)  # Every 6 hours
 
 The **start-legacy.py** script enables running existing VOLTTRON agents without any code modifications. It provides a compatibility layer that transparently redirects VOLTTRON imports to AEMS equivalents.
 
+> **📋 Prerequisites:**
+> - AEMS installed with optional dependencies (if needed): `pip install -e ".[historians,drivers,ilc]"`
+> - **A local clone of VOLTTRON** containing the agent source code
+>
+> ```bash
+> # Standard VOLTTRON agents
+> git clone https://github.com/VOLTTRON/volttron.git ~/volttron
+>
+> # PNNL applications (ILCAgent, etc.)
+> git clone https://github.com/VOLTTRON/volttron-pnnl-applications.git ~/volttron-pnnl-applications
+> ```
+
 ### How It Works
 
 1. **Auto-Detection**: Scans agent directory to find the module and class
 2. **Import Hooks**: Intercepts VOLTTRON imports and redirects to AEMS shims
 3. **Config Handling**: Intelligently parses configs and passes parameters to agent `__init__`
 4. **Working Directory**: Changes to agent directory before running (like `vctl start`)
+5. **Agent Source**: Loads agent code from your VOLTTRON clone
 
 ### Usage
 
@@ -259,22 +312,42 @@ Once the server is running, access interactive documentation at:
 
 ### Environment Variables
 ```bash
-# Server configuration
-VOLTTRON_HOME=/path/to/volttron    # Base directory for configs
-AEMS_CONFIG_DEBUG=1               # Enable config store debugging
-AEMS_AGENT_DEBUG=1               # Enable agent communication debugging
+# VOLTTRON_HOME - Base directory for agent configs
+export VOLTTRON_HOME=/home/user/.volttron
 
-# Start server with debugging
+# JWT_SECRET_KEY - Secret key for JWT token generation (production only)
+export JWT_SECRET_KEY=your-secret-key-change-in-production
+
+# Start server
 aems-server --host 0.0.0.0 --port 8000
 ```
 
 ### Server Options
 ```bash
 aems-server --help
-  --host TEXT        Server host address [default: 127.0.0.1]
-  --port INTEGER     Server port [default: 8000]
-  --volttron-home    VOLTTRON_HOME directory for configs
-  --config-dir       Custom config store directory
+
+Options:
+  --host TEXT          Server host address [default: 127.0.0.1]
+  --port INTEGER       Server port [default: 8000]
+  --volttron-home PATH VOLTTRON_HOME directory for config store
+                       [default: ~/.volttron]
+  --config-dir PATH    Custom config store directory
+                       [default: $VOLTTRON_HOME/aems_config_store]
+```
+
+### Config Store Location
+
+The config store is located at `$VOLTTRON_HOME/aems_config_store/` by default. Each agent gets its own subdirectory:
+
+```
+~/.volttron/aems_config_store/
+├── platform.driver/
+│   ├── devices/PNNL/BUILDING/DEVICE
+│   └── registry_configs/device.csv
+├── platform.historian/
+│   └── config
+└── ilc.platform/
+    └── config
 ```
 
 ## Use Cases
@@ -357,6 +430,25 @@ For new development or when you want to fully migrate, update your agent code:
 2. **Update connection**: Use WebSocket address instead of ZMQ
 3. **Keep all decorators**: `@RPC.export`, `@config.subscribe`, `@periodic` work identically
 4. **Test compatibility**: Run with `python -m pytest tests/test_volttron_compatibility.py`
+
+## Documentation
+
+### 📚 Complete Documentation
+
+- **[Quick Start Guide](docs/QUICK_START_LEGACY_AGENTS.md)** - Get started running legacy VOLTTRON agents in 30 seconds
+- **[Legacy Agent Support](docs/LEGACY_AGENT_SUPPORT.md)** - Comprehensive guide to running VOLTTRON agents on AEMS
+- **[Implementation Details](docs/LEGACY_WRAPPER_SUMMARY.md)** - Technical details of the compatibility layer
+- **[vctl-Style Launcher](docs/VCTL_STYLE_LAUNCHER.md)** - Using start-legacy.py like VOLTTRON's vctl
+- **[Compatibility Status](docs/VOLTTRON_COMPATIBILITY_STATUS.md)** - Feature compatibility matrix
+- **[AI Transformation Journey](docs/AI_TRANSFORMATION_JOURNEY.md)** - How this library was built with AI assistance
+- **[Development Guide](CLAUDE.md)** - Developer setup and common commands
+
+### 🚀 Quick Links
+
+- [Installation](#1-installation) - Install with optional dependencies
+- [Running Legacy Agents](#legacy-agent-launcher) - Run VOLTTRON agents without modifications
+- [VOLTTRON Compatibility](#volttron-compatibility) - Feature compatibility matrix
+- [Development Setup](#development-setup) - Set up for development
 
 ## Support
 

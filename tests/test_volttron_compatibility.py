@@ -53,26 +53,44 @@ class VOLTTRONCompatibilityTester:
         """Record config store callbacks."""
         with self.lock:
             self.callbacks_received.append(
-                {"config_name": config_name, "action": action, "contents": contents, "timestamp": time.time()}
+                {
+                    "config_name": config_name,
+                    "action": action,
+                    "contents": contents,
+                    "timestamp": time.time(),
+                }
             )
 
     def record_periodic(self, task_name: str):
         """Record periodic task executions."""
         with self.lock:
-            self.periodic_executions.append({"task": task_name, "timestamp": time.time()})
+            self.periodic_executions.append(
+                {"task": task_name, "timestamp": time.time()}
+            )
 
     def record_rpc(self, method: str, args: tuple, kwargs: dict, result: Any):
         """Record RPC calls."""
         with self.lock:
             self.rpc_calls_received.append(
-                {"method": method, "args": args, "kwargs": kwargs, "result": result, "timestamp": time.time()}
+                {
+                    "method": method,
+                    "args": args,
+                    "kwargs": kwargs,
+                    "result": result,
+                    "timestamp": time.time(),
+                }
             )
 
     def record_pubsub(self, topic: str, message: Any, headers: dict = None):
         """Record PubSub messages."""
         with self.lock:
             self.messages_published.append(
-                {"topic": topic, "message": message, "headers": headers or {}, "timestamp": time.time()}
+                {
+                    "topic": topic,
+                    "message": message,
+                    "headers": headers or {},
+                    "timestamp": time.time(),
+                }
             )
 
     def record_cron(self, task_name: str):
@@ -80,7 +98,14 @@ class VOLTTRONCompatibilityTester:
         with self.lock:
             self.cron_executions.append({"task": task_name, "timestamp": time.time()})
 
-    def add_result(self, test_name: str, expected: str, actual: str, passed: bool, details: dict = None):
+    def add_result(
+        self,
+        test_name: str,
+        expected: str,
+        actual: str,
+        passed: bool,
+        details: dict = None,
+    ):
         """Add a test result."""
         self.results.append(
             TestResult(
@@ -150,7 +175,9 @@ class TestConfigStoreCompatibility(VOLTTRONCompatibilityTester):
         agent.vip.config.set_default("config", {"default_key": "default_value"})
 
         # Step 2: Subscribe to configs
-        agent.vip.config.subscribe(config_callback, actions=["NEW", "UPDATE"], pattern="*")
+        agent.vip.config.subscribe(
+            config_callback, actions=["NEW", "UPDATE"], pattern="*"
+        )
 
         # Record state before connection
         callbacks_before = callback_count["count"]
@@ -202,7 +229,9 @@ class TestConfigStoreCompatibility(VOLTTRONCompatibilityTester):
         time.sleep(0.5)
 
         # Check single callback
-        callback_count = len([c for c in self.callbacks_received if c["config_name"] == "test_config"])
+        callback_count = len(
+            [c for c in self.callbacks_received if c["config_name"] == "test_config"]
+        )
 
         self.add_result(
             "Single Update Single Callback",
@@ -236,13 +265,21 @@ class TestConfigStoreCompatibility(VOLTTRONCompatibilityTester):
         agent.vip.config.set("no_notify_config", {"key": "value"}, send_update=False)
         time.sleep(0.5)
 
-        no_notify_count = len([c for c in self.callbacks_received if c["config_name"] == "no_notify_config"])
+        no_notify_count = len(
+            [
+                c
+                for c in self.callbacks_received
+                if c["config_name"] == "no_notify_config"
+            ]
+        )
 
         # Update with send_update=True (default)
         agent.vip.config.set("notify_config", {"key": "value"}, send_update=True)
         time.sleep(0.5)
 
-        notify_count = len([c for c in self.callbacks_received if c["config_name"] == "notify_config"])
+        notify_count = len(
+            [c for c in self.callbacks_received if c["config_name"] == "notify_config"]
+        )
 
         self.add_result(
             "send_update Flag",
@@ -286,7 +323,9 @@ class TestPeriodicTasksCompatibility(VOLTTRONCompatibilityTester):
             greenlet = agent.core.periodic(0.5, periodic_task)
         else:
             # Fallback for testing
-            greenlet = gevent.spawn(lambda: [periodic_task() or gevent.sleep(0.5) for _ in range(10)])
+            greenlet = gevent.spawn(
+                lambda: [periodic_task() or gevent.sleep(0.5) for _ in range(10)]
+            )
 
         # Run for 2.5 seconds
         time.sleep(2.5)
@@ -329,7 +368,9 @@ class TestPeriodicTasksCompatibility(VOLTTRONCompatibilityTester):
         if hasattr(agent, "core"):
             greenlet = agent.core.periodic(0.2, periodic_task)
         else:
-            greenlet = gevent.spawn(lambda: [periodic_task() or gevent.sleep(0.2) for _ in range(50)])
+            greenlet = gevent.spawn(
+                lambda: [periodic_task() or gevent.sleep(0.2) for _ in range(50)]
+            )
 
         # Let it run
         time.sleep(0.5)
@@ -383,7 +424,9 @@ class TestRPCCompatibility(VOLTTRONCompatibilityTester):
 
         # Call the RPC method from another agent
         try:
-            result = agent2.vip.rpc.call("rpc_provider", "test_method", 5, 3).get(timeout=2)
+            result = agent2.vip.rpc.call("rpc_provider", "test_method", 5, 3).get(
+                timeout=2
+            )
             success = True
             actual_result = result
         except Exception as e:
@@ -460,7 +503,9 @@ class TestPubSubCompatibility(VOLTTRONCompatibilityTester):
         messages_received = []
 
         def message_handler(peer, sender, bus, topic, headers, message):
-            messages_received.append({"topic": topic, "message": message, "headers": headers})
+            messages_received.append(
+                {"topic": topic, "message": message, "headers": headers}
+            )
             self.record_pubsub(topic, message, headers)
 
         # Subscribe to topic
@@ -618,10 +663,15 @@ class TestManagerAgentCompatibility(VOLTTRONCompatibilityTester):
                 greenlets_created.append(greenlet)
 
         # Manager's initialization sequence
-        agent.vip.config.subscribe(update_default, actions=["NEW", "UPDATE"], pattern="config")
+        agent.vip.config.subscribe(
+            update_default, actions=["NEW", "UPDATE"], pattern="config"
+        )
 
         # Set default like Manager
-        default_config = {"setpoint_validate_frequency": 120, "occupancy_validate_frequency": 60}
+        default_config = {
+            "setpoint_validate_frequency": 120,
+            "occupancy_validate_frequency": 60,
+        }
         agent.vip.config.set_default("config", default_config)
 
         # This is where the bug would manifest
@@ -633,7 +683,10 @@ class TestManagerAgentCompatibility(VOLTTRONCompatibilityTester):
             "0 or 1 update_default calls (no duplicates)",
             f"{update_default_calls['count']} calls",
             update_default_calls["count"] <= 1,
-            {"callbacks": self.callbacks_received, "greenlets_created": len(greenlets_created)},
+            {
+                "callbacks": self.callbacks_received,
+                "greenlets_created": len(greenlets_created),
+            },
         )
 
         # Clean up greenlets
@@ -682,7 +735,13 @@ def run_compatibility_tests():
                     # Clean up
                     bus.stop()
                 except Exception as e:
-                    tester.add_result(method_name, "Test execution", f"Failed with error: {e}", False, {})
+                    tester.add_result(
+                        method_name,
+                        "Test execution",
+                        f"Failed with error: {e}",
+                        False,
+                        {},
+                    )
 
         all_results.extend(tester.results)
         print(tester.get_summary())
@@ -713,6 +772,13 @@ if __name__ == "__main__":
 
     # Save results to file
     with open("/tmp/volttron_compatibility_results.json", "w") as f:
-        json.dump([{"test": r.test_name, "passed": r.passed, "details": r.details} for r in results], f, indent=2)
+        json.dump(
+            [
+                {"test": r.test_name, "passed": r.passed, "details": r.details}
+                for r in results
+            ],
+            f,
+            indent=2,
+        )
 
     print("\nResults saved to /tmp/volttron_compatibility_results.json")

@@ -101,7 +101,9 @@ class TestNoDuplicateCallbacks:
 
         # Subscribe to updates
         callback = counter.create_callback("update_callback")
-        agent.vip.config.subscribe(callback, actions=["NEW", "UPDATE"], pattern="test_config")
+        agent.vip.config.subscribe(
+            callback, actions=["NEW", "UPDATE"], pattern="test_config"
+        )
 
         agent.start()
         time.sleep(0.5)
@@ -137,10 +139,15 @@ class TestNoDuplicateCallbacks:
             print(f"update_default called with {config_name}")
 
         # Subscribe to main config
-        agent.vip.config.subscribe(update_default, actions=["NEW", "UPDATE"], pattern="config")
+        agent.vip.config.subscribe(
+            update_default, actions=["NEW", "UPDATE"], pattern="config"
+        )
 
         # Set default config like Manager
-        default_config = {"setpoint_validate_frequency": 120, "occupancy_validate_frequency": 60}
+        default_config = {
+            "setpoint_validate_frequency": 120,
+            "occupancy_validate_frequency": 60,
+        }
         agent.vip.config.set_default("config", default_config)
 
         # Connect (this is where the bug was triggering)

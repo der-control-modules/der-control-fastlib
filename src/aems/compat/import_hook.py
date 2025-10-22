@@ -26,7 +26,11 @@ class VolttronImportRedirector(MetaPathFinder, Loader):
     REDIRECT_MAP = {
         # Core agent imports
         "volttron.platform.vip.agent": "aems.compat.shims.vip_agent",
+        "volttron.platform.agent.base_historian": "aems.compat.shims.base_historian",
+        "volttron.platform.agent.math_utils": "aems.compat.shims.math_utils",
         "volttron.platform.agent": "aems.compat.shims.platform_agent",
+        # Database utilities
+        "volttron.platform.dbutils": "aems.compat.shims.dbutils",
         # Messaging and health
         "volttron.platform.messaging.health": "aems.compat.shims.health",
         "volttron.platform.messaging": "aems.compat.shims.messaging",
@@ -38,6 +42,9 @@ class VolttronImportRedirector(MetaPathFinder, Loader):
         "volttron.platform.vip": "aems.compat.shims.vip",
         # Platform base
         "volttron.platform": "aems.compat.shims.platform",
+        # Utils
+        "volttron.utils.docs": "aems.compat.shims.utils_docs",
+        "volttron.utils": "aems.compat.shims.utils",
     }
 
     def __init__(self):

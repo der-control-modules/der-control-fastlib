@@ -1,38 +1,48 @@
 {
-    "python.linting.enabled": true,
-    "python.linting.pylintEnabled": true,
-    "python.linting.flake8Enabled": true,
+    // Python interpreter
+    "python.defaultInterpreterPath": "./.venv/bin/python",
+
+    // Disable old linters - we use Ruff now
+    "python.linting.enabled": false,
+    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": false,
     "python.linting.pycodestyleEnabled": false,
     "python.linting.mypyEnabled": false,
-    "python.formatting.provider": "black",
-    "python.formatting.blackArgs": [
-        "--line-length=120"
-    ],
+
+    // Disable old formatters - we use Ruff now
+    "python.formatting.provider": "none",
+
+    // Use Ruff extension for linting and formatting
+    // Install the extension: charliermarsh.ruff
     "[python]": {
-        "editor.defaultFormatter": "ms-python.python",
+        "editor.defaultFormatter": "charliermarsh.ruff",
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
-            "source.organizeImports": "explicit"
+            "source.organizeImports": "explicit",
+            "source.fixAll": "explicit"
         }
     },
-    "python.linting.pylintArgs": [
-        "--max-line-length=120",
-        "--disable=line-too-long,trailing-whitespace,bad-whitespace"
-    ],
-    "python.linting.flake8Args": [
-        "--max-line-length=120",
-        "--extend-ignore=E203,W503,E501,W504"
-    ],
-    "editor.rulers": [
-        120
-    ],
+
+    // Ruff configuration
+    "ruff.enable": true,
+    "ruff.lint.enable": true,
+    "ruff.format.args": ["--line-length=120"],
+    "ruff.lint.args": ["--line-length=120"],
+    "ruff.organizeImports": true,
+    "ruff.fixAll": true,
+
+    // Editor settings
+    "editor.rulers": [120],
     "editor.formatOnSave": true,
     "editor.formatOnType": false,
     "editor.formatOnPaste": true,
-    "python.analysis.autoImportCompletions": true,
-    "python.defaultInterpreterPath": "./.venv/bin/python",
+
+    // File settings
     "files.trimTrailingWhitespace": true,
     "files.insertFinalNewline": true,
     "files.trimFinalNewlines": true,
-    "python.linting.lintOnSave": true
+
+    // Python analysis
+    "python.analysis.autoImportCompletions": true,
+    "python.analysis.typeCheckingMode": "basic"
 }

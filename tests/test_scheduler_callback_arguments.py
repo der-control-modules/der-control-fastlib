@@ -18,7 +18,9 @@ class CallbackTestAgent(Agent):
         super().__init__(*args, **kwargs)
         self.callback_results = []
 
-    def callback_with_args(self, event_name: str, value: int, flag: bool = False, **kwargs):
+    def callback_with_args(
+        self, event_name: str, value: int, flag: bool = False, **kwargs
+    ):
         """Test callback that captures all arguments passed to it."""
         fired_at = datetime.now()
         result = {
@@ -26,7 +28,7 @@ class CallbackTestAgent(Agent):
             "value": value,
             "flag": flag,
             "kwargs": kwargs,
-            "fired_at": fired_at
+            "fired_at": fired_at,
         }
         self.callback_results.append(result)
         _log.info(
@@ -51,9 +53,9 @@ def test_two_future_events_with_arguments(message_bus_manager_fixture):
         future_time_1,
         agent.callback_with_args,
         "first_event",  # event_name
-        42,             # value
-        True,           # flag
-        extra_param="first"
+        42,  # value
+        True,  # flag
+        extra_param="first",
     )
 
     # Schedule second event 2 seconds in future (should fire after first)
@@ -62,9 +64,9 @@ def test_two_future_events_with_arguments(message_bus_manager_fixture):
         future_time_2,
         agent.callback_with_args,
         "second_event",  # event_name
-        100,            # value
-        False,          # flag
-        extra_param="second"
+        100,  # value
+        False,  # flag
+        extra_param="second",
     )
 
     _log.info("Scheduled two future events:")
@@ -75,7 +77,9 @@ def test_two_future_events_with_arguments(message_bus_manager_fixture):
     gevent.sleep(3)
 
     # Verify both events fired
-    assert len(agent.callback_results) == 2, f"Expected 2 events, got {len(agent.callback_results)}"
+    assert (
+        len(agent.callback_results) == 2
+    ), f"Expected 2 events, got {len(agent.callback_results)}"
 
     # Verify first event
     first_result = agent.callback_results[0]
@@ -92,9 +96,13 @@ def test_two_future_events_with_arguments(message_bus_manager_fixture):
     assert second_result["kwargs"]["extra_param"] == "second"
 
     # Verify events fired in correct order
-    assert first_result["fired_at"] < second_result["fired_at"], "Events did not fire in correct order"
+    assert (
+        first_result["fired_at"] < second_result["fired_at"]
+    ), "Events did not fire in correct order"
 
-    _log.info("✅ Two future events test passed - events fired in correct order with correct arguments")
+    _log.info(
+        "✅ Two future events test passed - events fired in correct order with correct arguments"
+    )
     agent.disconnect()
 
 
@@ -113,10 +121,10 @@ def test_past_and_future_events_with_arguments(message_bus_manager_fixture):
     agent.core.schedule(
         past_time,
         agent.callback_with_args,
-        "past_event",   # event_name
-        999,            # value
-        True,           # flag
-        status="past"
+        "past_event",  # event_name
+        999,  # value
+        True,  # flag
+        status="past",
     )
 
     # Schedule future event
@@ -124,10 +132,10 @@ def test_past_and_future_events_with_arguments(message_bus_manager_fixture):
     agent.core.schedule(
         future_time,
         agent.callback_with_args,
-        "future_event", # event_name
-        123,            # value
-        False,          # flag
-        status="future"
+        "future_event",  # event_name
+        123,  # value
+        False,  # flag
+        status="future",
     )
 
     _log.info("Scheduled past and future events:")
@@ -138,9 +146,9 @@ def test_past_and_future_events_with_arguments(message_bus_manager_fixture):
     gevent.sleep(0.5)
 
     # Past event should have fired immediately
-    assert len(agent.callback_results) == 1, (
-        f"Expected 1 event (past) to have fired immediately, got {len(agent.callback_results)}"
-    )
+    assert (
+        len(agent.callback_results) == 1
+    ), f"Expected 1 event (past) to have fired immediately, got {len(agent.callback_results)}"
 
     past_result = agent.callback_results[0]
     assert past_result["event_name"] == "past_event"
@@ -152,7 +160,9 @@ def test_past_and_future_events_with_arguments(message_bus_manager_fixture):
     gevent.sleep(1.5)
 
     # Now both events should have fired
-    assert len(agent.callback_results) == 2, f"Expected 2 events total, got {len(agent.callback_results)}"
+    assert (
+        len(agent.callback_results) == 2
+    ), f"Expected 2 events total, got {len(agent.callback_results)}"
 
     # Verify future event
     future_result = agent.callback_results[1]
@@ -163,9 +173,13 @@ def test_past_and_future_events_with_arguments(message_bus_manager_fixture):
 
     # Verify timing: past event should have fired much earlier than future event
     time_diff = (future_result["fired_at"] - past_result["fired_at"]).total_seconds()
-    assert time_diff >= 1.0, f"Time difference between events should be >= 1 second, got {time_diff}"
+    assert (
+        time_diff >= 1.0
+    ), f"Time difference between events should be >= 1 second, got {time_diff}"
 
-    _log.info("✅ Past and future events test passed - past event fired immediately, future event fired later")
+    _log.info(
+        "✅ Past and future events test passed - past event fired immediately, future event fired later"
+    )
     agent.disconnect()
 
 
@@ -185,7 +199,7 @@ def test_complex_argument_combinations(message_bus_manager_fixture):
             "data_list": data_list,
             "args": args,
             "kwargs": kwargs,
-            "fired_at": datetime.now()
+            "fired_at": datetime.now(),
         }
         agent.callback_results.append(result)
         _log.info(
@@ -203,13 +217,13 @@ def test_complex_argument_combinations(message_bus_manager_fixture):
     agent.core.schedule(
         future_time,
         complex_callback,
-        "complex_test",      # event_id
-        test_dict,           # data_dict
-        test_list,           # data_list
-        "extra_arg1",        # *args
-        "extra_arg2",        # *args
-        param1="kwarg1",     # **kwargs
-        param2={"nested": "kwarg"}
+        "complex_test",  # event_id
+        test_dict,  # data_dict
+        test_list,  # data_list
+        "extra_arg1",  # *args
+        "extra_arg2",  # *args
+        param1="kwarg1",  # **kwargs
+        param2={"nested": "kwarg"},
     )
 
     _log.info("Scheduled complex event with:")
@@ -222,7 +236,9 @@ def test_complex_argument_combinations(message_bus_manager_fixture):
     gevent.sleep(2)
 
     # Verify event fired with correct arguments
-    assert len(agent.callback_results) == 1, f"Expected 1 event, got {len(agent.callback_results)}"
+    assert (
+        len(agent.callback_results) == 1
+    ), f"Expected 1 event, got {len(agent.callback_results)}"
 
     result = agent.callback_results[0]
     assert result["event_id"] == "complex_test"
@@ -253,9 +269,9 @@ def test_event_ordering_with_microsecond_precision(message_bus_manager_fixture):
         agent.core.schedule(
             event_time,
             agent.callback_with_args,
-            f"event_{i}",     # event_name
-            i,               # value (index)
-            i % 2 == 0       # flag (alternating True/False)
+            f"event_{i}",  # event_name
+            i,  # value (index)
+            i % 2 == 0,  # flag (alternating True/False)
         )
         _log.info(f"Scheduled event_{i} for {event_time}")
 
@@ -263,24 +279,33 @@ def test_event_ordering_with_microsecond_precision(message_bus_manager_fixture):
     gevent.sleep(2)
 
     # Verify all events fired
-    assert len(agent.callback_results) == 5, f"Expected 5 events, got {len(agent.callback_results)}"
+    assert (
+        len(agent.callback_results) == 5
+    ), f"Expected 5 events, got {len(agent.callback_results)}"
 
     # Verify events fired in correct order
     for i, result in enumerate(agent.callback_results):
-        assert result["event_name"] == f"event_{i}", f"Event {i} fired out of order: got {result['event_name']}"
+        assert (
+            result["event_name"] == f"event_{i}"
+        ), f"Event {i} fired out of order: got {result['event_name']}"
         assert result["value"] == i, f"Event {i} had wrong value: got {result['value']}"
-        assert result["flag"] == (i % 2 == 0), f"Event {i} had wrong flag: got {result['flag']}"
+        assert result["flag"] == (
+            i % 2 == 0
+        ), f"Event {i} had wrong flag: got {result['flag']}"
 
     # Verify timestamps are in ascending order
     for i in range(1, len(agent.callback_results)):
-        prev_time = agent.callback_results[i-1]["fired_at"]
+        prev_time = agent.callback_results[i - 1]["fired_at"]
         curr_time = agent.callback_results[i]["fired_at"]
         assert prev_time <= curr_time, f"Events {i-1} and {i} fired out of order"
 
-    _log.info("✅ Microsecond precision ordering test passed - all events fired in correct sequence")
+    _log.info(
+        "✅ Microsecond precision ordering test passed - all events fired in correct sequence"
+    )
     agent.disconnect()
 
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v", "-s"])

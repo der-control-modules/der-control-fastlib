@@ -7,7 +7,9 @@ class ConfigListTestAgent(Agent):
         self.configs_received = {}
         abc = {"def": "ghi"}
         # Registers the configstore for the pattern 'config' ('config is default config entry')
-        self.vip.config.subscribe(self.config_callback, actions=["NEW", "UPDATE"], pattern="config")
+        self.vip.config.subscribe(
+            self.config_callback, actions=["NEW", "UPDATE"], pattern="config"
+        )
         self.vip.config.set_default("config", abc)
 
     def config_callback(self, config_name, action, config_value):

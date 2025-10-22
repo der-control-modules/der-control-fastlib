@@ -6,6 +6,7 @@ Provides: messaging module namespace with topics and headers
 
 # Re-export health constants explicitly
 from aems.compat.shims.health import STATUS_BAD, STATUS_GOOD, UNKNOWN
+from aems.compat.shims.messaging_utils import Topic
 
 
 # VOLTTRON messaging headers
@@ -26,21 +27,23 @@ class topics:
     DRIVER_TOPIC_BASE = "devices"
     DRIVER_TOPIC_ALL = "devices/#"
 
-    @staticmethod
-    def DEVICES_VALUE(device, point=""):
-        """Build a device value topic path."""
-        return f"devices/{device}/{point}"
+    # Topic templates (these are callable Topic objects)
+    # Format: devices/{campus}/{building}/{unit}/{path}/{point}
+    DEVICES_PATH = Topic("devices//{campus}//{building}//{unit}//{path!S}//{point}")
+    DEVICES_VALUE = Topic("devices//{campus}//{building}//{unit}//{path!S}//{point}")
 
-    @staticmethod
-    def DEVICES_PATH(device):
-        """Build a device path topic."""
-        return f"devices/{device}"
+    # RPC device path (for actuator agent RPC calls, no 'devices' prefix)
+    # Format: {campus}/{building}/{unit}/{path}/{point}
+    RPC_DEVICE_PATH = Topic("{campus}//{building}//{unit}//{path!S}//{point}")
 
     # Actuator topics
-    ACTUATOR_GET = "platform/actuator/get"
-    ACTUATOR_SET = "platform/actuator/set"
-    ACTUATOR_SCHEDULE_REQUEST = "platform/actuator/schedule/request"
-    ACTUATOR_SCHEDULE_RESULT = "platform/actuator/schedule/result"
+    ACTUATOR_GET = "devices/actuators/get/{campus}/{building}/{unit}/{path}/{point}"
+    ACTUATOR_SET = "devices/actuators/set/{campus}/{building}/{unit}/{path}/{point}"
+    ACTUATOR_VALUE = "devices/actuators/value/{campus}/{building}/{unit}/{path}/{point}"
+    ACTUATOR_REVERT_POINT = "devices/actuators/revert/point/{campus}/{building}/{unit}/{path}/{point}"
+    ACTUATOR_REVERT_DEVICE = "devices/actuators/revert/device/{campus}/{building}/{unit}/{path}/{point}"
+    ACTUATOR_SCHEDULE_REQUEST = "devices/actuators/schedule/request"
+    ACTUATOR_SCHEDULE_RESULT = "devices/actuators/schedule/result"
 
     # Platform topics
     PLATFORM_SEND = "platform/send"

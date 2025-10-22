@@ -40,7 +40,12 @@ class TestConfigReferences:
         self.test_agent = self.manager.create_connected_agent(agent_id)
 
         # Create a referenced configuration (database config)
-        db_config = {"host": "localhost", "port": 5432, "database": "testdb", "username": "testuser"}
+        db_config = {
+            "host": "localhost",
+            "port": 5432,
+            "database": "testdb",
+            "username": "testuser",
+        }
 
         # Store the database config
         url = f"{self.base_url}/{agent_id}/database"
@@ -48,7 +53,11 @@ class TestConfigReferences:
         assert response.status_code == 200
 
         # Create main configuration that references the database config
-        main_config = {"app_name": "test_app", "database_config": "config://database", "debug": True}
+        main_config = {
+            "app_name": "test_app",
+            "database_config": "config://database",
+            "debug": True,
+        }
 
         # Store the main config
         url = f"{self.base_url}/{agent_id}/main"
@@ -93,7 +102,11 @@ class TestConfigReferences:
         assert response.status_code == 200
 
         # Create settings config that references base
-        settings_config = {"environment": "test", "base_settings": "config://base", "additional_timeout": 60}
+        settings_config = {
+            "environment": "test",
+            "base_settings": "config://base",
+            "additional_timeout": 60,
+        }
 
         # Store settings config
         url = f"{self.base_url}/{agent_id}/settings"

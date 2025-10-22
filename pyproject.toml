@@ -39,6 +39,8 @@ dependencies = [
     "watchgod==0.8.2",
     "volttron-core>=2.0.0rc20",
     "jinja2~=3.1.2",
+    "python-dateutil>=2.8.0",  # For timestamp parsing in VOLTTRON compatibility layer
+    "ply>=3.11",               # For VOLTTRON historian agents (lexer/parser)
     # Security: Ensure minimum versions for transitive dependencies
     "starlette>=0.47.2",     # Fixes GHSA-2c2j-9gv5-cj73 (blocking thread issue)
     # Note: cryptography>=44.0.1 is now enforced via volttron-core>=2.0.0rc20
@@ -59,6 +61,36 @@ dev = [
     "click>=8.0.0",
     "pre-commit>=3.0.0",
 ]
+
+# Dependencies for VOLTTRON Historian agents (SQLHistorian, MQTTHistorian, etc.)
+# These are required for all historian agent types
+historians = [
+    "python-dateutil>=2.8.0",  # For timestamp parsing in BaseHistorian
+    "ply>=3.11",               # For SQLHistorian (lexer/parser for table definitions)
+    # Optional database drivers - install only what you need:
+    # "mysql-connector-python>=8.0.33",  # For SQLHistorian with MySQL backend
+    # "psycopg2-binary>=2.9.0",          # For SQLHistorian with PostgreSQL/Redshift backend
+    # "paho-mqtt>=1.6.0",                # For MQTTHistorian
+]
+
+# Dependencies for PlatformDriverAgent device interfaces
+# These are optional and only needed when using specific hardware drivers
+drivers = [
+    "bacpypes>=0.16.7",        # For PlatformDriverAgent BACnet driver interface
+    "pymodbus>=2.5.3",         # For PlatformDriverAgent Modbus driver interface
+    "modbus-tk>=1.1.2",        # For PlatformDriverAgent Modbus TK driver interface
+    "pyserial>=3.5",           # For PlatformDriverAgent serial communication (Modbus)
+    # Note: pydnp3 for DNP3/IEEE 2030.5 drivers requires manual installation
+    # Note: suds-jurko for ChargePoint driver may be needed for EV charging stations
+]
+
+# Dependencies for ILCAgent (Intelligent Load Control Agent)
+# Required for demand response and grid services control applications
+ilc = [
+    "sympy>=1.12",             # For ILCAgent (symbolic math for demand formula evaluation)
+    "transitions>=0.9.0",      # For ILCAgent (state machine library for control logic)
+]
+
 # # Dependencies for documentation
 # docs = [
 #     "sphinx>=6.1.3",

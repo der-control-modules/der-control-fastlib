@@ -191,7 +191,14 @@ class ConnectionManager:
 
         if peer not in self.active_connections:
             _log.debug(f"RPC target {peer} not found")
-            await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": f"Peer {peer} not found"})
+            await self.send_message(
+                sender,
+                {
+                    "type": "rpc_error",
+                    "msg_id": msg_id,
+                    "error": f"Peer {peer} not found",
+                },
+            )
             return
 
         # Create a message for the RPC call
@@ -219,7 +226,14 @@ class ConnectionManager:
             await self.send_message(sender, {"type": "rpc_response", "msg_id": msg_id, "result": response})
         except asyncio.TimeoutError:
             _log.debug(f"RPC request timed out for msg_id {msg_id}")
-            await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": "RPC request timed out"})
+            await self.send_message(
+                sender,
+                {
+                    "type": "rpc_error",
+                    "msg_id": msg_id,
+                    "error": "RPC request timed out",
+                },
+            )
             self.clear_rpc_response(msg_id)
         except Exception as e:
             # Handle exceptions from RPC method execution

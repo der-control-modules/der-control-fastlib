@@ -38,7 +38,12 @@ class TestChainedRPC:
         yield
 
         # Cleanup
-        for agent in [self.proxy_agent, self.driver_agent, self.device_agent, self.external_client]:
+        for agent in [
+            self.proxy_agent,
+            self.driver_agent,
+            self.device_agent,
+            self.external_client,
+        ]:
             if agent:
                 agent.disconnect()
 
@@ -64,7 +69,9 @@ class TestChainedRPC:
                 def make_call(dev_id):
                     try:
                         _log.debug(f"Making RPC call for device: {dev_id}")
-                        result = self.proxy_agent.vip.rpc.call("platform.driver", "get_point", dev_id, "temperature")
+                        result = self.proxy_agent.vip.rpc.call(
+                            "platform.driver", "get_point", dev_id, "temperature"
+                        )
                         value = result.get(timeout=8)  # Reduced timeout
                         _log.debug(f"RPC call completed for device {dev_id}: {value}")
                         return dev_id, value
@@ -98,7 +105,9 @@ class TestChainedRPC:
 
         # External client calls proxy agent, which chains to driver agent
         start_time = time.time()
-        result = self.external_client.vip.rpc.call("proxy_agent", "get_multiple_devices", ["device1", "device2"])
+        result = self.external_client.vip.rpc.call(
+            "proxy_agent", "get_multiple_devices", ["device1", "device2"]
+        )
         response = result.get(timeout=15)
         end_time = time.time()
 
@@ -125,7 +134,9 @@ class TestChainedRPC:
             _log.debug(f"Driver getting {point_name} from device at {device_path}")
 
             # Chain to device agent
-            device_result = self.driver_agent.vip.rpc.call("device_agent", "read_value", point_name)
+            device_result = self.driver_agent.vip.rpc.call(
+                "device_agent", "read_value", point_name
+            )
             raw_value = device_result.get(timeout=10)
 
             # Add driver-level processing
@@ -146,7 +157,9 @@ class TestChainedRPC:
 
             for device_path, point_name, target_value in point_data:
                 # First get current value (A->B->C chain)
-                current_result = self.proxy_agent.vip.rpc.call("platform.driver", "get_point", device_path, point_name)
+                current_result = self.proxy_agent.vip.rpc.call(
+                    "platform.driver", "get_point", device_path, point_name
+                )
                 current_data = current_result.get(timeout=15)
 
                 # Simulate set operation
@@ -159,7 +172,11 @@ class TestChainedRPC:
                 }
                 results.append(set_result)
 
-            return {"operation": "set_multiple_points", "results": results, "total_operations": len(results)}
+            return {
+                "operation": "set_multiple_points",
+                "results": results,
+                "total_operations": len(results),
+            }
 
         self.proxy_agent.vip.rpc.export_method("set_points", set_multiple_points)
         gevent.sleep(1)  # Wait for method registration
@@ -171,7 +188,9 @@ class TestChainedRPC:
         ]
 
         start_time = time.time()
-        result = self.external_client.vip.rpc.call("proxy_agent", "set_points", point_operations)
+        result = self.external_client.vip.rpc.call(
+            "proxy_agent", "set_points", point_operations
+        )
         response = result.get(timeout=30)
         end_time = time.time()
 
@@ -194,9 +213,15 @@ class TestChainedRPC:
         def simulate_device_operation(operation_id, delay=1.0):
             _log.debug(f"Device operation {operation_id} starting (delay: {delay}s)")
             gevent.sleep(delay)  # Simulate variable device response time
-            return {"operation_id": operation_id, "result": f"Operation {operation_id} completed", "delay": delay}
+            return {
+                "operation_id": operation_id,
+                "result": f"Operation {operation_id} completed",
+                "delay": delay,
+            }
 
-        self.device_agent.vip.rpc.export_method("device_operation", simulate_device_operation)
+        self.device_agent.vip.rpc.export_method(
+            "device_operation", simulate_device_operation
+        )
 
         # Set up driver to handle multiple devices
         def process_device_operations(operations):
@@ -224,25 +249,33 @@ class TestChainedRPC:
 
             return results
 
-        self.driver_agent.vip.rpc.export_method("process_operations", process_device_operations)
+        self.driver_agent.vip.rpc.export_method(
+            "process_operations", process_device_operations
+        )
 
         # Set up proxy for coordinated multi-device control
         def coordinated_control(control_sequence):
-            _log.debug(f"Proxy coordinating control sequence with {len(control_sequence)} steps")
+            _log.debug(
+                f"Proxy coordinating control sequence with {len(control_sequence)} steps"
+            )
             sequence_results = []
 
             for step_id, operations in control_sequence:
                 step_start = time.time()
 
                 # Call driver for this step (which will parallelize device calls)
-                step_result = self.proxy_agent.vip.rpc.call("platform.driver", "process_operations", operations).get(
-                    timeout=20
-                )
+                step_result = self.proxy_agent.vip.rpc.call(
+                    "platform.driver", "process_operations", operations
+                ).get(timeout=20)
 
                 step_end = time.time()
 
                 sequence_results.append(
-                    {"step_id": step_id, "duration": step_end - step_start, "operations": step_result}
+                    {
+                        "step_id": step_id,
+                        "duration": step_end - step_start,
+                        "operations": step_result,
+                    }
                 )
 
             return {
@@ -251,18 +284,25 @@ class TestChainedRPC:
                 "total_steps": len(sequence_results),
             }
 
-        self.proxy_agent.vip.rpc.export_method("coordinated_control", coordinated_control)
+        self.proxy_agent.vip.rpc.export_method(
+            "coordinated_control", coordinated_control
+        )
         gevent.sleep(1)  # Wait for method registration
 
         # Create a complex control sequence
         control_sequence = [
             ("step1", [("op1", 0.5), ("op2", 0.8), ("op3", 0.3)]),  # 3 parallel ops
             ("step2", [("op4", 1.0), ("op5", 0.7)]),  # 2 parallel ops
-            ("step3", [("op6", 0.4), ("op7", 0.9), ("op8", 0.6), ("op9", 0.2)]),  # 4 parallel ops
+            (
+                "step3",
+                [("op6", 0.4), ("op7", 0.9), ("op8", 0.6), ("op9", 0.2)],
+            ),  # 4 parallel ops
         ]
 
         start_time = time.time()
-        result = self.external_client.vip.rpc.call("proxy_agent", "coordinated_control", control_sequence)
+        result = self.external_client.vip.rpc.call(
+            "proxy_agent", "coordinated_control", control_sequence
+        )
         response = result.get(timeout=45)
         end_time = time.time()
 
@@ -286,9 +326,13 @@ class TestChainedRPC:
         # Step 3: max(0.4, 0.9, 0.6, 0.2) ≈ 0.9s + overhead
         assert step3_duration < 2.5, f"Step 3 took too long: {step3_duration}s"
 
-        _log.info(f"Step durations: {step1_duration:.2f}s, {step2_duration:.2f}s, {step3_duration:.2f}s")
+        _log.info(
+            f"Step durations: {step1_duration:.2f}s, {step2_duration:.2f}s, {step3_duration:.2f}s"
+        )
 
-    @pytest.mark.skip(reason="Timeout behavior test needs investigation - timing issues in test environment")
+    @pytest.mark.skip(
+        reason="Timeout behavior test needs investigation - timing issues in test environment"
+    )
     def test_chained_rpc_timeout_behavior(self):
         """Test how timeouts behave in chained RPC calls."""
 
@@ -304,7 +348,9 @@ class TestChainedRPC:
         def driver_with_timeout(operation_delay):
             _log.debug(f"Driver calling device with {operation_delay}s delay")
             try:
-                result = self.driver_agent.vip.rpc.call("device_agent", "slow_operation", operation_delay)
+                result = self.driver_agent.vip.rpc.call(
+                    "device_agent", "slow_operation", operation_delay
+                )
                 return result.get(timeout=3)  # 3 second timeout at driver level
             except Exception as e:
                 return {"error": f"Driver timeout: {str(e)}"}
@@ -315,7 +361,9 @@ class TestChainedRPC:
         def proxy_operation(delay):
             _log.debug(f"Proxy initiating operation with {delay}s delay")
             try:
-                result = self.proxy_agent.vip.rpc.call("platform.driver", "timed_operation", delay)
+                result = self.proxy_agent.vip.rpc.call(
+                    "platform.driver", "timed_operation", delay
+                )
                 return result.get(timeout=8)  # 8 second timeout at proxy level
             except Exception as e:
                 return {"error": f"Proxy timeout: {str(e)}"}

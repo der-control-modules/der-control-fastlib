@@ -9,7 +9,11 @@ import contextlib
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
+
+import pytz
+from dateutil.parser import parse as parse_date
 
 _log = logging.getLogger(__name__)
 
@@ -89,7 +93,12 @@ class utils:
         # Parse command line arguments (VOLTTRON style)
         parser = argparse.ArgumentParser(description=f"Run {agent_class.__name__}")
 
-        parser.add_argument("--config", dest="config_path", help="Path to agent configuration file", default=None)
+        parser.add_argument(
+            "--config",
+            dest="config_path",
+            help="Path to agent configuration file",
+            default=None,
+        )
 
         parser.add_argument(
             "--identity",
@@ -127,7 +136,11 @@ class utils:
             # Instantiate the agent
             # VOLTTRON agents expect config_path as first argument
             if args.config_path:
-                agent = agent_class(config_path=args.config_path, identity=args.identity, address=args.address)
+                agent = agent_class(
+                    config_path=args.config_path,
+                    identity=args.identity,
+                    address=args.address,
+                )
             else:
                 agent = agent_class(identity=args.identity, address=args.address)
 
@@ -161,6 +174,64 @@ class utils:
             if "agent" in locals():
                 with contextlib.suppress(Exception):
                     agent.disconnect()
+
+    @staticmethod
+    def format_timestamp(time_stamp):
+        """Create a consistent datetime string representation based on ISO 8601 format."""
+        time_str = time_stamp.strftime("%Y-%m-%dT%H:%M:%S.%f")
+
+        if time_stamp.tzinfo is not None:
+            sign = "+"
+            td = time_stamp.tzinfo.utcoffset(time_stamp)
+            if td.days < 0:
+                sign = "-"
+                td = -td
+
+            seconds = td.seconds
+            minutes, seconds = divmod(seconds, 60)
+            hours, minutes = divmod(minutes, 60)
+            time_str += f"{sign}{hours:02}:{minutes:02}"
+
+        return time_str
+
+    @staticmethod
+    def parse_timestamp_string(time_stamp_str):
+        """Parse timestamp string to datetime object."""
+        return parse_date(time_stamp_str)
+
+    @staticmethod
+    def get_aware_utc_now():
+        """Get current UTC time as timezone-aware datetime."""
+        return datetime.now(pytz.UTC)
+
+    @staticmethod
+    def process_timestamp(timestamp_string, topic=""):
+        """Process timestamp string from VOLTTRON message."""
+        if isinstance(timestamp_string, str):
+            return utils.parse_timestamp_string(timestamp_string)
+        return timestamp_string
+
+    @staticmethod
+    def fix_sqlite3_datetime(sql=None):
+        """Register datetime converters for SQLite compatibility."""
+        if sql is None:
+            import sqlite3 as sql
+
+        def parse(time_stamp_bytes):
+            return utils.parse_timestamp_string(time_stamp_bytes.decode("utf-8"))
+
+        sql.register_adapter(datetime, utils.format_timestamp)
+        sql.register_converter("timestamp", parse)
+
+    @staticmethod
+    def update_kwargs_with_config(kwargs, config_dict):
+        """Update kwargs dictionary with config values (VOLTTRON pattern)."""
+        kwargs.update(config_dict)
+
+    @staticmethod
+    def is_secure_mode():
+        """Check if VOLTTRON is running in secure mode (always False in AEMS)."""
+        return False
 
     @staticmethod
     def _setup_pubsub_subscriptions(agent):
@@ -202,5 +273,32 @@ class math_utils:
     pass
 
 
+# Export utils functions at module level for direct imports
+# This allows: from volttron.platform.agent.utils import fix_sqlite3_datetime
+fix_sqlite3_datetime = utils.fix_sqlite3_datetime
+format_timestamp = utils.format_timestamp
+parse_timestamp_string = utils.parse_timestamp_string
+is_secure_mode = utils.is_secure_mode
+get_aware_utc_now = utils.get_aware_utc_now
+process_timestamp = utils.process_timestamp
+update_kwargs_with_config = utils.update_kwargs_with_config
+load_config = utils.load_config
+setup_logging = utils.setup_logging
+vip_main = utils.vip_main
+
 # Export utils and other modules at module level
-__all__ = ["utils", "known_identities", "math_utils"]
+__all__ = [
+    "utils",
+    "known_identities",
+    "math_utils",
+    "fix_sqlite3_datetime",
+    "format_timestamp",
+    "parse_timestamp_string",
+    "get_aware_utc_now",
+    "process_timestamp",
+    "update_kwargs_with_config",
+    "load_config",
+    "setup_logging",
+    "vip_main",
+    "is_secure_mode",
+]

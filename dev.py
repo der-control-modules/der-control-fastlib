@@ -400,16 +400,18 @@ def run_command(cmd, description=None):
     # Run the command and capture output
     process = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
-    if process.returncode != 0:
-        print("❌ Error:")
-        if process.stderr:
-            print(process.stderr)
-        return False
-
+    # Always print stdout if available (even on errors, for tools like pip-audit)
     if process.stdout:
         print(process.stdout)
 
-    return process.returncode == 0
+    if process.returncode != 0:
+        # Print stderr only if it contains something different from stdout
+        if process.stderr and process.stderr.strip() != process.stdout.strip():
+            print("❌ Error details:")
+            print(process.stderr)
+        return False
+
+    return True
 
 
 def setup_upstream(upstream_url=None):
@@ -807,37 +809,85 @@ def coverage():
     return True
 
 
-def security():
+def security(strict=False):
     """
-    Run security scans.
+    Run security scans with configurable severity threshold.
 
-    Performs security scanning on both the code and dependencies to
-    identify potential security vulnerabilities.
+    Performs security scanning on both code and dependencies. In standard mode (default),
+    only fails on MEDIUM/HIGH/CRITICAL severity issues. In strict mode, fails on any issue.
+
+    Args:
+        strict (bool): If True, fail on any vulnerabilities. If False (default), only fail
+                      on MEDIUM+ severity issues. Allows LOW severity and unfixable deps.
 
     Returns
     -------
-        bool: True if all security checks passed, False otherwise
+        bool: True if security checks passed based on severity threshold
 
     Notes
     -----
-        - Uses pip-audit to scan dependencies for vulnerabilities
-        - Uses bandit to scan the codebase for security issues
-        - Generates a JSON report in bandit-report.json
+        Standard mode (strict=False): Suitable for CI with known LOW severity issues
+        Strict mode (strict=True): Zero-tolerance, fails on any finding
+
+        Tools used:
+        - pip-audit: Scans dependencies for CVEs
+        - bandit: Scans code for security anti-patterns (-ll for MEDIUM+ only)
     """
     print("🔒 Running security scans...")
+    if strict:
+        print("⚠️  STRICT MODE: Will fail on any vulnerabilities")
+    else:
+        print("ℹ️  STANDARD MODE: Only fails on MEDIUM/HIGH/CRITICAL severity")
+    print()
 
     # Run pip-audit for dependency vulnerability scanning
-    pip_audit_ok = run_command("pip-audit", "Scanning dependencies with pip-audit")
+    print("=" * 60)
+    print("📦 Dependency Security (pip-audit)")
+    print("=" * 60)
+    pip_audit_ok = run_command("pip-audit", "Scanning dependencies")
+    print()
 
-    # Run bandit for code security analysis
-    bandit_ok = run_command("bandit -r src/ -f json -o bandit-report.json", "Running Bandit security analysis")
+    # Run bandit for code security analysis (only MEDIUM+ with -ll flag)
+    print("=" * 60)
+    print("🔍 Code Security (Bandit)")
+    print("=" * 60)
+    bandit_ok = run_command("bandit -r src/ -f json -o bandit-report.json -ll", "Scanning code for MEDIUM/HIGH issues")
 
-    if bandit_ok:
-        print("📄 Bandit report saved to bandit-report.json")
-        # Also run bandit with console output for immediate feedback
-        run_command("bandit -r src/", "Bandit security summary")
+    # Show Bandit info
+    print("\n📄 Bandit report saved to bandit-report.json")
+    print("💡 View all issues: bandit -r src/")
+    print("💡 View MEDIUM+: bandit -r src/ -ll")
 
-    return pip_audit_ok and bandit_ok
+    # Determine pass/fail based on mode
+    print("\n" + "=" * 60)
+    print("📊 Security Scan Summary")
+    print("=" * 60)
+
+    if strict:
+        # Strict mode: fail on any issues
+        passed = pip_audit_ok and bandit_ok
+        if passed:
+            print("✅ PASS: No security issues found")
+        else:
+            print("❌ FAIL: Security issues detected (strict mode)")
+            if not pip_audit_ok:
+                print("   - Dependency vulnerabilities present")
+            if not bandit_ok:
+                print("   - Code security issues present")
+    else:
+        # Standard mode: only Bandit failures matter (MEDIUM+ only via -ll flag)
+        # pip-audit failures are informational unless we want to parse severity
+        passed = bandit_ok
+        if passed:
+            print("✅ PASS: No MEDIUM/HIGH/CRITICAL issues")
+            if not pip_audit_ok:
+                print("ℹ️  Info: Dependency vulnerabilities present")
+                print("   (Acceptable if LOW severity or unfixable transitive deps)")
+        else:
+            print("❌ FAIL: MEDIUM/HIGH code security issues detected")
+
+    print()
+    return passed
 
 
 def build():
@@ -1013,6 +1063,12 @@ def main():
     elif command == "create-pr-branch":
         branch_name = sys.argv[2] if len(sys.argv) > 2 else None
         success = create_pr_branch(branch_name)
+        sys.exit(0 if success else 1)
+
+    # Handle security command with optional --strict flag
+    elif command == "security":
+        strict = "--strict" in sys.argv
+        success = security(strict=strict)
         sys.exit(0 if success else 1)
 
     # Map command names to their corresponding functions

@@ -50,11 +50,13 @@ def test_heap_ordering():
     print(f"  Top of heap: {queue[0]}")
 
     # Verify the past event is at position 0
-    assert queue[0] == past_event, f"Past event should be at top of heap, but got {queue[0]}"
+    assert (
+        queue[0] == past_event
+    ), f"Past event should be at top of heap, but got {queue[0]}"
     print("\n✅ Past event correctly moved to top of heap")
 
     # Now test with many events
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Testing with large queue (like production):")
 
     large_queue = []
@@ -86,7 +88,7 @@ def test_heap_ordering():
     print("\n✅ Past event correctly at top even with large queue")
 
     # Test processing due events
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Testing processing of due events:")
 
     process_queue = []

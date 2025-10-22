@@ -23,7 +23,7 @@ class TracingTestAgent(Agent):
         result = {
             "event_name": event_name,
             "metadata": metadata or {},
-            "executed_at": datetime.now()
+            "executed_at": datetime.now(),
         }
         self.callback_results.append(result)
         print(f"🎯 Callback executed: {event_name} with metadata: {metadata}")
@@ -37,9 +37,9 @@ class TracingTestAgent(Agent):
 
 def test_scheduler_tracing_one_time_events(message_bus_manager_fixture):
     """Test scheduler tracing for one-time events."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING SCHEDULER TRACING - ONE-TIME EVENTS")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -65,13 +65,17 @@ def test_scheduler_tracing_one_time_events(message_bus_manager_fixture):
     future_time = now + timedelta(seconds=1)
 
     print(f"📅 Scheduling one-time event for {future_time}")
-    agent.core.schedule(future_time, agent.test_callback, "trace_test", {"key": "value"})
+    agent.core.schedule(
+        future_time, agent.test_callback, "trace_test", {"key": "value"}
+    )
 
     # Wait for event to execute
     gevent.sleep(2)
 
     # Verify callback executed
-    assert len(agent.callback_results) == 1, f"Expected 1 callback, got {len(agent.callback_results)}"
+    assert (
+        len(agent.callback_results) == 1
+    ), f"Expected 1 callback, got {len(agent.callback_results)}"
     assert agent.callback_results[0]["event_name"] == "trace_test"
 
     print("✅ One-time event tracing test completed")
@@ -80,9 +84,9 @@ def test_scheduler_tracing_one_time_events(message_bus_manager_fixture):
 
 def test_scheduler_tracing_cron_events(message_bus_manager_fixture):
     """Test scheduler tracing for cron events."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING SCHEDULER TRACING - CRON EVENTS")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -104,7 +108,9 @@ def test_scheduler_tracing_cron_events(message_bus_manager_fixture):
 
     # Schedule a cron event (every minute for testing - but we'll only wait briefly)
     print("📅 Scheduling cron event: '*/1 * * * *' (every minute)")
-    agent.core.schedule("*/1 * * * *", agent.test_callback, "cron_test", {"type": "cron"})
+    agent.core.schedule(
+        "*/1 * * * *", agent.test_callback, "cron_test", {"type": "cron"}
+    )
 
     # Wait briefly (cron events get rescheduled)
     gevent.sleep(1)
@@ -115,9 +121,9 @@ def test_scheduler_tracing_cron_events(message_bus_manager_fixture):
 
 def test_scheduler_tracing_periodic_events(message_bus_manager_fixture):
     """Test scheduler tracing for periodic (interval) events."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING SCHEDULER TRACING - PERIODIC EVENTS")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -145,17 +151,21 @@ def test_scheduler_tracing_periodic_events(message_bus_manager_fixture):
     gevent.sleep(2.5)
 
     # Should have executed at least 2 times
-    assert len(agent.callback_results) >= 2, f"Expected at least 2 callbacks, got {len(agent.callback_results)}"
+    assert (
+        len(agent.callback_results) >= 2
+    ), f"Expected at least 2 callbacks, got {len(agent.callback_results)}"
 
-    print(f"✅ Periodic event tracing test completed - {len(agent.callback_results)} executions")
+    print(
+        f"✅ Periodic event tracing test completed - {len(agent.callback_results)} executions"
+    )
     agent.disconnect()
 
 
 def test_scheduler_tracing_error_handling(message_bus_manager_fixture):
     """Test scheduler tracing when events throw errors."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING SCHEDULER TRACING - ERROR HANDLING")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -186,7 +196,9 @@ def test_scheduler_tracing_error_handling(message_bus_manager_fixture):
     gevent.sleep(2)
 
     # Verify callback was called (even though it errored)
-    assert len(agent.callback_results) == 1, f"Expected 1 callback, got {len(agent.callback_results)}"
+    assert (
+        len(agent.callback_results) == 1
+    ), f"Expected 1 callback, got {len(agent.callback_results)}"
     assert agent.callback_results[0]["status"] == "error"
 
     print("✅ Error handling tracing test completed")
@@ -195,9 +207,9 @@ def test_scheduler_tracing_error_handling(message_bus_manager_fixture):
 
 def test_scheduler_tracing_lifecycle(message_bus_manager_fixture):
     """Test scheduler lifecycle tracing (start/stop)."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING SCHEDULER TRACING - LIFECYCLE")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()

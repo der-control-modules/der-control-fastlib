@@ -24,29 +24,24 @@ class ProductionScenarioAgent(Agent):
     def _do_control_action(self, gid: str, state: str):
         """The control action that should fire."""
         action_time = datetime.now()
-        self.control_actions.append({
-            'gid': gid,
-            'state': state,
-            'time': action_time,
-            'timestamp': time.time()
-        })
+        self.control_actions.append(
+            {"gid": gid, "state": state, "time": action_time, "timestamp": time.time()}
+        )
         print(f"✅ CONTROL ACTION FIRED: gid={gid}, state={state} at {action_time}")
 
     def some_other_task(self, task_id: str):
         """Some other scheduled task."""
-        self.other_events.append({
-            'task_id': task_id,
-            'time': datetime.now(),
-            'timestamp': time.time()
-        })
+        self.other_events.append(
+            {"task_id": task_id, "time": datetime.now(), "timestamp": time.time()}
+        )
         print(f"📋 Other task executed: {task_id}")
 
 
 def test_production_scenario_with_existing_queue(message_bus_manager_fixture):
     """Test the exact production scenario: agent with existing scheduled events, then add past event."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 PRODUCTION SCENARIO: EXISTING QUEUE + PAST EVENT")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -85,7 +80,9 @@ def test_production_scenario_with_existing_queue(message_bus_manager_fixture):
     print(f"  Queue size: {queue_size}")
     if agent.core._scheduler._event_queue:
         next_event = agent.core._scheduler._event_queue[0]
-        print(f"  Next event: {next_event.name} at {datetime.fromtimestamp(next_event.next_time)}")
+        print(
+            f"  Next event: {next_event.name} at {datetime.fromtimestamp(next_event.next_time)}"
+        )
 
     # Let the scheduler run for a bit
     print("\n⏳ Step 2: Let agent run for 2 seconds (simulating production runtime)...")
@@ -119,7 +116,9 @@ def test_production_scenario_with_existing_queue(message_bus_manager_fixture):
     print(f"  Queue size: {queue_before} -> {queue_after}")
     if agent.core._scheduler._event_queue:
         next_event = agent.core._scheduler._event_queue[0]
-        print(f"  Next event: {next_event.name} at {datetime.fromtimestamp(next_event.next_time)}")
+        print(
+            f"  Next event: {next_event.name} at {datetime.fromtimestamp(next_event.next_time)}"
+        )
         print(f"  Is it the 8AM event? {next_event.name == 'zone_1'}")
 
     # Wait for past event to fire
@@ -136,14 +135,16 @@ def test_production_scenario_with_existing_queue(message_bus_manager_fixture):
     if agent.control_actions:
         print("\n✅ Control actions that fired:")
         for action in agent.control_actions:
-            time_diff = action['timestamp'] - current_timestamp
-            print(f"  - {action['gid']}: {action['state']} at {action['time']} (+{time_diff:.2f}s from test start)")
+            time_diff = action["timestamp"] - current_timestamp
+            print(
+                f"  - {action['gid']}: {action['state']} at {action['time']} (+{time_diff:.2f}s from test start)"
+            )
     else:
         print("\n❌ NO CONTROL ACTIONS FIRED!")
 
     # Check for the specific 8AM event
     past_event_fired = any(
-        action['state'] == 'occupied' and action['gid'] == 'zone_1'
+        action["state"] == "occupied" and action["gid"] == "zone_1"
         for action in agent.control_actions
     )
 
@@ -152,30 +153,38 @@ def test_production_scenario_with_existing_queue(message_bus_manager_fixture):
 
         # Debug info
         print("\n🔍 Debug information:")
-        print(f"  Scheduler greenlet exists: {agent.core._scheduler._scheduler_greenlet is not None}")
+        print(
+            f"  Scheduler greenlet exists: {agent.core._scheduler._scheduler_greenlet is not None}"
+        )
         if agent.core._scheduler._scheduler_greenlet:
-            print(f"  Scheduler greenlet dead: {agent.core._scheduler._scheduler_greenlet.dead}")
+            print(
+                f"  Scheduler greenlet dead: {agent.core._scheduler._scheduler_greenlet.dead}"
+            )
         print(f"  Events in queue: {len(agent.core._scheduler._event_queue)}")
 
         # Check if the event is still in the queue
         for i, event in enumerate(agent.core._scheduler._event_queue):
-            if 'zone_1' in event.name or '_do_control_action' in str(event.function):
+            if "zone_1" in event.name or "_do_control_action" in str(event.function):
                 event_time = datetime.fromtimestamp(event.next_time)
-                print(f"  Found control event at position {i}: {event.name}, time: {event_time}")
+                print(
+                    f"  Found control event at position {i}: {event.name}, time: {event_time}"
+                )
     else:
         print("\n✅ Past event fired correctly even with existing queue")
 
     agent.disconnect()
 
     # Assert to make test fail if bug is present
-    assert past_event_fired, "Past 8AM event should have fired immediately even with existing queue!"
+    assert (
+        past_event_fired
+    ), "Past 8AM event should have fired immediately even with existing queue!"
 
 
 def test_verify_scheduler_wakeup_with_queue(message_bus_manager_fixture):
     """Verify the scheduler wakes up when a past event is added to existing queue."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 TESTING SCHEDULER WAKEUP WITH EXISTING QUEUE")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -187,10 +196,12 @@ def test_verify_scheduler_wakeup_with_queue(message_bus_manager_fixture):
     # Add some far future events
     now = datetime.now()
     for i in range(5):
-        future_time = now + timedelta(hours=i+1)
+        future_time = now + timedelta(hours=i + 1)
         agent.core.schedule(future_time, agent.some_other_task, f"future_{i}")
 
-    print(f"Added 5 future events, queue size: {len(agent.core._scheduler._event_queue)}")
+    print(
+        f"Added 5 future events, queue size: {len(agent.core._scheduler._event_queue)}"
+    )
 
     # Let scheduler settle
     gevent.sleep(1)

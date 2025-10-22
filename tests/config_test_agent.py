@@ -52,7 +52,9 @@ class ConfigTestAgent(Agent):
         self._schedule_processing_task()
 
         # Schedule a daily report task (won't change with config)
-        self.core.schedule(self._daily_report, "0 0 * * *", name="daily_report")  # Midnight every day
+        self.core.schedule(
+            self._daily_report, "0 0 * * *", name="daily_report"
+        )  # Midnight every day
 
         print(f"{self.identity} agent started!")
 
@@ -72,7 +74,9 @@ class ConfigTestAgent(Agent):
         targets = self._config.get("targets", [])
         threshold = self._config.get("threshold", 100)
 
-        print(f"[{current_time}] Processing {len(targets)} targets with threshold {threshold}")
+        print(
+            f"[{current_time}] Processing {len(targets)} targets with threshold {threshold}"
+        )
         for target in targets:
             print(f"  - Processing target: {target}")
 
@@ -86,15 +90,23 @@ class ConfigTestAgent(Agent):
 
         if use_cron:
             # If we're now using cron but we have an interval-based task, switch to cron
-            if "_process_data" in current_tasks and "interval" in current_tasks["_process_data"]:
+            if (
+                "_process_data" in current_tasks
+                and "interval" in current_tasks["_process_data"]
+            ):
                 print("Switching from interval to cron scheduling")
                 self.core.cancel("_process_data")
                 cron_schedule = self._config.get("cron_schedule", "*/5 * * * *")
-                self.core.schedule(self._process_data, cron_schedule, name="_process_data")
+                self.core.schedule(
+                    self._process_data, cron_schedule, name="_process_data"
+                )
                 print(f"Now using cron schedule: {cron_schedule}")
         else:
             # If we're using interval but have a cron-based task, switch to interval
-            if "_process_data" in current_tasks and "cron" in current_tasks["_process_data"]:
+            if (
+                "_process_data" in current_tasks
+                and "cron" in current_tasks["_process_data"]
+            ):
                 print("Switching from cron to interval scheduling")
                 self.core.cancel("_process_data")
                 interval = self._config.get("interval", 60)
@@ -105,7 +117,9 @@ class ConfigTestAgent(Agent):
                 configured_interval = self._config.get("interval", 60)
                 current_interval = current_tasks["_process_data"].get("interval", 0)
                 if current_interval != configured_interval:
-                    print(f"Updating processing interval from {current_interval} to {configured_interval}")
+                    print(
+                        f"Updating processing interval from {current_interval} to {configured_interval}"
+                    )
                     self.core.update_interval("_process_data", configured_interval)
 
     @Core.receiver("onconfigure")
@@ -204,13 +218,19 @@ class ConfigTestAgent(Agent):
                         # Already using cron, check if schedule changed
                         current_cron = current_tasks["_process_data"]["cron"]
                         if current_cron != cron_schedule:
-                            print(f"Updating cron schedule from {current_cron} to {cron_schedule}")
+                            print(
+                                f"Updating cron schedule from {current_cron} to {cron_schedule}"
+                            )
                             self.core.update_cron("_process_data", cron_schedule)
                     else:
                         # Switch from interval to cron
-                        print(f"Switching from interval to cron schedule: {cron_schedule}")
+                        print(
+                            f"Switching from interval to cron schedule: {cron_schedule}"
+                        )
                         self.core.cancel("_process_data")
-                        self.core.schedule(self._process_data, cron_schedule, name="_process_data")
+                        self.core.schedule(
+                            self._process_data, cron_schedule, name="_process_data"
+                        )
                 else:
                     # Switch to interval or update interval
                     interval = config.get("interval", 60)
@@ -218,13 +238,17 @@ class ConfigTestAgent(Agent):
                         # Already using interval, check if it changed
                         current_interval = current_tasks["_process_data"]["interval"]
                         if current_interval != interval:
-                            print(f"Updating interval from {current_interval} to {interval}")
+                            print(
+                                f"Updating interval from {current_interval} to {interval}"
+                            )
                             self.core.update_interval("_process_data", interval)
                     else:
                         # Switch from cron to interval
                         print(f"Switching from cron to interval: {interval}")
                         self.core.cancel("_process_data")
-                        self.core.schedule(self._process_data, interval, name="_process_data")
+                        self.core.schedule(
+                            self._process_data, interval, name="_process_data"
+                        )
 
         except Exception as e:
             print(f"Error applying configuration: {e}")
@@ -324,12 +348,16 @@ class ConfigTestAgent(Agent):
         if use_cron:
             # Use cron-based scheduling
             cron_schedule = self._config.get("cron_schedule", "*/5 * * * *")
-            task_name = self.core.schedule(self._process_data, cron_schedule, name="process_data")
+            task_name = self.core.schedule(
+                self._process_data, cron_schedule, name="process_data"
+            )
             print(f"Scheduled processing with cron expression: {cron_schedule}")
         else:
             # Use interval-based scheduling
             interval = self._config.get("interval", 60)
-            task_name = self.core.schedule(self._process_data, interval, name="process_data")
+            task_name = self.core.schedule(
+                self._process_data, interval, name="process_data"
+            )
             print(f"Scheduled processing with interval: {interval} seconds")
 
         # Remember the task name for later updates
@@ -346,7 +374,9 @@ class ConfigTestAgent(Agent):
         targets = self._config.get("targets", [])
         threshold = self._config.get("threshold", 100)
 
-        print(f"[{current_time}] Processing {len(targets)} targets with threshold {threshold}")
+        print(
+            f"[{current_time}] Processing {len(targets)} targets with threshold {threshold}"
+        )
         for target in targets:
             print(f"  - Processing target: {target}")
 

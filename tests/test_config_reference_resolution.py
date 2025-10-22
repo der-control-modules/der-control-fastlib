@@ -34,6 +34,7 @@ class TestConfigReferenceResolution:
 
         # Create unique test ID
         import uuid
+
         self.test_id = str(uuid.uuid4())[:8]
 
         yield
@@ -49,29 +50,23 @@ class TestConfigReferenceResolution:
         """Test simple config:// reference in string value."""
         agent_id = f"ref_agent_{self.test_id}"
 
-        self.agent = self.manager.create_connected_agent(agent_id, agent_class=ReferenceResolutionAgent)
+        self.agent = self.manager.create_connected_agent(
+            agent_id, agent_class=ReferenceResolutionAgent
+        )
 
         # Set base config
-        base_config = {
-            "host": "localhost",
-            "port": 8080,
-            "protocol": "http"
-        }
+        base_config = {"host": "localhost", "port": 8080, "protocol": "http"}
         result = self.agent.vip.config.set("server_config", base_config)
         result.get(timeout=5)
 
         # Set config with reference
-        referencing_config = {
-            "server": "config://server_config",
-            "timeout": 30
-        }
+        referencing_config = {"server": "config://server_config", "timeout": 30}
         result = self.agent.vip.config.set("client_config", referencing_config)
         result.get(timeout=5)
 
         # Subscribe to see resolved value
         self.agent.vip.config.subscribe(
-            self.agent.on_config_update,
-            pattern="client_config"
+            self.agent.on_config_update, pattern="client_config"
         )
 
         gevent.sleep(0.5)
@@ -87,36 +82,24 @@ class TestConfigReferenceResolution:
         """Test config references within nested structures."""
         agent_id = f"nested_ref_agent_{self.test_id}"
 
-        self.agent = self.manager.create_connected_agent(agent_id, agent_class=ReferenceResolutionAgent)
+        self.agent = self.manager.create_connected_agent(
+            agent_id, agent_class=ReferenceResolutionAgent
+        )
 
         # Set base configs
-        db_config = {
-            "host": "db.example.com",
-            "port": 5432,
-            "database": "myapp"
-        }
+        db_config = {"host": "db.example.com", "port": 5432, "database": "myapp"}
         result = self.agent.vip.config.set("database", db_config)
         result.get(timeout=5)
 
-        cache_config = {
-            "host": "cache.example.com",
-            "port": 6379,
-            "ttl": 3600
-        }
+        cache_config = {"host": "cache.example.com", "port": 6379, "ttl": 3600}
         result = self.agent.vip.config.set("cache", cache_config)
         result.get(timeout=5)
 
         # Set config with nested references
         app_config = {
             "name": "MyApp",
-            "connections": {
-                "database": "config://database",
-                "cache": "config://cache"
-            },
-            "settings": {
-                "debug": False,
-                "workers": 4
-            }
+            "connections": {"database": "config://database", "cache": "config://cache"},
+            "settings": {"debug": False, "workers": 4},
         }
         result = self.agent.vip.config.set("app", app_config)
         result.get(timeout=5)
@@ -133,7 +116,9 @@ class TestConfigReferenceResolution:
         """Test config references within lists."""
         agent_id = f"list_ref_agent_{self.test_id}"
 
-        self.agent = self.manager.create_connected_agent(agent_id, agent_class=ReferenceResolutionAgent)
+        self.agent = self.manager.create_connected_agent(
+            agent_id, agent_class=ReferenceResolutionAgent
+        )
 
         # Set device configs
         device1 = {"id": "sensor_1", "type": "temperature", "unit": "celsius"}
@@ -149,12 +134,8 @@ class TestConfigReferenceResolution:
 
         # Set config with list of references
         devices_config = {
-            "devices": [
-                "config://device_1",
-                "config://device_2",
-                "config://device_3"
-            ],
-            "poll_interval": 60
+            "devices": ["config://device_1", "config://device_2", "config://device_3"],
+            "poll_interval": 60,
         }
         result = self.agent.vip.config.set("devices", devices_config)
         result.get(timeout=5)
@@ -168,21 +149,22 @@ class TestConfigReferenceResolution:
         assert resolved["devices"][1] == device2
         assert resolved["devices"][2] == device3
 
-    @pytest.mark.skip(reason="Circular reference causes timeout - needs better handling")
+    @pytest.mark.skip(
+        reason="Circular reference causes timeout - needs better handling"
+    )
     def test_circular_reference_detection(self):
         """Test that circular references are detected and handled."""
         agent_id = f"circular_ref_agent_{self.test_id}"
 
-        self.agent = self.manager.create_connected_agent(agent_id, agent_class=ReferenceResolutionAgent)
+        self.agent = self.manager.create_connected_agent(
+            agent_id, agent_class=ReferenceResolutionAgent
+        )
 
         # Create circular reference
-        config_a = {
-            "name": "Config A",
-            "reference": "config://config_b"
-        }
+        config_a = {"name": "Config A", "reference": "config://config_b"}
         config_b = {
             "name": "Config B",
-            "reference": "config://config_a"  # Circular reference
+            "reference": "config://config_a",  # Circular reference
         }
 
         result = self.agent.vip.config.set("config_a", config_a)
@@ -203,13 +185,12 @@ class TestConfigReferenceResolution:
         """Test handling of references to non-existent configs."""
         agent_id = f"missing_ref_agent_{self.test_id}"
 
-        self.agent = self.manager.create_connected_agent(agent_id, agent_class=ReferenceResolutionAgent)
+        self.agent = self.manager.create_connected_agent(
+            agent_id, agent_class=ReferenceResolutionAgent
+        )
 
         # Set config with reference to non-existent config
-        config = {
-            "name": "Test Config",
-            "missing_ref": "config://non_existent_config"
-        }
+        config = {"name": "Test Config", "missing_ref": "config://non_existent_config"}
         result = self.agent.vip.config.set("test_config", config)
         result.get(timeout=5)
 
@@ -223,7 +204,9 @@ class TestConfigReferenceResolution:
         """Test that config references work with extra whitespace."""
         agent_id = f"whitespace_ref_agent_{self.test_id}"
 
-        self.agent = self.manager.create_connected_agent(agent_id, agent_class=ReferenceResolutionAgent)
+        self.agent = self.manager.create_connected_agent(
+            agent_id, agent_class=ReferenceResolutionAgent
+        )
 
         # Set base config
         base = {"value": "test_value"}
@@ -232,11 +215,11 @@ class TestConfigReferenceResolution:
 
         # Set config with reference containing whitespace
         configs_to_test = [
-            {"ref": "config://  base"},      # Leading spaces
-            {"ref": "config://base  "},      # Trailing spaces
-            {"ref": "config://  base  "},    # Both
-            {"ref": "config://\tbase"},      # Tab
-            {"ref": "config://\nbase\n"},    # Newlines
+            {"ref": "config://  base"},  # Leading spaces
+            {"ref": "config://base  "},  # Trailing spaces
+            {"ref": "config://  base  "},  # Both
+            {"ref": "config://\tbase"},  # Tab
+            {"ref": "config://\nbase\n"},  # Newlines
         ]
 
         for i, config in enumerate(configs_to_test):
@@ -252,7 +235,9 @@ class TestConfigReferenceResolution:
         """Test that config references are case-insensitive."""
         agent_id = f"case_ref_agent_{self.test_id}"
 
-        self.agent = self.manager.create_connected_agent(agent_id, agent_class=ReferenceResolutionAgent)
+        self.agent = self.manager.create_connected_agent(
+            agent_id, agent_class=ReferenceResolutionAgent
+        )
 
         # Set config with mixed case name
         base = {"setting": "value"}
@@ -261,10 +246,10 @@ class TestConfigReferenceResolution:
 
         # Reference with different cases
         refs = [
-            {"ref": "config://myconfig"},    # Lowercase
-            {"ref": "config://MYCONFIG"},    # Uppercase
-            {"ref": "config://MyConfig"},    # Original case
-            {"ref": "config://mYcOnFiG"},    # Mixed
+            {"ref": "config://myconfig"},  # Lowercase
+            {"ref": "config://MYCONFIG"},  # Uppercase
+            {"ref": "config://MyConfig"},  # Original case
+            {"ref": "config://mYcOnFiG"},  # Mixed
         ]
 
         for i, config in enumerate(refs):
@@ -280,7 +265,9 @@ class TestConfigReferenceResolution:
         """Test that updates to referenced configs propagate."""
         agent_id = f"propagate_ref_agent_{self.test_id}"
 
-        self.agent = self.manager.create_connected_agent(agent_id, agent_class=ReferenceResolutionAgent)
+        self.agent = self.manager.create_connected_agent(
+            agent_id, agent_class=ReferenceResolutionAgent
+        )
 
         # Set base config
         base = {"version": 1, "data": "initial"}
@@ -288,17 +275,13 @@ class TestConfigReferenceResolution:
         result.get(timeout=5)
 
         # Set referencing config
-        ref_config = {
-            "name": "Referencer",
-            "source": "config://base"
-        }
+        ref_config = {"name": "Referencer", "source": "config://base"}
         result = self.agent.vip.config.set("referencer", ref_config)
         result.get(timeout=5)
 
         # Subscribe to updates
         self.agent.vip.config.subscribe(
-            self.agent.on_config_update,
-            pattern="referencer"
+            self.agent.on_config_update, pattern="referencer"
         )
 
         # Initial resolution
@@ -324,7 +307,9 @@ class TestConfigReferenceResolution:
         """Test configs with both references and regular values."""
         agent_id = f"mixed_ref_agent_{self.test_id}"
 
-        self.agent = self.manager.create_connected_agent(agent_id, agent_class=ReferenceResolutionAgent)
+        self.agent = self.manager.create_connected_agent(
+            agent_id, agent_class=ReferenceResolutionAgent
+        )
 
         # Set referenced configs
         db = {"host": "localhost", "port": 5432}
@@ -337,15 +322,15 @@ class TestConfigReferenceResolution:
 
         # Mixed config
         mixed = {
-            "app_name": "TestApp",              # Regular value
-            "version": "1.0.0",                  # Regular value
-            "database": "config://db",          # Reference
+            "app_name": "TestApp",  # Regular value
+            "version": "1.0.0",  # Regular value
+            "database": "config://db",  # Reference
             "performance": {
-                "workers": 4,                    # Regular value
-                "limits": "config://limits"     # Nested reference
+                "workers": 4,  # Regular value
+                "limits": "config://limits",  # Nested reference
             },
-            "features": ["auth", "api"],        # Regular list
-            "debug": True                       # Regular boolean
+            "features": ["auth", "api"],  # Regular list
+            "debug": True,  # Regular boolean
         }
 
         result = self.agent.vip.config.set("app_config", mixed)
@@ -356,8 +341,8 @@ class TestConfigReferenceResolution:
 
         # Check mixed resolution
         assert resolved["app_name"] == "TestApp"  # Unchanged
-        assert resolved["version"] == "1.0.0"     # Unchanged
-        assert resolved["database"] == db         # Resolved
+        assert resolved["version"] == "1.0.0"  # Unchanged
+        assert resolved["database"] == db  # Resolved
         assert resolved["performance"]["workers"] == 4  # Unchanged
         assert resolved["performance"]["limits"] == limits  # Resolved
         assert resolved["features"] == ["auth", "api"]  # Unchanged
@@ -367,7 +352,9 @@ class TestConfigReferenceResolution:
         """Test that only complete strings are treated as references."""
         agent_id = f"partial_ref_agent_{self.test_id}"
 
-        self.agent = self.manager.create_connected_agent(agent_id, agent_class=ReferenceResolutionAgent)
+        self.agent = self.manager.create_connected_agent(
+            agent_id, agent_class=ReferenceResolutionAgent
+        )
 
         # Set base config
         base = {"value": "test"}
@@ -378,7 +365,7 @@ class TestConfigReferenceResolution:
         partial = {
             "url": "http://config://base/path",  # Not a pure reference
             "desc": "See config://base for details",  # Contains reference but not pure
-            "ref": "config://base"  # This SHOULD be resolved
+            "ref": "config://base",  # This SHOULD be resolved
         }
 
         result = self.agent.vip.config.set("partial", partial)

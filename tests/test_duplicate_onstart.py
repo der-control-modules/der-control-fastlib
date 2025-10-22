@@ -39,7 +39,9 @@ def test_duplicate_onstart_issue(message_bus_manager_fixture):
         print(f"Final onstart count: {agent.onstart_count}")
 
         # Check that onstart was called exactly once
-        assert agent.onstart_count == 1, f"Expected onstart=1, got {agent.onstart_count}"
+        assert (
+            agent.onstart_count == 1
+        ), f"Expected onstart=1, got {agent.onstart_count}"
         print("✓ onstart was called exactly once!")
 
     finally:

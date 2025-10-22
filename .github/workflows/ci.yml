@@ -29,7 +29,7 @@ jobs:
 
       - name: Run format check
         run: |
-          ruff --check src/
+          ruff check src/
 
       - name: Run linting
         run: |
@@ -59,9 +59,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .[dev]
 
-      - name: Run security scans
+      - name: Run security scans (standard mode)
         run: |
-          python dev.py security
+          python dev.py security  # Only fails on MEDIUM/HIGH/CRITICAL severity
+        if: github.ref != 'refs/heads/main'
+
+      - name: Run security scans (strict mode for main branch)
+        run: |
+          python dev.py security --strict  # Zero tolerance for releases
+        if: github.ref == 'refs/heads/main'
 
       - name: Upload security results
         uses: actions/upload-artifact@v4

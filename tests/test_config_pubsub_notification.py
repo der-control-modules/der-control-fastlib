@@ -24,7 +24,12 @@ class ConfigPubSubTestAgent(Agent):
         """Callback for configuration updates via direct subscription."""
         _log.info(f"DIRECT CALLBACK RECEIVED: {config_name} ({action})")
         self.callback_notifications.append(
-            {"config_name": config_name, "action": action, "received_at": time.time(), "source": "callback"}
+            {
+                "config_name": config_name,
+                "action": action,
+                "received_at": time.time(),
+                "source": "callback",
+            }
         )
 
 
@@ -47,7 +52,9 @@ def test_config_pubsub_notification(message_bus_manager_fixture):
 
         _log.info("2. Agent1 subscribing to config updates via direct subscription...")
         agent1.config.subscribe(
-            callback=agent1.config_update_callback, pattern="pubsub_test_config", actions=["UPDATE", "NEW"]
+            callback=agent1.config_update_callback,
+            pattern="pubsub_test_config",
+            actions=["UPDATE", "NEW"],
         )
 
         # Note: Both agents automatically subscribe to their own config topics
@@ -61,17 +68,25 @@ def test_config_pubsub_notification(message_bus_manager_fixture):
         gevent.sleep(3)  # Allow time for notifications to be processed
 
         _log.info("5. Verifying agent1 received notification via callback...")
-        assert len(agent1.callback_notifications) > 0, "Agent1 did not receive direct callback notification"
+        assert (
+            len(agent1.callback_notifications) > 0
+        ), "Agent1 did not receive direct callback notification"
 
-        _log.info("6. Verifying agent1 has the config (config isolation means agent2 should NOT have it)...")
+        _log.info(
+            "6. Verifying agent1 has the config (config isolation means agent2 should NOT have it)..."
+        )
         # Only agent1 should have the config in their cache (config stores are isolated)
-        assert "pubsub_test_config" in agent1.config._config_cache, "Agent1 missing config in cache"
+        assert (
+            "pubsub_test_config" in agent1.config._config_cache
+        ), "Agent1 missing config in cache"
         assert (
             "pubsub_test_config" not in agent2.config._config_cache
         ), "Agent2 should not have agent1's config (config isolation)"
 
         # Check that agent1 has the correct config data
-        assert agent1.config.get("pubsub_test_config") == test_config, "Agent1 has incorrect config data"
+        assert (
+            agent1.config.get("pubsub_test_config") == test_config
+        ), "Agent1 has incorrect config data"
 
         _log.info("7. Agent2 setting its own config (isolated from agent1)...")
         updated_config = {"test": "updated", "timestamp": time.time()}
@@ -84,8 +99,12 @@ def test_config_pubsub_notification(message_bus_manager_fixture):
         agent1_config = agent1.config.get("pubsub_test_config")
         agent2_config = agent2.config.get("pubsub_test_config")
 
-        assert agent1_config["test"] == "data", f"Agent1 config should be unchanged: {agent1_config}"
-        assert agent2_config["test"] == "updated", f"Agent2 config should be updated: {agent2_config}"
+        assert (
+            agent1_config["test"] == "data"
+        ), f"Agent1 config should be unchanged: {agent1_config}"
+        assert (
+            agent2_config["test"] == "updated"
+        ), f"Agent2 config should be updated: {agent2_config}"
 
         _log.info("✅ SUCCESS: Config isolation and notifications working correctly!")
 
@@ -120,12 +139,16 @@ def test_config_delete_notification(message_bus_manager_fixture):
         gevent.sleep(2)  # Allow time for initial config to propagate
 
         # Verify only agent1 has the config (due to config isolation)
-        assert "delete_test_config" in agent1.config._config_cache, "Agent1 missing initial config"
+        assert (
+            "delete_test_config" in agent1.config._config_cache
+        ), "Agent1 missing initial config"
         assert (
             "delete_test_config" not in agent2.config._config_cache
         ), "Agent2 should not have agent1's config (config isolation)"
 
-        _log.info("3. Agent1 deleting the config (only affects agent1 due to config isolation)...")
+        _log.info(
+            "3. Agent1 deleting the config (only affects agent1 due to config isolation)..."
+        )
         agent1.config.delete("delete_test_config")
 
         gevent.sleep(3)  # Allow time for delete notification to be processed
@@ -141,7 +164,9 @@ def test_config_delete_notification(message_bus_manager_fixture):
                 == agent1.config._default_configs["delete_test_config"]
             ), "Agent1 config not reverted to default"
         else:
-            assert "delete_test_config" not in agent1.config._config_cache, "Agent1 did not remove the deleted config"
+            assert (
+                "delete_test_config" not in agent1.config._config_cache
+            ), "Agent1 did not remove the deleted config"
 
         # Agent2 should still not have the config (config isolation)
         assert (

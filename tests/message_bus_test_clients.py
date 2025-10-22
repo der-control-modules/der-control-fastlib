@@ -66,9 +66,13 @@ class MessageBusTestClient:
             raise ConnectionError("Client not connected")
 
         subscription_id = str(uuid.uuid4())
-        self.subscriptions[prefix] = callback or (lambda msg: print(f"Subscription callback for {prefix}: {msg}"))
+        self.subscriptions[prefix] = callback or (
+            lambda msg: print(f"Subscription callback for {prefix}: {msg}")
+        )
 
-        await self.websocket.send(json.dumps({"type": "subscribe", "prefix": prefix, "id": subscription_id}))
+        await self.websocket.send(
+            json.dumps({"type": "subscribe", "prefix": prefix, "id": subscription_id})
+        )
 
         print(f"Client {self.identity} subscribed to prefix: {prefix}")
         return subscription_id
@@ -80,14 +84,20 @@ class MessageBusTestClient:
 
         subscription_id = str(uuid.uuid4())
         # Note: We're using the pattern as the key here, which might not be ideal for regex patterns
-        self.subscriptions[pattern] = callback or (lambda msg: print(f"Subscription callback for {pattern}: {msg}"))
+        self.subscriptions[pattern] = callback or (
+            lambda msg: print(f"Subscription callback for {pattern}: {msg}")
+        )
 
-        await self.websocket.send(json.dumps({"type": "subscribe", "pattern": pattern, "id": subscription_id}))
+        await self.websocket.send(
+            json.dumps({"type": "subscribe", "pattern": pattern, "id": subscription_id})
+        )
 
         print(f"Client {self.identity} subscribed to pattern: {pattern}")
         return subscription_id
 
-    async def publish(self, topic: str, message: Any, headers: dict | None = None, bus: str = ""):
+    async def publish(
+        self, topic: str, message: Any, headers: dict | None = None, bus: str = ""
+    ):
         """Publish a message to a topic."""
         if not self.connected:
             raise ConnectionError("Client not connected")
@@ -134,7 +144,9 @@ class MessageBusTestClient:
             )
         )
 
-        print(f"Client {self.identity} sent VIP message to {peer}: subsystem={subsystem}, args={args}")
+        print(
+            f"Client {self.identity} sent VIP message to {peer}: subsystem={subsystem}, args={args}"
+        )
         return msg_id
 
     def set_callback_handler(self, callback):
@@ -264,12 +276,18 @@ async def run_complex_test():
     await asyncio.sleep(1)
 
     # Coordinator sends control messages
-    await coordinator.publish("control/agent1/start", {"command": "start", "parameters": {"delay": 0}})
-    await coordinator.publish("control/agent2/stop", {"command": "stop", "reason": "maintenance"})
+    await coordinator.publish(
+        "control/agent1/start", {"command": "start", "parameters": {"delay": 0}}
+    )
+    await coordinator.publish(
+        "control/agent2/stop", {"command": "stop", "reason": "maintenance"}
+    )
     await coordinator.publish("control/all/status", {"command": "report_status"})
 
     # Coordinator sends a broadcast
-    await coordinator.publish("broadcast/attention", {"message": "System will restart in 5 minutes"})
+    await coordinator.publish(
+        "broadcast/attention", {"message": "System will restart in 5 minutes"}
+    )
 
     # Agent1 responds with VIP message
     await agent1.send_vip_message("coordinator", "response", ["status", "running"])

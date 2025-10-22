@@ -94,8 +94,12 @@ class TestAuthentication:
         algorithm = "HS256"
 
         # Decode and validate access token
-        access_payload = jwt.decode(data["access_token"], secret_key, algorithms=[algorithm])
-        refresh_payload = jwt.decode(data["refresh_token"], secret_key, algorithms=[algorithm])
+        access_payload = jwt.decode(
+            data["access_token"], secret_key, algorithms=[algorithm]
+        )
+        refresh_payload = jwt.decode(
+            data["refresh_token"], secret_key, algorithms=[algorithm]
+        )
 
         # Verify access token payload
         assert access_payload["sub"] == "testuser"
@@ -120,7 +124,11 @@ class TestAuthentication:
 
         # Refresh token should expire in about 7 days (with some tolerance)
         refresh_duration = refresh_exp - now
-        assert timedelta(days=6, hours=23) <= refresh_duration <= timedelta(days=7, hours=1)
+        assert (
+            timedelta(days=6, hours=23)
+            <= refresh_duration
+            <= timedelta(days=7, hours=1)
+        )
 
     def test_authenticate_missing_username_json(self, message_bus):
         """Test authentication with missing username in JSON data."""
@@ -258,7 +266,9 @@ class TestAuthentication:
             ("", "", 401),
         ],
     )
-    def test_various_credentials(self, message_bus, username, password, expected_status):
+    def test_various_credentials(
+        self, message_bus, username, password, expected_status
+    ):
         """Test authentication with various credential combinations."""
         base_url = f"http://{message_bus.host}:{message_bus.port}"
 

@@ -22,20 +22,16 @@ class ProductionDebugAgent(Agent):
     def _do_control_action(self, gid: str, state: str):
         """The actual control action that should fire."""
         action_time = datetime.now()
-        self.control_actions.append({
-            'gid': gid,
-            'state': state,
-            'time': action_time
-        })
+        self.control_actions.append({"gid": gid, "state": state, "time": action_time})
         print(f"🎯 CONTROL ACTION FIRED: gid={gid}, state={state} at {action_time}")
         _log.info(f"_do_control_action executed: gid={gid}, state={state}")
 
 
 def test_scheduler_8am_6pm_simulation(message_bus_manager_fixture):
     """Simulate the exact production scenario with 8am-6pm occupancy override."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("🔍 PRODUCTION DEBUG: 8AM-6PM OCCUPANCY OVERRIDE")
-    print("="*80)
+    print("=" * 80)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
@@ -71,7 +67,9 @@ def test_scheduler_8am_6pm_simulation(message_bus_manager_fixture):
     agent.core.schedule(today_8am, agent._do_control_action, "2025-09-12_0", "occupied")
 
     print("🔧 Calling agent.core.schedule() for 6PM...")
-    agent.core.schedule(today_6pm, agent._do_control_action, "2025-09-12_0", "unoccupied")
+    agent.core.schedule(
+        today_6pm, agent._do_control_action, "2025-09-12_0", "unoccupied"
+    )
 
     print("\n📊 After scheduling:")
     print(f"   - Queue size: {len(agent.core._scheduler._event_queue)}")
@@ -94,8 +92,7 @@ def test_scheduler_8am_6pm_simulation(message_bus_manager_fixture):
 
     # Check if 8AM event fired (it's in the past so should fire immediately)
     past_event_fired = any(
-        action['state'] == 'occupied'
-        for action in agent.control_actions
+        action["state"] == "occupied" for action in agent.control_actions
     )
 
     if not past_event_fired:
@@ -112,6 +109,7 @@ def test_scheduler_8am_6pm_simulation(message_bus_manager_fixture):
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v", "-s"])
 
 logging.basicConfig(level=logging.DEBUG)
@@ -137,7 +135,9 @@ def test_scheduler_with_various_times(message_bus_manager_fixture):
     manager = message_bus_manager_fixture
     manager.start_bus()
 
-    agent = TestSchedulerAgent("test.scheduler.debug", host="127.0.0.1", port=manager.port)
+    agent = TestSchedulerAgent(
+        "test.scheduler.debug", host="127.0.0.1", port=manager.port
+    )
     agent.connect()
 
     # Manually start the scheduler
@@ -145,7 +145,9 @@ def test_scheduler_with_various_times(message_bus_manager_fixture):
 
     now = datetime.now()
     _log.info(f"Current time: {now}")
-    _log.info(f"Scheduler running: {agent.core._scheduler._scheduler_greenlet is not None}")
+    _log.info(
+        f"Scheduler running: {agent.core._scheduler._scheduler_greenlet is not None}"
+    )
 
     # Test 1: Schedule event in the past (should fire immediately)
     past_time = now - timedelta(seconds=10)
@@ -165,13 +167,17 @@ def test_scheduler_with_various_times(message_bus_manager_fixture):
     _log.info("Waiting for events to fire...")
     gevent.sleep(0.5)  # Wait for immediate events
 
-    assert len(agent.events_fired) >= 2, f"Expected at least 2 events (past and current), got {len(agent.events_fired)}"
+    assert (
+        len(agent.events_fired) >= 2
+    ), f"Expected at least 2 events (past and current), got {len(agent.events_fired)}"
     _log.info(f"Events fired so far: {agent.events_fired}")
 
     # Wait for future event
     gevent.sleep(2)
 
-    assert len(agent.events_fired) == 3, f"Expected 3 events total, got {len(agent.events_fired)}"
+    assert (
+        len(agent.events_fired) == 3
+    ), f"Expected 3 events total, got {len(agent.events_fired)}"
     _log.info(f"All events fired: {agent.events_fired}")
 
     agent.disconnect()
@@ -182,7 +188,9 @@ def test_scheduler_8am_6pm_simulation_duplicate(message_bus_manager_fixture):
     manager = message_bus_manager_fixture
     manager.start_bus()
 
-    agent = TestSchedulerAgent("test.scheduler.8am6pm", host="127.0.0.1", port=manager.port)
+    agent = TestSchedulerAgent(
+        "test.scheduler.8am6pm", host="127.0.0.1", port=manager.port
+    )
     agent.connect()
     agent.core._scheduler.start()
 
@@ -201,9 +209,15 @@ def test_scheduler_8am_6pm_simulation_duplicate(message_bus_manager_fixture):
     timestamp_6pm = time.mktime(time_6pm.timetuple())
     timestamp_now = time.time()
 
-    _log.info(f"8am timestamp: {timestamp_8am} ({datetime.fromtimestamp(timestamp_8am)})")
-    _log.info(f"6pm timestamp: {timestamp_6pm} ({datetime.fromtimestamp(timestamp_6pm)})")
-    _log.info(f"Now timestamp: {timestamp_now} ({datetime.fromtimestamp(timestamp_now)})")
+    _log.info(
+        f"8am timestamp: {timestamp_8am} ({datetime.fromtimestamp(timestamp_8am)})"
+    )
+    _log.info(
+        f"6pm timestamp: {timestamp_6pm} ({datetime.fromtimestamp(timestamp_6pm)})"
+    )
+    _log.info(
+        f"Now timestamp: {timestamp_now} ({datetime.fromtimestamp(timestamp_now)})"
+    )
 
     # Schedule the events
     agent.core.schedule(time_8am, agent.test_callback, "8am_event")
@@ -223,12 +237,18 @@ def test_scheduler_8am_6pm_simulation_duplicate(message_bus_manager_fixture):
 
     # If current time is between 8am and 6pm, we expect 8am to have fired
     if time_8am < now < time_6pm:
-        assert any("8am" in evt[0] for evt in agent.events_fired), "8am event should have fired (time is past)"
+        assert any(
+            "8am" in evt[0] for evt in agent.events_fired
+        ), "8am event should have fired (time is past)"
 
     # If current time is after 6pm, both should have fired
     if now > time_6pm:
-        assert any("8am" in evt[0] for evt in agent.events_fired), "8am event should have fired"
-        assert any("6pm" in evt[0] for evt in agent.events_fired), "6pm event should have fired"
+        assert any(
+            "8am" in evt[0] for evt in agent.events_fired
+        ), "8am event should have fired"
+        assert any(
+            "6pm" in evt[0] for evt in agent.events_fired
+        ), "6pm event should have fired"
 
     agent.disconnect()
 
@@ -238,16 +258,22 @@ def test_scheduler_not_started(message_bus_manager_fixture):
     manager = message_bus_manager_fixture
     manager.start_bus()
 
-    agent = TestSchedulerAgent("test.scheduler.notstarted", host="127.0.0.1", port=manager.port)
+    agent = TestSchedulerAgent(
+        "test.scheduler.notstarted", host="127.0.0.1", port=manager.port
+    )
     agent.connect()
 
     # Note: NOT calling agent.core._scheduler.start()
     # The scheduler should auto-start via agent.connect() -> start_periodic_tasks()
 
     # Check if scheduler is running
-    _log.info(f"Scheduler greenlet exists: {agent.core._scheduler._scheduler_greenlet is not None}")
+    _log.info(
+        f"Scheduler greenlet exists: {agent.core._scheduler._scheduler_greenlet is not None}"
+    )
     if agent.core._scheduler._scheduler_greenlet:
-        _log.info(f"Scheduler greenlet dead: {agent.core._scheduler._scheduler_greenlet.dead}")
+        _log.info(
+            f"Scheduler greenlet dead: {agent.core._scheduler._scheduler_greenlet.dead}"
+        )
 
     # Try to schedule something
     now = datetime.now()
@@ -259,7 +285,9 @@ def test_scheduler_not_started(message_bus_manager_fixture):
 
     # Check if it fired
     _log.info(f"Events fired: {agent.events_fired}")
-    assert len(agent.events_fired) == 1, "Event should have fired even without explicit start"
+    assert (
+        len(agent.events_fired) == 1
+    ), "Event should have fired even without explicit start"
 
     agent.disconnect()
 

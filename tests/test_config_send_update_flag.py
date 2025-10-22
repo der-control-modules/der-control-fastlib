@@ -13,7 +13,9 @@ from unittest.mock import patch
 import gevent
 
 # Configure logging for test debugging
-logging.basicConfig(level=logging.DEBUG, format="%(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.DEBUG, format="%(name)s - %(levelname)s - %(message)s"
+)
 _log = logging.getLogger(__name__)
 
 
@@ -49,7 +51,8 @@ def test_config_send_update_true_sends_notification(message_bus_manager_fixture)
         config_updates = [
             msg
             for _, msg in sent_messages
-            if msg.get("type") == "vip" and msg.get("message", {}).get("data", {}).get("method") == "config.update"
+            if msg.get("type") == "vip"
+            and msg.get("message", {}).get("data", {}).get("method") == "config.update"
         ]
         assert (
             len(config_updates) > 0
@@ -82,7 +85,9 @@ def test_config_send_update_false_no_notification(message_bus_manager_fixture):
         # Patch the send_message method to track calls
         with patch.object(manager.bus.manager, "send_message", side_effect=mock_send):
             # Set config with send_update=False
-            result = agent1.vip.config.set("test_config", {"key": "value"}, send_update=False)
+            result = agent1.vip.config.set(
+                "test_config", {"key": "value"}, send_update=False
+            )
             result.get(timeout=5.0)
 
             # Give time to ensure no async WebSocket notification
@@ -92,9 +97,12 @@ def test_config_send_update_false_no_notification(message_bus_manager_fixture):
         config_updates = [
             msg
             for _, msg in sent_messages
-            if msg.get("type") == "vip" and msg.get("message", {}).get("data", {}).get("method") == "config.update"
+            if msg.get("type") == "vip"
+            and msg.get("message", {}).get("data", {}).get("method") == "config.update"
         ]
-        assert len(config_updates) == 0, f"Expected no config.update RPC messages, but got: {config_updates}"
+        assert (
+            len(config_updates) == 0
+        ), f"Expected no config.update RPC messages, but got: {config_updates}"
 
     finally:
         agent1.disconnect()
@@ -122,7 +130,9 @@ def test_config_send_update_controls_local_callbacks(message_bus_manager_fixture
         agent1.vip.config.subscribe(test_callback, pattern="test_config")
 
         # Test with send_update=True (should call callback)
-        result = agent1.vip.config.set("test_config", {"key": "value1"}, send_update=True)
+        result = agent1.vip.config.set(
+            "test_config", {"key": "value1"}, send_update=True
+        )
         result.get(timeout=5.0)
         gevent.sleep(0.5)  # Allow callback execution
 
@@ -135,11 +145,15 @@ def test_config_send_update_controls_local_callbacks(message_bus_manager_fixture
         callback_called.clear()
 
         # Test with send_update=False (should NOT call callback)
-        result = agent1.vip.config.set("test_config", {"key": "value2"}, send_update=False)
+        result = agent1.vip.config.set(
+            "test_config", {"key": "value2"}, send_update=False
+        )
         result.get(timeout=5.0)
         gevent.sleep(0.5)  # Allow time to ensure no callback
 
-        assert len(callback_called) == 0, f"Expected no callbacks with send_update=False, but got: {callback_called}"
+        assert (
+            len(callback_called) == 0
+        ), f"Expected no callbacks with send_update=False, but got: {callback_called}"
 
     finally:
         agent1.disconnect()
@@ -245,7 +259,11 @@ def test_manager_agent_update_store_flag_usage(message_bus_manager_fixture):
         with patch.object(agent1.vip.config, "set", side_effect=mock_set):
             # Simulate what ManagerProxy.config_set does
             # When update_store=False is passed, it should use send_update=False
-            result = agent1.vip.config.set("schedule", {"Monday": {"start": "8:00", "end": "17:00"}}, send_update=False)
+            result = agent1.vip.config.set(
+                "schedule",
+                {"Monday": {"start": "8:00", "end": "17:00"}},
+                send_update=False,
+            )
             result.get(timeout=5.0)
 
             # Verify that send_update=False was used
@@ -255,7 +273,11 @@ def test_manager_agent_update_store_flag_usage(message_bus_manager_fixture):
             set_calls.clear()
 
             # When update_store=True is passed (or default), it should use send_update=True
-            result = agent1.vip.config.set("schedule", {"Monday": {"start": "9:00", "end": "18:00"}}, send_update=True)
+            result = agent1.vip.config.set(
+                "schedule",
+                {"Monday": {"start": "9:00", "end": "18:00"}},
+                send_update=True,
+            )
             result.get(timeout=5.0)
 
             # Verify that send_update=True was used
