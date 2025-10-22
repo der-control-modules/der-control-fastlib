@@ -726,24 +726,25 @@ def update():
 
 def format_code():
     """
-    Format code with Black.
+    Format code with ruff.
 
-    Runs the Black code formatter on the source and test directories to
+    Runs the ruff formatter on the source and test directories to
     ensure consistent code style across the project.
 
     Returns
     -------
         bool: True if formatting was successful, False otherwise
     """
-    return run_command("black src/ tests/", "Formatting code")
+    return run_command(".venv/bin/ruff format src/ tests/", "Formatting code")
 
 
 def lint():
     """
     Run linting checks.
 
-    Executes both Pylint and flake8 on the source code to identify
-    potential issues, bugs, and stylistic problems.
+    Executes ruff on the source code to identify potential issues,
+    bugs, and stylistic problems. Ruff replaces pylint, flake8, black,
+    and isort with a single fast tool.
 
     Returns
     -------
@@ -751,15 +752,11 @@ def lint():
     """
     print("🔍 Running linting checks...")
 
-    print("🔄 Running Pylint...")
-    pylint_process = subprocess.run("pylint src/", shell=True, text=True)
-    pylint_ok = pylint_process.returncode == 0
+    print("🔄 Running ruff check...")
+    ruff_process = subprocess.run(".venv/bin/ruff check src/ tests/", shell=True, text=True)
+    ruff_ok = ruff_process.returncode == 0
 
-    print("\n🔄 Running flake8...")
-    flake8_process = subprocess.run("flake8 src/", shell=True, text=True)
-    flake8_ok = flake8_process.returncode == 0
-
-    if pylint_ok and flake8_ok:
+    if ruff_ok:
         print("✅ Linting passed!")
         return True
     else:
