@@ -22,8 +22,9 @@ echo "    --address ws://localhost:8000 \\"
 echo "    --identity platform.listener"
 echo ""
 
-"$SCRIPT_DIR/.venv/bin/python" start-legacy.py \
+"$SCRIPT_DIR/.venv/bin/python" -u start-legacy.py \
     --agent-dir /home/volttron/volttron/examples/ListenerAgent \
     --address ws://localhost:8000 \
     --volttron-home "$VOLTTRON_HOME" \
-    --identity "platform.listener"
+    --identity "platform.listener" \
+    --log-file "$SCRIPT_DIR/log_platform.listener.log"

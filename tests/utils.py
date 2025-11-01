@@ -21,6 +21,17 @@ def get_random_open_port() -> int:
     return port
 
 
+def is_port_listening(host: str, port: int, timeout: float = 1.0) -> bool:
+    """Check if a port is actually listening and accepting connections."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, port))
+            return result == 0
+    except (TimeoutError, OSError):
+        return False
+
+
 class MessageBusManager:
     """Manager for test message bus instances."""
 
@@ -69,7 +80,7 @@ class MessageBusManager:
         )
         self.bus.start()
 
-        # Wait for server to be ready
+        # Wait for server to be ready - check that port is actually listening
         max_wait_time = 10  # seconds
         check_interval = 0.5  # seconds
         elapsed_time = 0
@@ -83,10 +94,12 @@ class MessageBusManager:
                     hasattr(self.bus, "_server_thread")
                     and self.bus._server_thread.is_alive()
                 ):
-                    print(
-                        f"Test message bus started successfully after {elapsed_time} seconds"
-                    )
-                    return self.bus, port
+                    # Additionally check that the port is actually listening
+                    if is_port_listening(host, port, timeout=0.5):
+                        print(
+                            f"Test message bus started successfully after {elapsed_time} seconds"
+                        )
+                        return self.bus, port
 
         # If we get here, startup failed
         self.stop_bus()

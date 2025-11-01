@@ -108,11 +108,11 @@ def scheduler_trace(message: str, **kwargs):
         if metadata_parts:
             trace_msg += f" | {', '.join(metadata_parts)}"
 
-    # Print with yellow background and black text
-    print(f"{Back.YELLOW}{Fore.BLACK}{trace_msg}{Style.RESET_ALL}")
+    # Print with yellow background and black text (commented out to reduce noise)
+    # print(f"{Back.YELLOW}{Fore.BLACK}{trace_msg}{Style.RESET_ALL}")
 
-    # Also log to the regular logger for file logging
-    _log.info(f"SCHEDULER_TRACE: {message} | {kwargs if kwargs else 'no metadata'}")
+    # Also log to the regular logger for file logging (at DEBUG level instead of INFO)
+    _log.debug(f"SCHEDULER_TRACE: {message} | {kwargs if kwargs else 'no metadata'}")
 
 
 def occupancy_override_trace(message: str, **kwargs):
@@ -231,6 +231,29 @@ class RPC:
 
         _log.debug(f"Agent {self._agent.identity} making RPC call to {peer}.{method} with msg_id {msg_id}")
 
+        # Debug: Check for non-serializable arguments
+        try:
+            # Test serialize peer
+            json.dumps(peer)
+        except TypeError as e:
+            _log.error(f"RPC call failed: peer argument is not JSON serializable: {peer} (type: {type(peer).__name__})")
+            raise TypeError(f"RPC peer is not JSON serializable: {peer}") from e
+
+        for i, arg in enumerate(new_args):
+            try:
+                json.dumps(arg)
+            except TypeError as e:
+                _log.error(f"RPC call failed: arg[{i}] is not JSON serializable: {arg} (type: {type(arg).__name__})")
+                raise TypeError(f"RPC arg[{i}] is not JSON serializable: {arg}") from e
+
+        for key, val in kwargs.items():
+            try:
+                json.dumps(val)
+            except TypeError as e:
+                val_type = type(val).__name__
+                _log.error(f"RPC call failed: kwarg '{key}' is not JSON serializable: {val} (type: {val_type})")
+                raise TypeError(f"RPC kwarg '{key}' is not JSON serializable: {val}") from e
+
         self._agent.websocket.send(
             json.dumps(
                 {
@@ -317,16 +340,32 @@ class RPC:
         if method_name in self._exported_methods:
             # Execute RPC methods in greenlets to prevent blocking nested RPC calls
             method = self._exported_methods[method_name]
-            _log.debug(f"Agent {self._agent.identity} executing method {method_name}")
+            _log.debug(f"RPC CALL: {self._agent.identity}.{method_name}(args={args}, kwargs={kwargs})")
 
             def execute_method():
                 try:
                     result = method(*args, **kwargs)
-                    _log.debug(f"Agent {self._agent.identity} method {method_name} result: {result}")
-                    async_result.set(result)
+
+                    # Handle VOLTTRON-style AsyncResult returns
+                    # Many VOLTTRON RPC methods return AsyncResult objects, not direct values
+                    if isinstance(result, AsyncResult):
+                        _log.debug(
+                            f"Agent {self._agent.identity} method {method_name} returned AsyncResult, waiting..."
+                        )
+                        try:
+                            # Wait for the actual result (with timeout)
+                            actual_result = result.get(timeout=30)
+                            _log.debug(f"RPC RETURN: {self._agent.identity}.{method_name} => {actual_result}")
+                            async_result.set(actual_result)
+                        except Exception as async_e:
+                            _log.debug(f"RPC ERROR: {self._agent.identity}.{method_name} => {async_e}")
+                            async_result.set_exception(async_e)
+                    else:
+                        _log.debug(f"RPC RETURN: {self._agent.identity}.{method_name} => {result}")
+                        async_result.set(result)
                 except Exception as e:
                     error = str(e)
-                    _log.error(f"Agent {self._agent.identity} method {method_name} error: {error}")
+                    _log.debug(f"RPC ERROR: {self._agent.identity}.{method_name} => {error}")
                     async_result.set_exception(e)
 
             # Spawn the method execution in a greenlet to prevent blocking
@@ -350,11 +389,21 @@ class PubSub:
         self,
         peer: str,
         topic: str,
-        message: Any,
         headers: dict | None = None,
+        message: Any = None,
         bus: str = "",
     ):
-        """Publish a message to a topic, returning an AsyncResult."""
+        """Publish a message to a topic, returning an AsyncResult.
+
+        Args:
+            peer: Target peer (e.g., 'pubsub')
+            topic: Topic string
+            headers: Optional message headers dict
+            message: Message payload
+            bus: Bus name (default: "")
+
+        Note: Parameter order matches VOLTTRON's pubsub.publish() signature.
+        """
         if not self._agent.connected:
             _log.debug(f"Agent not connected yet, deferring publish to {topic}")
             # Store pending publish to be sent after connection
@@ -585,6 +634,40 @@ class PubSub:
         """Get all active subscriptions."""
         return list(self._subscriptions.keys())
 
+    def unsubscribe(self, peer=None, prefix=None, callback=None, bus="", **kwargs):
+        """Unsubscribe from topic(s).
+
+        Args:
+            peer: Peer to unsubscribe from (typically 'pubsub')
+            prefix: Topic prefix to unsubscribe from (None = all topics)
+            callback: Specific callback to remove (None = all callbacks for prefix)
+            bus: Bus name (default: '')
+            **kwargs: Additional keyword arguments for compatibility
+
+        Returns:
+            AsyncResult that resolves to True when unsubscribe completes
+        """
+        # Create an AsyncResult to track the unsubscribe operation
+        async_result = AsyncResult()
+
+        try:
+            if prefix is None:
+                # Unsubscribe from all topics
+                _log.debug(f"Agent {self._agent.identity} unsubscribing from all topics")
+                self._subscriptions.clear()
+            else:
+                # Unsubscribe from specific prefix
+                if prefix in self._subscriptions:
+                    del self._subscriptions[prefix]
+                    _log.debug(f"Agent {self._agent.identity} unsubscribed from prefix: {prefix}")
+
+            async_result.set(True)  # Success
+        except Exception as e:
+            _log.error(f"Error unsubscribing: {e}")
+            async_result.set_exception(e)
+
+        return async_result
+
     def handle_message(self, data: dict):
         """Handle an incoming pubsub message."""
         topic = data.get("topic", "")
@@ -599,6 +682,86 @@ class PubSub:
                     traceback.print_exc()
 
 
+class Health:
+    """Health subsystem for the Agent."""
+
+    def __init__(self, agent):
+        self._agent = agent
+        from aems.compat.shims.health import STATUS_GOOD, Status
+
+        self._status = Status.build(STATUS_GOOD)
+        self._status_callbacks = []
+
+    def send_alert(self, alert_key, statusobj):
+        """
+        Send an alert with the given key and status object.
+
+        Args:
+            alert_key: Quasi-unique key for the alert
+            statusobj: Status object with alert information
+        """
+        from aems.compat.shims.health import Status
+        from aems.compat.shims.messaging import topics
+
+        if not isinstance(statusobj, Status):
+            raise ValueError("statusobj must be a Status object.")
+
+        agent_class = self._agent.__class__.__name__
+        identity = self._agent.identity
+        # Replace '.' with '_' for compatibility with message bus routing
+        topic = topics.ALERTS.format(agent_class=agent_class, agent_identity=identity.replace(".", "_"))
+        headers = {"alert_key": alert_key}
+
+        try:
+            self._agent.vip.pubsub.publish("pubsub", topic=topic, headers=headers, message=statusobj.as_json()).get(
+                timeout=10
+            )
+            _log.debug(f"Alert sent: {alert_key} to {topic}")
+        except Exception as e:
+            _log.error(f"Failed to send alert {alert_key}: {e}")
+
+    def set_status(self, status, context=None):
+        """
+        Update the agent's health status.
+
+        Args:
+            status: New status value
+            context: Optional context information
+        """
+        self._status.update_status(status, context)
+        for callback in self._status_callbacks:
+            try:
+                callback(status, context)
+            except Exception as e:
+                _log.error(f"Error in status callback: {e}")
+
+    def get_status(self):
+        """Get the current status object."""
+        return self._status
+
+    def get_status_value(self):
+        """Get the current status value."""
+        return self._status.status
+
+    def get_status_json(self):
+        """Get the status as JSON string."""
+        return self._status.as_json()
+
+    def add_status_callback(self, callback):
+        """
+        Add a callback to be called when status changes.
+
+        Args:
+            callback: Function with signature (status, context)
+        """
+        self._status_callbacks.append(callback)
+
+    def publish(self):
+        """Publish the current health status."""
+        # This would publish to a health topic, but for now we just log it
+        _log.debug(f"Health status: {self._status.status}")
+
+
 class VIP:
     """VIP subsystem for the Agent."""
 
@@ -606,6 +769,7 @@ class VIP:
         self._agent = agent
         self.rpc = RPC(agent)
         self.pubsub = PubSub(agent)
+        self.health = Health(agent)
         # Use the agent's existing config instance instead of creating a new one
         self.config = agent.config
         self.peerlist = Peerlist(agent)
@@ -674,6 +838,16 @@ class Core:
 
         # Register any methods decorated with @Core.periodic
         self._register_periodic_methods(agent)
+
+    def run(self, *args, **kwargs):
+        """
+        VOLTTRON compatibility method - fires onstart event.
+
+        In VOLTTRON, this starts the agent's event loop. In AEMS, agents are already
+        running within gevent greenlets, so we don't need to start a loop. However,
+        we need to fire the onstart event to trigger @Core.receiver('onstart') handlers.
+        """
+        self.fire_event("onstart", sender=self._agent)
 
     def schedule(self, when, function, *args, **kwargs):
         """
@@ -996,7 +1170,10 @@ class Config:
         _log.info(f"ConfigStore created for agent {agent.identity}")
 
         # Connect to relevant agent signals
+        _log.info(f"Connecting ConfigStore to onconnected signal for agent {agent.identity}")
         self._agent.core.onconnected.connect(self._on_connection_established)
+        handler_count = len(self._agent.core.onconnected._handlers)
+        _log.info(f"ConfigStore connected to onconnected signal. Signal now has {handler_count} handlers")
         self._agent.core.onconfigure.connect(self._on_update_from_server)  # Renamed method
 
     def _execute_callbacks_safely(self, config_name: str, action: str, config_value: Any):
@@ -3050,8 +3227,10 @@ class Signal:
 
     def fire(self, sender, **kwargs):
         """Fire the signal, calling all connected handlers."""
+        _log.info(f"Signal '{self.name}' fired with {len(self._handlers)} handlers")
         for handler in self._handlers[:]:  # Copy to avoid issues if handlers are added/removed during iteration
             try:
+                _log.debug(f"Calling handler {handler.__name__} for signal '{self.name}'")
                 gevent.spawn(handler, sender, **kwargs)
             except Exception as e:
                 _log.error(f"Error in {self.name} handler: {e}")
@@ -3211,6 +3390,47 @@ class Agent:
         self.connected = True
         _log.debug(f"Agent {self.identity} websocket connection opened")
 
+        # Fire the onconnected event to notify config store and other subsystems
+        _log.info(f"Firing onconnected event for agent {self.identity}")
+        self.core.fire_event("onconnected", sender=self)
+
+        # Directly trigger config store to fetch configs from server
+        # (bypassing the signal mechanism which has timing issues)
+        if hasattr(self, "config") and hasattr(self.config, "_on_connection_established"):
+            _log.info(f"Directly calling ConfigStore._on_connection_established for agent {self.identity}")
+            self.config._on_connection_established(sender=self)
+
+        # Load configurations from config store
+        _log.info(f"Loading configurations for agent {self.identity}")
+        self._load_configs()
+
+        # Send RPC methods to server for registration with signatures
+        import inspect
+
+        rpc_methods_info = []
+        for method_name, method in self.vip.rpc._exported_methods.items():
+            try:
+                sig = inspect.signature(method)
+                params = []
+                for param_name, param in sig.parameters.items():
+                    if param_name == "self":
+                        continue
+                    param_info = {"name": param_name}
+                    if param.annotation != inspect.Parameter.empty:
+                        param_info["type"] = str(param.annotation)
+                    if param.default != inspect.Parameter.empty:
+                        param_info["default"] = str(param.default)
+                    params.append(param_info)
+
+                rpc_methods_info.append({"name": method_name, "params": params})
+            except Exception as e:
+                _log.warning(f"Could not inspect method {method_name}: {e}")
+                rpc_methods_info.append({"name": method_name, "params": []})
+
+        if rpc_methods_info:
+            self.websocket.send(json.dumps({"type": "register_rpc_methods", "methods": rpc_methods_info}))
+            _log.debug(f"Agent {self.identity} registered {len(rpc_methods_info)} RPC methods with signatures")
+
         # Process any pending subscriptions that were deferred during initialization
         if hasattr(self, "_pending_subscriptions") and self._pending_subscriptions:
             _log.debug(f"Processing {len(self._pending_subscriptions)} pending subscriptions")
@@ -3227,7 +3447,7 @@ class Agent:
             _log.debug(f"Processing {len(self._pending_publishes)} pending publishes")
             for peer, topic, headers, message in self._pending_publishes:
                 try:
-                    self.vip.pubsub.publish(peer, topic, message, headers)
+                    self.vip.pubsub.publish(peer, topic, headers, message)
                     _log.debug(f"Sent pending publish to {topic}")
                 except Exception as e:
                     _log.error(f"Error sending pending publish to {topic}: {e}")
@@ -3308,6 +3528,12 @@ class Agent:
                 kwargs = data.get("kwargs", {})
                 msg_id = data.get("msg_id")
 
+                # Log the RPC call at INFO level for visibility
+                _log.info(
+                    f"Agent {self.identity} executing RPC: {method_name}(args={args}, kwargs={kwargs}) "
+                    f"from {sender} [msg_id: {msg_id}]"
+                )
+
                 # Process the RPC request - returns an AsyncResult
                 async_result = self.vip.rpc.handle_request(sender, method_name, args, kwargs, msg_id)
 
@@ -3315,8 +3541,13 @@ class Agent:
                 def send_response():
                     try:
                         _log.debug(f"Agent {self.identity} waiting for RPC result for msg_id {msg_id}")
-                        # Wait for the result (with timeout)
-                        result = async_result.get(timeout=10)
+                        # Wait for the result (with timeout - increased for BACnet operations)
+                        result = async_result.get(timeout=30)
+                        # Log the result at INFO level
+                        _log.info(
+                            f"Agent {self.identity} RPC {method_name} completed, returning: {result} "
+                            f"[msg_id: {msg_id}]"
+                        )
                         # Send successful response
                         _log.debug(f"Agent {self.identity} sending RPC response for msg_id {msg_id}: {result}")
                         response_msg = {
@@ -3329,7 +3560,10 @@ class Agent:
                     except Exception as e:
                         # Send error response
                         error = str(e)
-                        _log.error(f"Agent {self.identity} RPC error for msg_id {msg_id}: {error}")
+                        _log.error(
+                            f"Agent {self.identity} RPC {method_name}(args={args}, kwargs={kwargs}) "
+                            f"failed: {error} [msg_id: {msg_id}]"
+                        )
                         try:
                             error_msg = {
                                 "type": "rpc_error",

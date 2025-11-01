@@ -279,11 +279,16 @@ class ConfigStore:
             _log.error(f"Error retrieving JSON config from {config_file}: {e}")
             return None
 
-    def _retrieve_csv(self, config_file: str) -> list[list[str]] | None:
-        """Retrieve a CSV configuration as a list of rows."""
+    def _retrieve_csv(self, config_file: str) -> list[dict[str, str]] | None:
+        """
+        Retrieve a CSV configuration as a list of dictionaries.
+
+        This matches VOLTTRON's behavior where CSV files are parsed with the first row
+        as headers and subsequent rows as dictionaries with those headers as keys.
+        """
         try:
             with open(config_file, newline="") as f:
-                reader = csv.reader(f)
+                reader = csv.DictReader(f)
                 return list(reader)
         except Exception as e:
             _log.error(f"Error retrieving CSV config from {config_file}: {e}")

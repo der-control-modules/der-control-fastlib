@@ -39,6 +39,7 @@ class ConnectionManager:
 
     def __init__(self):
         self.active_connections: dict[str, WebSocket] = {}
+        self.agent_rpc_methods: dict[str, list[str]] = {}  # Store RPC methods for each agent
         self.message_queue: asyncio.Queue = asyncio.Queue()
         self.prefix_subscriptions: dict[str, dict[str, list[tuple[str, SubscriptionCallback]]]] = {}
         self.regex_subscriptions: dict[str, list[tuple[Pattern, str, SubscriptionCallback]]] = {}
@@ -46,6 +47,9 @@ class ConnectionManager:
         self._status_task: asyncio.Task = None
         self._status_reporter_started = False
         self._no_connections_count = 0  # Track consecutive periods with no connections
+        # Message bus monitoring
+        self.known_topics: set[str] = set()  # Track all topics that have been published
+        self.monitor_connections: dict[str, WebSocket] = {}  # WebSocket connections for monitors
 
     async def connect(self, websocket: WebSocket, identity: str):
         """Connect a client to the message bus."""
@@ -78,6 +82,8 @@ class ConnectionManager:
             del self.active_connections[identity]
         if identity in self.prefix_subscriptions:
             del self.prefix_subscriptions[identity]
+        if identity in self.agent_rpc_methods:
+            del self.agent_rpc_methods[identity]
         # Remove any regex subscriptions for this identity
         self.regex_subscriptions = {
             identity_key: subscriptions
@@ -124,6 +130,22 @@ class ConnectionManager:
 
     async def publish(self, bus: str, topic: str, headers: dict, message: Any, sender: str):
         """Publish a message to subscribers."""
+        # Track this topic
+        self.known_topics.add(topic)
+
+        # Broadcast to message bus monitors
+        import datetime
+
+        monitor_data = {
+            "type": "pubsub_message",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "topic": topic,
+            "sender": sender,
+            "headers": headers,
+            "message": message,
+        }
+        await self._broadcast_to_monitors(monitor_data)
+
         # Process prefix subscriptions
         for _identity, prefixes in self.prefix_subscriptions.items():
             for prefix, callbacks in prefixes.items():
@@ -184,6 +206,8 @@ class ConnectionManager:
 
     async def handle_rpc(self, sender: str, peer: str, method: str, args: list, kwargs: dict, msg_id: str):
         """Handle RPC request between clients."""
+        # Log at INFO level with full parameters for visibility
+        _log.info(f"RPC request from {sender} to {peer}: {method}(args={args}, kwargs={kwargs}) [msg_id: {msg_id}]")
         _log.debug(
             f"RPC request from {sender} to {peer}: {method}({truncate_debug_message(args)}, "
             f"{truncate_debug_message(kwargs)}) [msg_id: {msg_id}]"
@@ -221,10 +245,15 @@ class ConnectionManager:
         # Wait for response with timeout
         try:
             _log.debug(f"Waiting for RPC response for msg_id {msg_id}")
-            response = await asyncio.wait_for(future, 10.0)  # 10 second timeout
+            response = await asyncio.wait_for(future, 30.0)  # 30 second timeout for BACnet operations
+            _log.info(f"RPC response from {peer} to {sender}: {method} returned {response}")
             _log.debug(f"Received RPC response for msg_id {msg_id}: {truncate_debug_message(response)}")
             await self.send_message(sender, {"type": "rpc_response", "msg_id": msg_id, "result": response})
         except asyncio.TimeoutError:
+            _log.warning(
+                f"RPC request from {sender} to {peer}.{method}(args={args}, kwargs={kwargs}) "
+                f"timed out after 30s [msg_id: {msg_id}]"
+            )
             _log.debug(f"RPC request timed out for msg_id {msg_id}")
             await self.send_message(
                 sender,
@@ -237,7 +266,10 @@ class ConnectionManager:
             self.clear_rpc_response(msg_id)
         except Exception as e:
             # Handle exceptions from RPC method execution
-            _log.error(f"RPC request failed for msg_id {msg_id}: {e}")
+            _log.error(
+                f"RPC request from {sender} to {peer}.{method}(args={args}, kwargs={kwargs}) "
+                f"failed: {e} [msg_id: {msg_id}]"
+            )
             await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": str(e)})
             self.clear_rpc_response(msg_id)
 
@@ -297,3 +329,37 @@ class ConnectionManager:
             if not future.done():
                 future.cancel()
         self.rpc_responses.clear()
+
+    # Message bus monitoring methods
+    async def connect_monitor(self, websocket: WebSocket, monitor_id: str):
+        """Connect a message bus monitor client."""
+        await websocket.accept()
+        self.monitor_connections[monitor_id] = websocket
+        _log.info(f"Message bus monitor {monitor_id} connected")
+
+    def disconnect_monitor(self, monitor_id: str):
+        """Disconnect a message bus monitor client."""
+        if monitor_id in self.monitor_connections:
+            del self.monitor_connections[monitor_id]
+            _log.info(f"Message bus monitor {monitor_id} disconnected")
+
+    async def _broadcast_to_monitors(self, data: dict):
+        """Broadcast pub/sub message to all connected monitors."""
+        disconnected = []
+        for monitor_id, websocket in self.monitor_connections.items():
+            try:
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.send_json(data)
+                else:
+                    disconnected.append(monitor_id)
+            except Exception as e:
+                _log.error(f"Error broadcasting to monitor {monitor_id}: {e}")
+                disconnected.append(monitor_id)
+
+        # Clean up disconnected monitors
+        for monitor_id in disconnected:
+            self.disconnect_monitor(monitor_id)
+
+    def get_known_topics(self) -> list[str]:
+        """Get list of all known topics (sorted)."""
+        return sorted(self.known_topics)

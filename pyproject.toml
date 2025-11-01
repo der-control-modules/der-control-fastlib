@@ -91,6 +91,13 @@ ilc = [
     "transitions>=0.9.0",      # For ILCAgent (state machine library for control logic)
 ]
 
+# Dependencies for WeatherDotGov agent
+# Required for weather data collection agents
+weather = [
+    "grequests>=0.7.0",        # For WeatherDotGov agent (asynchronous HTTP requests)
+    "pint>=0.17",              # For WeatherDotGov agent (unit conversion and handling)
+]
+
 # # Dependencies for documentation
 # docs = [
 #     "sphinx>=6.1.3",
@@ -141,6 +148,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "bacnet: marks tests that require BACnet device or network (deselect with '-m \"not bacnet\"')",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",

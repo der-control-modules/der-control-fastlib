@@ -22,8 +22,9 @@ echo "    --address ws://localhost:8000 \\"
 echo "    --identity ilc.platform"
 echo ""
 
-"$SCRIPT_DIR/.venv/bin/python" start-legacy.py \
+"$SCRIPT_DIR/.venv/bin/python" -u start-legacy.py \
     --agent-dir /home/volttron/volttron-pnnl-applications/GridServices/Control/ILCAgent \
     --address ws://localhost:8000 \
     --volttron-home "$VOLTTRON_HOME" \
-    --identity "ilc.platform"
+    --identity "ilc.platform" \
+    --log-file "$SCRIPT_DIR/log_ilc.platform.log"

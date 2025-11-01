@@ -3,7 +3,8 @@ r"""
 VOLTTRON Legacy Agent Launcher for AEMS.
 
 This script allows running existing VOLTTRON agents without code modifications.
-It changes to the agent's directory and runs it from there, just like vctl start.
+It runs the agent module from its directory by calling its main() function,
+just like running `python -m agent.module` or how vctl start works.
 
 Usage:
     ./start-legacy.py --agent-dir <path> [options]
@@ -24,8 +25,6 @@ Arguments:
     --agent-dir PATH    Path to agent directory (required)
     --module MODULE     Agent module path (e.g., 'listener.agent' or 'sqlhistorian.historian')
                         If not provided, will auto-detect by searching for vip_main call
-    --class CLASS       Agent class name (e.g., 'ListenerAgent' or 'SQLHistorian')
-                        If not provided, will auto-detect from the module
     --config PATH       Path to agent configuration file (relative to agent-dir)
     --identity ID       Agent identity/name
     --address URL       AEMS message bus address (default: ws://localhost:8000)
@@ -33,19 +32,25 @@ Arguments:
     --debug             Enable debug logging
     --help              Show this help message
 
-Features:
-    - Auto-detects module and class from directory structure
-    - Installs VOLTTRON compatibility shims via import hooks
-    - Intelligently passes config parameters based on agent __init__ signature
-    - Supports agents with custom required parameters (e.g., PlatformDriverAgent)
+How it works:
+    1. Changes to agent directory (like vctl start)
+    2. Installs VOLTTRON compatibility shims via import hooks
+    3. Imports the agent module
+    4. Calls the module's main() function, which calls utils.vip_main()
+    5. vip_main() handles all agent initialization (config loading, factory functions, etc.)
+
+This approach works with:
+    - Agents with direct class instantiation (e.g., ListenerAgent)
+    - Agents with factory functions (e.g., BACnetProxyAgent)
+    - Agents with custom config parameter names
+    - All standard VOLTTRON agent patterns
 """
 
 import argparse
 import contextlib
-import importlib
-import importlib.util
 import logging
 import os
+import runpy
 import signal
 import sys
 from pathlib import Path
@@ -56,15 +61,41 @@ _log = logging.getLogger(__name__)
 _agent_instance = None
 
 
-def setup_logging(debug=False):
+def setup_logging(debug=False, log_file=None, keep=False):
     """Configure logging for the launcher."""
     level = logging.DEBUG if debug else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        force=True,
-    )
+
+    # Create formatters
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    # Get root logger and clear any existing handlers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    root_logger.handlers = []
+
+    # Always add console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # Add file handler if log_file is specified
+    if log_file:
+        mode = "a" if keep else "w"
+        file_handler = logging.FileHandler(log_file, mode=mode)
+        # Always set file handler to DEBUG to capture all legacy agent protocol messages
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+
+    # Always enable DEBUG for legacy agent modules to capture protocol messages
+    # (like BACnet I-Am responses, driver scrapes, etc.)
+    logging.getLogger("bacnet_proxy").setLevel(logging.DEBUG)
+    logging.getLogger("platform_driver").setLevel(logging.DEBUG)
+    # Also enable for __main__ since agents run as main module
+    logging.getLogger("__main__").setLevel(logging.DEBUG)
+    # Enable DEBUG for platform shims to see AsyncCall activity
+    logging.getLogger("aems.compat.shims.platform").setLevel(logging.DEBUG)
 
     if debug:
         # Enable debug logging for key AEMS modules
@@ -253,14 +284,6 @@ def main():
     )
 
     parser.add_argument(
-        "--class",
-        dest="class_name",
-        help="Agent class name (e.g., 'ListenerAgent' or 'SQLHistorian'). "
-        "If not provided, will auto-detect from the module",
-        default=None,
-    )
-
-    parser.add_argument(
         "--config",
         dest="config_path",
         help="Path to agent configuration file (relative to agent-dir or absolute)",
@@ -289,11 +312,13 @@ def main():
     )
 
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--log-file", type=str, help="Log file path (logs to both console and file)")
+    parser.add_argument("--keep", action="store_true", help="Append to log file instead of overwriting")
 
     args = parser.parse_args()
 
     # Setup logging
-    setup_logging(args.debug)
+    setup_logging(args.debug, args.log_file, args.keep)
 
     _log.info("=" * 60)
     _log.info("AEMS Legacy VOLTTRON Agent Launcher (vctl-style)")
@@ -311,18 +336,14 @@ def main():
 
     _log.info(f"Agent Directory: {agent_dir}")
 
-    # Determine module and class - use manual specification if provided, otherwise auto-detect
-    if args.module_name and args.class_name:
+    # Determine module - use manual specification if provided, otherwise auto-detect
+    if args.module_name:
         module_name = args.module_name
-        class_name = args.class_name
-        _log.info(f"Using manually specified agent: {module_name}:{class_name}")
-    elif args.module_name or args.class_name:
-        _log.error("Both --module and --class must be specified together, or neither")
-        sys.exit(1)
+        _log.info(f"Using manually specified module: {module_name}")
     else:
-        # Auto-detect agent module and class
+        # Auto-detect agent module
         try:
-            module_name, class_name = find_agent_module_and_class(agent_dir)
+            module_name, _ = find_agent_module_and_class(agent_dir)
         except FileNotFoundError as e:
             _log.error(str(e))
             sys.exit(1)
@@ -350,8 +371,8 @@ def main():
             _log.warning(f"  Tried: {config_relative}")
             _log.warning(f"  Tried: {config_path}")
 
-    # Determine identity
-    identity = args.identity if args.identity else class_name.lower()
+    # Determine identity (use module name as fallback if not provided)
+    identity = args.identity if args.identity else module_name.split(".")[-1].lower()
 
     # Set VOLTTRON_HOME
     os.environ["VOLTTRON_HOME"] = args.volttron_home
@@ -378,172 +399,92 @@ def main():
 
     _log.info("-" * 60)
     _log.info(f"Agent Module:  {module_name}")
-    _log.info(f"Agent Class:   {class_name}")
     _log.info(f"Identity:      {identity}")
     _log.info(f"Address:       {args.address}")
     _log.info(f"Config:        {config_path_abs or '(none)'}")
     _log.info("-" * 60)
 
-    # IMPORTANT: Change to agent directory (like vctl start does)
+    # Save original directory for cleanup and AEMS module imports
     original_dir = Path.cwd()
-    os.chdir(agent_dir)
-    _log.info(f"Changed working directory to: {agent_dir}")
 
-    # Add agent directory to Python path so imports work
-    sys.path.insert(0, str(agent_dir))
-    _log.debug(f"Added to sys.path: {agent_dir}")
-
-    # Now install compatibility layer AFTER changing directory
-    # This ensures any relative imports work correctly
+    # First, install compatibility layer BEFORE changing directory
+    # This ensures AEMS modules are loaded from the repo, not the agent directory
     try:
         # Add src to path for AEMS modules
-        repo_root = original_dir  # Where we started
+        repo_root = original_dir  # Where we started (AEMS repo root)
         src_path = repo_root / "src"
         if src_path.exists():
             sys.path.insert(0, str(src_path))
-            _log.debug(f"Added to sys.path: {src_path}")
+            _log.debug(f"Added to sys.path for AEMS modules: {src_path}")
 
         from aems.compat import install_volttron_compatibility
 
         install_volttron_compatibility()
         _log.debug("VOLTTRON compatibility layer installed")
 
-        from aems.compat.shims.platform_agent import utils
+        from aems.compat.shims.platform_agent import utils  # noqa: F401
 
     except ImportError as e:
         _log.error(f"Failed to import AEMS compatibility layer: {e}")
         _log.error("Make sure you're running from the AEMS repository root")
         sys.exit(1)
 
+    # IMPORTANT: Change to agent directory (like vctl start does)
+    # This must happen AFTER AEMS imports but BEFORE agent module import
+    # The agent module will be imported with its directory as the current working directory
+    os.chdir(agent_dir)
+    _log.info(f"Changed working directory to: {agent_dir}")
+    _log.info(f"  Agent module will be imported from this directory (like 'python -m {module_name}')")
+
+    # Add agent directory to Python path at the BEGINNING so imports work
+    # This ensures the agent's package is found first
+    sys.path.insert(0, str(agent_dir))
+    _log.debug(f"Added to sys.path for agent imports: {agent_dir}")
+
+    # Set up environment variables for the agent
+    os.environ["AGENT_VIP_IDENTITY"] = identity
+    os.environ["AGENT_CONFIG"] = str(config_path_abs) if config_path_abs else ""
+
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
+    signal.signal(signal.SIGTERM, signal_handler)  # kill command
+
     try:
-        # Import the agent module
-        _log.info(f"Importing module: {module_name}")
-        agent_module = importlib.import_module(module_name)
-        _log.debug(f"Module imported successfully: {agent_module}")
+        _log.info(f"Executing agent module (like 'python -m {module_name}')...")
+        _log.info("  This will run the module's if __name__ == '__main__': block")
+        _log.info("  which typically calls utils.vip_main() to handle:")
+        _log.info(f"  - Loading config from: {config_path_abs or '(none)'}")
+        _log.info("  - Instantiating agent (factory or class)")
+        _log.info(f"  - Connecting to message bus: {args.address}")
+        _log.info("  - Setting up subscriptions and starting agent")
+        _log.info("=" * 60)
 
-        # Get agent version if available
-        agent_version = getattr(agent_module, "__version__", "unknown")
-        if agent_version != "unknown":
-            _log.info(f"Agent version: {agent_version}")
+        # Prepare sys.argv for the agent module execution
+        # AEMS vip_main uses ArgumentParser which reads sys.argv
+        original_argv = sys.argv.copy()
+        # Use a dummy script name for sys.argv[0]
+        sys.argv = [module_name]
 
-        # Get the agent class
-        try:
-            agent_class = getattr(agent_module, class_name)
-            _log.info(f"Loaded agent class: {class_name}")
-        except AttributeError:
-            _log.error(f"Class {class_name} not found in module {module_name}")
-            _log.error(f"Available classes: {[name for name in dir(agent_module) if not name.startswith('_')]}")
-            sys.exit(1)
-
-        # Prepare agent initialization parameters
-        agent_kwargs = {"identity": identity, "address": args.address}
-
-        # Load and parse config if provided
-        config_dict = {}
+        # Add config if provided
         if config_path_abs:
-            _log.info(f"Loading config from: {config_path_abs}")
-            try:
-                # Try to parse as JSON (with comments)
-                config_text = config_path_abs.read_text()
-                # Remove JSON comments (VOLTTRON configs often have comments)
-                import re
+            sys.argv.extend(["--config", str(config_path_abs)])
 
-                config_text = re.sub(r"#.*$", "", config_text, flags=re.MULTILINE)
-                import json
+        # Add identity
+        sys.argv.extend(["--identity", identity])
 
-                config_dict = json.loads(config_text)
-                _log.debug(f"Config loaded: {list(config_dict.keys())}")
-            except Exception as e:
-                _log.warning(f"Failed to parse config file: {e}")
-                _log.warning("Will try instantiating with just config_path parameter")
-                agent_kwargs["config_path"] = str(config_path_abs)
+        # Add message bus address
+        sys.argv.extend(["--address", args.address])
 
-        # Inspect agent class __init__ to see what parameters it accepts
-        import inspect
+        _log.debug(f"sys.argv for agent: {sys.argv}")
 
-        sig = inspect.signature(agent_class.__init__)
-        params = sig.parameters
-        param_names = list(params.keys())
-        _log.debug(f"Agent __init__ parameters: {param_names}")
-
-        # Handle config parameters
-        if config_dict:
-            # Add config_path if it's in the signature
-            if "config_path" in param_names and config_path_abs:
-                agent_kwargs["config_path"] = str(config_path_abs)
-
-            # Add all config values that match __init__ parameters
-            for key, value in config_dict.items():
-                if key in param_names:
-                    agent_kwargs[key] = value
-                    _log.debug(f"  Using config parameter: {key} = {value}")
-
-        # Check for required parameters (no default value) that are still missing
-        for param_name, param in params.items():
-            if param_name in ("self", "kwargs"):
-                continue
-            # Check if parameter is required (no default value)
-            if param.default is inspect.Parameter.empty:
-                if param_name not in agent_kwargs:
-                    # Provide sensible defaults for common required parameters
-                    if param_name == "driver_config_list":
-                        _log.warning(f"Required parameter '{param_name}' not in config, using empty list")
-                        _log.info("  Note: PlatformDriverAgent typically gets driver configs from config store")
-                        agent_kwargs[param_name] = []
-                    elif param_name == "config_path":
-                        if config_path_abs:
-                            agent_kwargs[param_name] = str(config_path_abs)
-                        else:
-                            # Create a temporary config file with empty JSON
-                            import tempfile
-
-                            with tempfile.NamedTemporaryFile(
-                                mode="w", suffix=".json", prefix=f"{identity}_config_", delete=False
-                            ) as temp_config:
-                                temp_config.write("{}")
-                                temp_config_path = temp_config.name
-
-                            agent_kwargs[param_name] = temp_config_path
-                            _log.info(f"Created temporary config file: {temp_config_path}")
-                            _log.info("  (contains empty JSON: {})")
-                    else:
-                        _log.warning(f"Required parameter '{param_name}' is missing and has no default!")
-
-        # Instantiate the agent
-        _log.info(f"Instantiating agent with parameters: {list(agent_kwargs.keys())}")
-        agent = agent_class(**agent_kwargs)
-
-        _log.info("Agent instantiated successfully")
-
-        # Set global agent instance for signal handler
-        _agent_instance = agent
-
-        # Register signal handlers for graceful shutdown
-        signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
-        signal.signal(signal.SIGTERM, signal_handler)  # kill command
-
-        # Connect to message bus
-        _log.info("Connecting to AEMS message bus...")
-        agent.connect()
-        _log.info(f"✓ Connected to {args.address}")
-
-        # Process @PubSub.subscribe decorators
-        utils._setup_pubsub_subscriptions(agent)
-
-        _log.info("=" * 60)
-        _log.info(f"✓ {class_name} is running from {agent_dir.name}/")
-        _log.info("  Press Ctrl+C to stop")
-        _log.info("=" * 60)
-
-        # Run until interrupted
+        # Execute the module (runs if __name__ == '__main__': block)
+        # This is equivalent to: python -m module_name
+        # Note: vip_main will automatically create temp config if needed
         try:
-            import time
-
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            # This may not be reached if signal handler exits first
-            _log.info("\nReceived keyboard interrupt, stopping agent...")
+            runpy.run_module(module_name, run_name="__main__", alter_sys=False)
+        finally:
+            # Restore original sys.argv
+            sys.argv = original_argv
 
     except Exception as e:
         _log.exception(f"Error running agent: {e}")

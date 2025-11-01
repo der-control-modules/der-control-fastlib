@@ -25,12 +25,13 @@ echo "    --address ws://localhost:8000 \\"
 echo "    --identity platform.historian"
 echo ""
 
-"$SCRIPT_DIR/.venv/bin/python" start-legacy.py \
+"$SCRIPT_DIR/.venv/bin/python" -u start-legacy.py \
     --agent-dir /home/volttron/volttron/services/core/SQLHistorian \
     --config config.sqlite \
     --address ws://localhost:8000 \
     --volttron-home "$VOLTTRON_HOME" \
-    --identity "platform.historian"
+    --identity "platform.historian" \
+    --log-file "$SCRIPT_DIR/log_platform.historian.log"
 
 # Uncomment below to test manual specification
 # echo ""
@@ -47,7 +48,7 @@ echo ""
 # echo "    --identity platform.historian"
 # echo ""
 #
-# "$SCRIPT_DIR/.venv/bin/python" start-legacy.py \
+# "$SCRIPT_DIR/.venv/bin/python" -u start-legacy.py \
 #     --agent-dir /home/volttron/volttron/services/core/SQLHistorian \
 #     --module sqlhistorian.historian \
 #     --class SQLHistorian \

@@ -80,8 +80,26 @@ class Agent(AEMSAgent):
         self._pending_address = address
         self._pending_kwargs = kwargs
 
-        # Initialize AEMS agent
-        super().__init__(identity=identity or "volttron_agent", address=address, **kwargs)
+        # Parse address into host and port for AEMS Agent
+        # VOLTTRON uses "ws://host:port" format
+        # AEMS Agent expects separate host and port parameters
+        host = kwargs.pop("host", "127.0.0.1")
+        port = kwargs.pop("port", 8000)
+
+        if address:
+            # Parse ws://host:port format
+            import re
+
+            match = re.match(r"ws://([^:]+):(\d+)", address)
+            if match:
+                host = match.group(1)
+                port = int(match.group(2))
+                _log.debug(f"Parsed address '{address}' to host='{host}', port={port}")
+            else:
+                _log.warning(f"Could not parse address '{address}', using defaults")
+
+        # Initialize AEMS agent with parsed host and port
+        super().__init__(identity=identity or "volttron_agent", host=host, port=port, **kwargs)
 
         # Replace core with VOLTTRON-compatible Core
         self.core = Core(self)

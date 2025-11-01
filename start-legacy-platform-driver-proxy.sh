@@ -1,12 +1,12 @@
 # Test script for AEMS Legacy Agent Launcher
-# This demonstrates how to start a VOLTTRON agent (PlatformDriverAgent) using the launcher
+# This demonstrates how to start a VOLTTRON agent (BACnetProxy) using the launcher
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export VOLTTRON_HOME="$SCRIPT_DIR/.volttron_home"
 
 echo "============================================================"
 echo "AEMS Legacy Agent Launcher - Test Script"
-echo "Testing with PlatformDriverAgent"
+echo "Testing with BACnetProxy"
 echo "============================================================"
 echo "VOLTTRON_HOME: $VOLTTRON_HOME"
 echo ""
@@ -17,14 +17,15 @@ echo "  The script will automatically find the agent module and class"
 echo "  by searching for vip_main() calls in the agent directory"
 echo ""
 echo "Command:"
-echo "  start-legacy.py --agent-dir /home/volttron/volttron/services/core/PlatformDriverAgent \\"
+echo "  start-legacy.py --agent-dir /home/volttron/volttron/services/core/BACnetProxy \\"
 echo "    --address ws://localhost:8000 \\"
-echo "    --identity platform.driver"
+echo "    --identity platform.bacnet_proxy"
 echo ""
 
 "$SCRIPT_DIR/.venv/bin/python" -u start-legacy.py \
-    --agent-dir /home/volttron/volttron/services/core/PlatformDriverAgent \
+    --agent-dir /home/volttron/volttron/services/core/BACnetProxy \
     --address ws://localhost:8000 \
     --volttron-home "$VOLTTRON_HOME" \
-    --identity "platform.driver" \
-    --log-file "$SCRIPT_DIR/log_platform.driver.log"
+    --identity "platform.bacnet_proxy" \
+    --config /home/volttron/bacnet_proxy.config \
+    --log-file "$SCRIPT_DIR/log_platform.bacnet_proxy.log"

@@ -25,13 +25,17 @@ class VolttronImportRedirector(MetaPathFinder, Loader):
     # Mapping of VOLTTRON modules to AEMS equivalents
     REDIRECT_MAP = {
         # Core agent imports
+        "volttron.platform.vip.agent.errors": "aems.compat.shims.vip_agent_errors",
         "volttron.platform.vip.agent": "aems.compat.shims.vip_agent",
         "volttron.platform.agent.base_historian": "aems.compat.shims.base_historian",
+        "volttron.platform.agent.base_weather": "aems.compat.shims.base_weather",
         "volttron.platform.agent.math_utils": "aems.compat.shims.math_utils",
+        "volttron.platform.agent.known_identities": "aems.compat.shims.known_identities",
         "volttron.platform.agent": "aems.compat.shims.platform_agent",
         # Database utilities
         "volttron.platform.dbutils": "aems.compat.shims.dbutils",
         # Messaging and health
+        "volttron.platform.messaging.headers": "aems.compat.shims.messaging_headers",
         "volttron.platform.messaging.health": "aems.compat.shims.health",
         "volttron.platform.messaging": "aems.compat.shims.messaging",
         # Subsystems
@@ -41,6 +45,7 @@ class VolttronImportRedirector(MetaPathFinder, Loader):
         # VIP base
         "volttron.platform.vip": "aems.compat.shims.vip",
         # Platform base
+        "volttron.platform.jsonapi": "aems.compat.shims.jsonapi",
         "volttron.platform": "aems.compat.shims.platform",
         # Utils
         "volttron.utils.docs": "aems.compat.shims.utils_docs",

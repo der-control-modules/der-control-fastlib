@@ -427,12 +427,37 @@ class FastAPIMessageBus(MessageBus):
                             _log.debug(f"Setting RPC error for msg_id {msg_id}: {error}")
                             self.manager.set_rpc_error(msg_id, error)
 
+                    elif data["type"] == "register_rpc_methods":
+                        # Handle RPC method registration from agent
+                        if "methods" in data:
+                            methods = data["methods"]
+                            self.manager.agent_rpc_methods[identity] = methods
+                            method_names = [m["name"] if isinstance(m, dict) else m for m in methods]
+                            _log.info(f"Registered {len(methods)} RPC methods for {identity}: {method_names}")
+
             except WebSocketDisconnect:
                 _log.debug(f"WebSocket disconnect for {identity}")
                 self.manager.disconnect(identity)
             except Exception as e:
                 _log.error(f"Error in websocket connection for {identity}: {e}")
                 self.manager.disconnect(identity)
+
+        @self.app.websocket("/monitor/{monitor_id}")
+        async def monitor_websocket(websocket: WebSocket, monitor_id: str):
+            """WebSocket endpoint for message bus monitoring."""
+            await self.manager.connect_monitor(websocket, monitor_id)
+            try:
+                # Keep connection alive and handle any incoming control messages
+                while True:
+                    # Just wait for messages (could be used for control later)
+                    data = await websocket.receive_json()
+                    _log.debug(f"Monitor {monitor_id} sent: {data}")
+            except WebSocketDisconnect:
+                _log.debug(f"Monitor {monitor_id} disconnected")
+                self.manager.disconnect_monitor(monitor_id)
+            except Exception as e:
+                _log.error(f"Error in monitor websocket for {monitor_id}: {e}")
+                self.manager.disconnect_monitor(monitor_id)
 
         @self.app.get("/config-store/list")
         async def list_configs(agent_id: str | None = None):
@@ -572,6 +597,89 @@ class FastAPIMessageBus(MessageBus):
             """Serve the config manager web interface."""
             return self.templates.TemplateResponse("config_manager.html", {"request": request})
 
+        @self.app.get("/control")
+        async def rpc_control_panel(request: Request):
+            """Serve the RPC control panel web interface."""
+            return self.templates.TemplateResponse("rpc_control.html", {"request": request})
+
+        @self.app.get("/message-monitor")
+        async def message_monitor_panel(request: Request):
+            """Serve the message bus monitor web interface."""
+            return self.templates.TemplateResponse("message_monitor.html", {"request": request})
+
+        @self.app.get("/api/agents")
+        async def list_agents():
+            """List all connected agents and their RPC methods."""
+            agents_info = []
+            for agent_id in self.manager.active_connections:
+                agents_info.append(
+                    {
+                        "agent_id": agent_id,
+                        "rpc_methods": self.manager.agent_rpc_methods.get(agent_id, []),
+                        "connected": True,
+                    }
+                )
+            return {"agents": agents_info}
+
+        @self.app.post("/api/rpc/call")
+        async def call_rpc_method(
+            agent_id: str = Body(...),
+            method: str = Body(...),
+            args: list = Body(default=[]),
+            kwargs: dict = Body(default={}),
+        ):
+            """Call an RPC method on a specific agent and wait for response."""
+            try:
+                # Check if agent is connected
+                if agent_id not in self.manager.active_connections:
+                    return {"success": False, "error": f"Agent {agent_id} not connected"}
+
+                # Use the connection manager's RPC handling
+                import asyncio
+                import uuid
+
+                msg_id = str(uuid.uuid4())
+
+                # Register a future for the response before sending
+                future = self.manager.register_rpc_response_future(msg_id)
+
+                # Build and send RPC message to the agent
+                rpc_message = {
+                    "type": "rpc_request",
+                    "sender": "web.control",
+                    "method": method,
+                    "args": args,
+                    "kwargs": kwargs,
+                    "msg_id": msg_id,
+                }
+
+                await self.manager.send_message(agent_id, rpc_message)
+                _log.info(f"RPC call sent to {agent_id}.{method} with msg_id {msg_id}")
+
+                # Wait for response with 30 second timeout (longer for web UI)
+                try:
+                    response = await asyncio.wait_for(future, 30.0)
+                    _log.info(f"RPC response received for msg_id {msg_id}: {response}")
+                    return {
+                        "success": True,
+                        "result": response,
+                        "msg_id": msg_id,
+                        "agent_id": agent_id,
+                        "method": method,
+                    }
+                except asyncio.TimeoutError:
+                    _log.warning(f"RPC call to {agent_id}.{method} timed out (msg_id: {msg_id})")
+                    return {
+                        "success": False,
+                        "error": "RPC call timed out after 30 seconds",
+                        "msg_id": msg_id,
+                        "timeout": True,
+                    }
+
+            except Exception as e:
+                _log.error(f"Error in RPC call: {e}")
+                return {"success": False, "error": str(e)}
+
         @self.app.websocket("/ws/config-ui")
         async def websocket_config_ui(websocket: WebSocket):
             """WebSocket endpoint for config UI real-time updates."""
@@ -601,6 +709,12 @@ class FastAPIMessageBus(MessageBus):
                 "service": "aems-server",
                 "status": "running",
             }
+
+        @self.app.get("/api/topics")
+        async def get_topics():
+            """Get list of all known pub/sub topics."""
+            topics = self.manager.get_known_topics()
+            return {"topics": topics}
 
         @self.app.get("/health")
         async def health_check():

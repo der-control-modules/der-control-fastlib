@@ -61,5 +61,33 @@ class Health:
         """
         return {"status": self._status, "message": self._status_message}
 
+    def send_alert(self, alert_key, statusobj):
+        """
+        Send an alert with the given key and status object.
+
+        Args:
+            alert_key: Quasi-unique key for the alert
+            statusobj: Status object with alert information
+        """
+        from aems.compat.shims.health import Status
+        from aems.compat.shims.messaging import topics
+
+        if not isinstance(statusobj, Status):
+            raise ValueError("statusobj must be a Status object.")
+
+        agent_class = self._owner.__class__.__name__
+        identity = self._owner.identity
+        # Replace '.' with '_' for compatibility with message bus routing
+        topic_str = topics.ALERTS.format(agent_class=agent_class, agent_identity=identity.replace(".", "_"))
+        headers = {"alert_key": alert_key}
+
+        try:
+            self._owner.vip.pubsub.publish("pubsub", topic=topic_str, headers=headers, message=statusobj.as_json()).get(
+                timeout=10
+            )
+            _log.debug(f"Alert sent: {alert_key} to {topic_str}")
+        except Exception as e:
+            _log.error(f"Failed to send alert {alert_key}: {e}")
+
 
 __all__ = ["Health", "STATUS_GOOD", "STATUS_BAD"]

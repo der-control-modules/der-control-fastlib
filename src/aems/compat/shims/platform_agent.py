@@ -90,6 +90,14 @@ class utils:
             --identity <name>    Agent identity
             --address <url>      Message bus address (ws://host:port)
         """
+        # Apply platform driver patches (for older VOLTTRON versions)
+        try:
+            from aems.compat.platform_driver_patches import apply_all_patches
+
+            apply_all_patches()
+        except Exception as e:
+            _log.debug(f"Platform driver patches not applied (may not be needed): {e}")
+
         # Parse command line arguments (VOLTTRON style)
         parser = argparse.ArgumentParser(description=f"Run {agent_class.__name__}")
 
@@ -127,26 +135,53 @@ class utils:
         if args.volttron_home:
             os.environ["VOLTTRON_HOME"] = args.volttron_home
 
+        # Track temporary config file for cleanup
+        temp_config_path = None
+
+        # All legacy VOLTTRON agents require config_path
+        # Create temporary empty config if not provided
+        if not args.config_path:
+            _log.info("No config file provided, creating temporary empty config...")
+
+            # Create temporary config file
+            import json
+            import tempfile
+
+            temp_fd, temp_config_path = tempfile.mkstemp(suffix=".json", prefix=f"{args.identity}_config_", text=True)
+
+            # Write empty JSON config
+            with os.fdopen(temp_fd, "w") as f:
+                json.dump({}, f)
+
+            args.config_path = temp_config_path
+            _log.info(f"  Created temporary config: {temp_config_path}")
+            _log.info("  (contains empty JSON: {})")
+
         _log.info(f"Starting {agent_class.__name__} version {version}")
         _log.info(f"  Identity: {args.identity}")
         _log.info(f"  Address: {args.address}")
         _log.info(f"  Config: {args.config_path}")
 
         try:
-            # Instantiate the agent
-            # VOLTTRON agents expect config_path as first argument
-            if args.config_path:
-                agent = agent_class(
-                    config_path=args.config_path,
-                    identity=args.identity,
-                    address=args.address,
-                )
-            else:
-                agent = agent_class(identity=args.identity, address=args.address)
+            # Instantiate the agent with config_path
+            # All VOLTTRON agents expect config_path as first argument
+            agent = agent_class(
+                config_path=args.config_path,
+                identity=args.identity,
+                address=args.address,
+            )
 
             # Store version
             if hasattr(agent, "core"):
                 agent.core._version = version
+
+            # WORKAROUND: Give BACpypes time to finish initialization
+            # BACpypes binds to network interface in __init__, which can interfere
+            # with WebSocket connection if we connect too quickly
+            import time
+
+            time.sleep(2)
+            _log.info("Waiting 2s after agent init before connecting...")
 
             # Connect to message bus
             agent.connect()
@@ -170,6 +205,14 @@ class utils:
             raise
 
         finally:
+            # Remove temporary config file if we created one
+            if temp_config_path and os.path.exists(temp_config_path):
+                try:
+                    os.unlink(temp_config_path)
+                    _log.debug(f"Removed temporary config file: {temp_config_path}")
+                except Exception as e:
+                    _log.debug(f"Failed to remove temporary config file: {e}")
+
             # Cleanup
             if "agent" in locals():
                 with contextlib.suppress(Exception):
@@ -206,10 +249,33 @@ class utils:
 
     @staticmethod
     def process_timestamp(timestamp_string, topic=""):
-        """Process timestamp string from VOLTTRON message."""
-        if isinstance(timestamp_string, str):
-            return utils.parse_timestamp_string(timestamp_string)
-        return timestamp_string
+        """Process timestamp string from VOLTTRON message.
+
+        Returns:
+            tuple: (timestamp, original_tz) - UTC datetime and original timezone
+        """
+        if timestamp_string is None:
+            _log.error(f"message for {topic} missing timestamp")
+            return None, None
+
+        try:
+            if isinstance(timestamp_string, str):
+                timestamp = utils.parse_timestamp_string(timestamp_string)
+            else:
+                timestamp = timestamp_string
+        except (ValueError, TypeError):
+            _log.error(f"message for {topic} bad timestamp string: {timestamp_string}")
+            return None, None
+
+        # Handle timezone
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=pytz.UTC)
+            original_tz = None
+        else:
+            original_tz = timestamp.tzinfo
+            timestamp = timestamp.astimezone(pytz.UTC)
+
+        return timestamp, original_tz
 
     @staticmethod
     def fix_sqlite3_datetime(sql=None):
