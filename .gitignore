@@ -1,5 +1,6 @@
 # Add patterns for files to ignore
 *.log
+log.*
 credentials_store/
 __pycache__/
 *.pyc
@@ -13,3 +14,23 @@ summary.md
 test_who_is*.py
 .claude/
 CLAUDE.md
+
+# Coverage reports
+.coverage
+htmlcov/
+coverage.xml
+
+# VOLTTRON runtime data
+.volttron_home/
+
+# Certificates (may contain sensitive data)
+certs/
+
+# Examples and temporary directories
+example-from-volttron/
+
+# Daily notes and temporary documentation
+END_OF_DAY_*.md
+
+# Executable scripts (uncomment if you want to track start-manager)
+# start-manager
