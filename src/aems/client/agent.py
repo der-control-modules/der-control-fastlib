@@ -3943,12 +3943,24 @@ def run_agent(agent_class, config_path=None, identity=None, **kwargs):
     parser.add_argument("--host", help="Message bus host", default="127.0.0.1")
     parser.add_argument("--port", help="Message bus port", type=int, default=8000)
     parser.add_argument(
+        "--address", help="Message bus address as ws://host:port (overrides --host/--port)", default=None
+    )
+    parser.add_argument(
         "--volttron-home",
         help="VOLTTRON_HOME directory",
         default=os.environ.get("VOLTTRON_HOME"),
     )
 
     args = parser.parse_args()
+
+    # Parse --address ws://host:port into host/port if provided
+    if args.address:
+        ws_url = args.address.replace("ws://", "").replace("wss://", "")
+        if ":" in ws_url:
+            args.host, port_str = ws_url.rsplit(":", 1)
+            args.port = int(port_str)
+        else:
+            args.host = ws_url
 
     # Set VOLTTRON_HOME environment variable if provided
     if args.volttron_home:

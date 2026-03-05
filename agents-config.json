@@ -25,7 +25,9 @@
       "identity": "platform.historian",
       "config_file": "configs/historian/config",
       "description": "SQL database historian",
-      "volumes": ["./data:/var/volttron/data"]
+      "volumes": [
+        "./data:/var/volttron/data"
+      ]
     },
     "mqtt_historian": {
       "enabled": false,
@@ -36,10 +38,10 @@
       "description": "MQTT historian"
     },
     "aems_manager": {
-      "enabled": false,
+      "enabled": true,
       "type": "aems-edge",
-      "agent_dir": "/volttron-pnnl-aems/aems-edge/Manager/manager",
-      "identity": "manager",
+      "agent_dir": "/volttron-pnnl-aems/aems-edge/Manager",
+      "identity": "manager.rtu02",
       "config_file": "configs/aems-manager/config",
       "description": "AEMS Edge Manager agent"
     },
@@ -64,7 +66,7 @@
       "description": "Example agent with web interface (exposes ports 8081 and 8444)"
     },
     "weather_dot_gov": {
-      "enabled": false,
+      "enabled": true,
       "type": "volttron",
       "agent_dir": "/volttron/services/core/WeatherDotGov",
       "identity": "platform.weather",
@@ -80,13 +82,15 @@
       "description": "Normal Framework BACnet driver (AEMS-native)"
     },
     "ilc": {
-      "enabled": false,
+      "enabled": true,
       "type": "volttron",
       "agent_dir": "/volttron-pnnl-applications/GridServices/Control/ILCAgent",
       "identity": "ilc.platform",
       "config_file": "configs/ilc/config",
       "description": "Intelligent Load Control agent with topic watching",
-      "depends_on": ["nf_driver"]
+      "depends_on": [
+        "nf_driver"
+      ]
     },
     "emailer": {
       "enabled": false,

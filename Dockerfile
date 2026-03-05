@@ -64,8 +64,8 @@ COPY --chown=volttron:volttron . .
 # Note: .git folder is needed for setuptools-scm to detect version
 
 # Install the package with all optional dependencies except dev/testing
-# Includes: historians, drivers, ilc, and weather
-RUN /app/.venv/bin/pip install -e ".[historians,drivers,ilc,weather]"
+# Includes: historians, drivers, ilc, weather, and manager
+RUN /app/.venv/bin/pip install -e ".[historians,drivers,ilc,weather,manager]"
 
 # Expose the default AEMS server port
 EXPOSE 8000

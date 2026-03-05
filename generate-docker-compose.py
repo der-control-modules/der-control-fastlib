@@ -57,7 +57,7 @@ def generate_server_service() -> str:
     image: aems-fastapi:latest
     container_name: aems-fastlib-server
     ports:
-      - "8000:8000"
+      - "5410:8000"
     volumes:
       - volttron-home:/var/volttron
     environment:
@@ -163,6 +163,14 @@ def generate_agent_service(agent_name: str, agent_config: dict[str, Any], global
     service += f'      "--identity", "{identity}",\n'
     service += f'      "--address", "{server_address}"\n'
     service += "    ]\n"
+
+    # Healthcheck - verify the agent process is running
+    service += "    healthcheck:\n"
+    service += '      test: ["CMD-SHELL", "grep -q start-legacy /proc/1/cmdline"]\n'
+    service += "      interval: 30s\n"
+    service += "      timeout: 5s\n"
+    service += "      retries: 3\n"
+    service += "      start_period: 15s\n"
 
     # Dependencies
     service += "    depends_on:\n"
