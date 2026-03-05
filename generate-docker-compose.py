@@ -44,8 +44,6 @@ def generate_compose_header() -> str:
 # DO NOT EDIT MANUALLY - Generated from agents-config.json
 # Run: python generate-docker-compose.py to regenerate
 
-version: '3.8'
-
 services:
 """
 
