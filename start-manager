@@ -1,3 +1,4 @@
+#!/bin/bash
 export VOLTTRON_HOME=/home/volttron/aems-nf/aems-edge/Manager/volttron_home
 export GEVENT_SUPPORT=True
 source .venv/bin/activate
