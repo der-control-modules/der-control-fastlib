@@ -20,6 +20,7 @@ basedb = None
 
 # Common VOLTTRON installation locations
 VOLTTRON_SEARCH_PATHS = [
+    "/volttron",  # Docker container location (cloned in Dockerfile)
     "/home/volttron/volttron",  # Development location
     Path.home() / "volttron",  # User's home directory
     "/opt/volttron",  # System installation

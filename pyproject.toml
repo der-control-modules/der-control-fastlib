@@ -37,13 +37,15 @@ dependencies = [
     "PyYAML==6.0.3",
     "watchdog==6.0.0",
     "watchgod==0.8.2",
-    "volttron-core>=2.0.0rc20",
     "jinja2~=3.1.2",
     "python-dateutil>=2.8.0",  # For timestamp parsing in VOLTTRON compatibility layer
     "ply>=3.11",               # For VOLTTRON historian agents (lexer/parser)
+    "pytz>=2023.3",            # For VOLTTRON compatibility layer (datetime timezone handling)
+    "tzlocal>=4.0",            # For VOLTTRON base_historian (local timezone detection)
+    "psutil>=5.9.0",           # For VOLTTRON platform layer
     # Security: Ensure minimum versions for transitive dependencies
     "starlette>=0.47.2",     # Fixes GHSA-2c2j-9gv5-cj73 (blocking thread issue)
-    # Note: cryptography>=44.0.1 is now enforced via volttron-core>=2.0.0rc20
+    "cryptography>=44.0.1",  # Security: enforce minimum cryptography version
 ]
 dynamic = ["version"]
 

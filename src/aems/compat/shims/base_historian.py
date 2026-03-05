@@ -18,6 +18,7 @@ BaseQueryHistorianAgent = None
 
 # Common VOLTTRON installation locations
 VOLTTRON_SEARCH_PATHS = [
+    "/volttron",  # Docker container location (cloned in Dockerfile)
     "/home/volttron/volttron",  # Development location
     Path.home() / "volttron",  # User's home directory
     "/opt/volttron",  # System installation
@@ -47,6 +48,10 @@ for volttron_path in VOLTTRON_SEARCH_PATHS:
             spec = importlib.util.spec_from_loader(loader.name, loader, origin=str(base_historian_file))
             _base_historian_module = importlib.util.module_from_spec(spec)
 
+            # Explicitly set __file__ — spec.has_location may be False in Python 3.11
+            # even when origin is set, causing inspect.getsourcelines() to fail inside ply.lex
+            _base_historian_module.__file__ = str(base_historian_file)
+
             # Store module in sys.modules BEFORE executing so ply can find it
             sys.modules["volttron_real_base_historian"] = _base_historian_module
 
@@ -71,28 +76,82 @@ for volttron_path in VOLTTRON_SEARCH_PATHS:
             # Continue trying other paths
             continue
 
-# If we couldn't import from VOLTTRON source, provide a helpful error
+# If we couldn't import from VOLTTRON source, provide a functional shim
 if BaseHistorian is None:
-    _log.error(
-        f"Could not find VOLTTRON BaseHistorian class. Searched paths: {[str(p) for p in VOLTTRON_SEARCH_PATHS]}"
-    )
+    searched = [str(p) for p in VOLTTRON_SEARCH_PATHS]
+    _log.warning(f"Could not load VOLTTRON BaseHistorian from source. Using AEMS shim. Searched: {searched}")
 
-    # Create a placeholder that gives a clear error message
-    class BaseHistorian:
-        def __init__(self, *args, **kwargs):
-            raise ImportError(
-                "BaseHistorian requires the VOLTTRON source code. "
-                "Please ensure VOLTTRON is installed or available in one of: "
-                f"{[str(p) for p in VOLTTRON_SEARCH_PATHS]}"
-            )
+    from aems.compat.shims.vip_agent import Agent as _Agent
 
-    class BaseHistorianAgent:
-        def __init__(self, *args, **kwargs):
-            raise ImportError("BaseHistorianAgent requires VOLTTRON source code")
+    class BaseHistorian(_Agent):
+        """AEMS shim for VOLTTRON BaseHistorian — inherits from Agent shim."""
 
-    class BaseQueryHistorianAgent:
         def __init__(self, *args, **kwargs):
-            raise ImportError("BaseQueryHistorianAgent requires VOLTTRON source code")
+            # Strip historian-specific kwargs that Agent shim doesn't understand
+            kwargs.pop("historian_setup", None)
+            kwargs.pop("publish_to_historian", None)
+            kwargs.pop("query_historian", None)
+            super().__init__(**kwargs)
+
+        def historian_setup(self):
+            """Override in subclass to set up historian-specific resources."""
+            pass
+
+        def publish_to_historian(self, to_publish_list):
+            """Override in subclass to persist data."""
+            pass
+
+        def query_historian(
+            self, topic, start=None, end=None, agg_type=None, agg_period=None, skip=0, count=None, order="FIRST_TO_LAST"
+        ):
+            """Override in subclass to query historical data."""
+            return {"values": [], "metadata": {}}
+
+        def query_topic_list(self):
+            """Override in subclass to list available topics."""
+            return []
+
+        def query_topics_metadata(self, topics):
+            """Override in subclass to get topic metadata."""
+            return {}
+
+        def query_topics_by_pattern(self, topic_pattern):
+            """Override in subclass to query topics matching a pattern."""
+            return {}
+
+        def version(self):
+            """Return the version of the historian."""
+            return "1.0"
+
+        def parse_table_def(self, tables_def):
+            default_table_def = {
+                "table_prefix": "",
+                "data_table": "data",
+                "topics_table": "topics",
+                "meta_table": "meta",
+            }
+            if not tables_def:
+                tables_def = default_table_def
+            else:
+                default_table_def.update(tables_def)
+                tables_def = default_table_def
+            table_names = dict(tables_def)
+            table_prefix = tables_def.get("table_prefix", None)
+            table_prefix = table_prefix + "_" if table_prefix else ""
+            if table_prefix:
+                for key, _value in list(table_names.items()):
+                    table_names[key] = table_prefix + table_names[key]
+            table_names["agg_topics_table"] = table_prefix + "aggregate_" + tables_def["topics_table"]
+            table_names["agg_meta_table"] = table_prefix + "aggregate_" + tables_def["meta_table"]
+            return tables_def, table_names
+
+    class BaseHistorianAgent(_Agent):
+        def __init__(self, *args, **kwargs):
+            super().__init__(**kwargs)
+
+    class BaseQueryHistorianAgent(_Agent):
+        def __init__(self, *args, **kwargs):
+            super().__init__(**kwargs)
 
 
 # Export the classes

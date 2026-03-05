@@ -3,7 +3,7 @@
   "description": "Configuration for legacy VOLTTRON and AEMS Edge agents",
   "agents": {
     "listener": {
-      "enabled": false,
+      "enabled": true,
       "type": "volttron",
       "agent_dir": "/volttron/examples/ListenerAgent",
       "identity": "listener",
@@ -19,12 +19,13 @@
       "description": "Device driver framework for BACnet, Modbus, etc."
     },
     "sql_historian": {
-      "enabled": false,
+      "enabled": true,
       "type": "volttron",
       "agent_dir": "/volttron/services/core/SQLHistorian",
       "identity": "platform.historian",
       "config_file": "configs/historian/config",
-      "description": "SQL database historian"
+      "description": "SQL database historian",
+      "volumes": ["./data:/var/volttron/data"]
     },
     "mqtt_historian": {
       "enabled": false,
@@ -71,7 +72,7 @@
       "description": "Weather data collection from weather.gov API"
     },
     "nf_driver": {
-      "enabled": false,
+      "enabled": true,
       "type": "aems-edge",
       "agent_dir": "/volttron-pnnl-aems/aems-edge/Normal",
       "identity": "platform.driver",
@@ -97,9 +98,9 @@
     }
   },
   "global": {
-    "server_address": "ws://aems-server:8000",
+    "server_address": "ws://aems-fastlib-server:8000",
     "volttron_home": "/var/volttron",
-    "config_base_dir": "/configs",
+    "config_base_dir": "/app",
     "restart_policy": "unless-stopped",
     "log_dir": "/var/log/aems",
     "enable_agent_logs": true

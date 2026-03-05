@@ -13,7 +13,19 @@ import importlib.util
 
 # Load the original VOLTTRON module directly from filesystem to avoid circular imports
 # This bypasses the import hook system entirely
-_module_path = "/home/volttron/volttron/volttron/platform/agent/base_weather.py"
+import os as _os
+
+_module_path = next(
+    (
+        p
+        for p in [
+            "/volttron/volttron/platform/agent/base_weather.py",  # Docker container
+            "/home/volttron/volttron/volttron/platform/agent/base_weather.py",  # Development
+        ]
+        if _os.path.exists(p)
+    ),
+    "/home/volttron/volttron/volttron/platform/agent/base_weather.py",  # fallback
+)
 _spec = importlib.util.spec_from_file_location("volttron.platform.agent.base_weather", _module_path)
 _original_module = importlib.util.module_from_spec(_spec)
 

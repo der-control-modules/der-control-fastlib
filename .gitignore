@@ -45,6 +45,9 @@ docker-compose.yml.backup
 # Logs directory
 logs/
 
+# Historian SQLite data (bind mounted from container)
+data/
+
 # Auto-generated documentation (AI session artifacts)
 DOCKER*.md
 AGENTS_CONFIG*.md

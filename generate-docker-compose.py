@@ -50,12 +50,12 @@ services:
 
 def generate_server_service() -> str:
     """Generate AEMS server service definition."""
-    return """  aems-server:
+    return """  aems-fastlib-server:
     build:
       context: .
       dockerfile: Dockerfile
     image: aems-fastapi:latest
-    container_name: aems-server
+    container_name: aems-fastlib-server
     ports:
       - "8000:8000"
     volumes:
@@ -166,7 +166,7 @@ def generate_agent_service(agent_name: str, agent_config: dict[str, Any], global
 
     # Dependencies
     service += "    depends_on:\n"
-    service += "      aems-server:\n"
+    service += "      aems-fastlib-server:\n"
     service += "        condition: service_healthy\n"
 
     # Add custom dependencies

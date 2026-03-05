@@ -1,3 +1,7 @@
+# Generated docker-compose.yml
+# DO NOT EDIT MANUALLY - Generated from agents-config.json
+# Run: python generate-docker-compose.py to regenerate
+
 services:
   aems-fastlib-server:
     build:
@@ -8,17 +12,10 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Mount VOLTTRON_HOME for persistent config storage
       - volttron-home:/var/volttron
-      # Optional: Mount local config directory
-      # - ./configs:/var/volttron/aems_config_store
-      # Optional: Mount logs directory
-      # - ./logs:/app/logs
     environment:
       - VOLTTRON_HOME=/var/volttron
       - AEMS_PORT=8000
-      # Optional: Add JWT secret for production
-      # - JWT_SECRET_KEY=your-secret-key-change-in-production
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
@@ -29,35 +26,82 @@ services:
     networks:
       - aems-network
 
-  # Optional: Add a legacy agent example
-  # Uncomment and customize as needed
-  # Note: VOLTTRON 9.0.4 is included in the image at /volttron
-  # aems-listener:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   image: aems-fastapi:latest
-  #   container_name: aems-listener
-  #   volumes:
-  #     - volttron-home:/var/volttron
-  #   environment:
-  #     - VOLTTRON_HOME=/var/volttron
-  #   command: [
-  #     "python", "/app/start-legacy.py",
-  #     "--agent-dir", "/volttron/examples/ListenerAgent",
-  #     "--config", "config",
-  #     "--identity", "listener",
-  #     "--address", "ws://aems-server:8000"
-  #   ]
-  #   depends_on:
-  #     aems-server:
-  #       condition: service_healthy
-  #   restart: unless-stopped
-  #   networks:
-  #     - aems-network
+  listener:
+    image: aems-fastapi:latest
+    container_name: aems-listener
+    volumes:
+      - volttron-home:/var/volttron
+      - agent-logs:/var/log/aems
+    environment:
+      - VOLTTRON_HOME=/var/volttron
+      - AGENT_LOG_FILE=/var/log/aems/listener.log
+    command: [
+      "python", "/app/start-legacy.py",
+      "--agent-dir", "/volttron/examples/ListenerAgent",
+      "--config", "config",
+      "--identity", "listener",
+      "--address", "ws://aems-fastlib-server:8000"
+    ]
+    depends_on:
+      aems-fastlib-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aems-network
+
+  sql_historian:
+    image: aems-fastapi:latest
+    container_name: aems-sql-historian
+    volumes:
+      - volttron-home:/var/volttron
+      - ./configs/historian:/app/configs/historian:ro
+      - agent-logs:/var/log/aems
+      - ./data:/var/volttron/data
+    environment:
+      - VOLTTRON_HOME=/var/volttron
+      - AGENT_LOG_FILE=/var/log/aems/platform.historian.log
+    command: [
+      "python", "/app/start-legacy.py",
+      "--agent-dir", "/volttron/services/core/SQLHistorian",
+      "--config", "/app/configs/historian/config",
+      "--identity", "platform.historian",
+      "--address", "ws://aems-fastlib-server:8000"
+    ]
+    depends_on:
+      aems-fastlib-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aems-network
+
+  nf_driver:
+    image: aems-fastapi:latest
+    container_name: aems-nf-driver
+    volumes:
+      - volttron-home:/var/volttron
+      - ./configs/nf-driver:/app/configs/nf-driver:ro
+      - agent-logs:/var/log/aems
+    environment:
+      - VOLTTRON_HOME=/var/volttron
+      - AGENT_LOG_FILE=/var/log/aems/platform.driver.log
+    command: [
+      "python", "/app/start-legacy.py",
+      "--agent-dir", "/volttron-pnnl-aems/aems-edge/Normal",
+      "--config", "/app/configs/nf-driver/config",
+      "--identity", "platform.driver",
+      "--address", "ws://aems-fastlib-server:8000"
+    ]
+    depends_on:
+      aems-fastlib-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aems-network
 
 volumes:
   volttron-home:
+    driver: local
+  agent-logs:
     driver: local
 
 networks:

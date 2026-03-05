@@ -42,6 +42,9 @@ RUN git clone --branch feature/29-add-endpoint-for-agent --depth 1 \
 RUN git clone --depth 1 \
     https://github.com/VOLTTRON/volttron-pnnl-applications.git /volttron-pnnl-applications
 
+# Fix ownership after git clones (clones run as root, so files are root-owned)
+RUN chown -R volttron:volttron /volttron /volttron-pnnl-aems /volttron-pnnl-applications
+
 # Set working directory
 WORKDIR /app
 
