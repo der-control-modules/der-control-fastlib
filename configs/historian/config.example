@@ -1,0 +1,14 @@
+{
+    "connection": {
+        "type": "sqlite",
+        "params": {
+            "database": "/var/volttron/data/platform.historian.sqlite"
+        }
+    },
+    "tables_def": {
+        "table_prefix": "",
+        "data_table": "data",
+        "topics_table": "topics",
+        "meta_table": "meta"
+    }
+}

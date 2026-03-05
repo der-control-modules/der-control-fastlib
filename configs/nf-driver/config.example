@@ -1,0 +1,13 @@
+{
+    "campus": "PNNL",
+    "building": "BUILDING1",
+    "devices": [
+        {
+            "device_address": "192.168.1.101",
+            "device_id": 1,
+            "name": "rtu01"
+        }
+    ],
+    "registry_config": "configs/nf-driver/schneider.csv",
+    "interval": 60
+}

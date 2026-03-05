@@ -91,6 +91,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 # Tests can use more relaxed rules
 "tests/**/*.py" = [
     "D",     # Don't require docstrings in tests
+    "E501",  # Don't enforce line length in tests
     "SIM",   # Don't simplify test code (clarity over brevity)
     "TCH",   # Don't enforce type checking imports in tests
     "B011",  # Don't warn about assert False in tests

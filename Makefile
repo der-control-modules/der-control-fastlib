@@ -66,6 +66,47 @@ clean: ## Clean up temporary files
 	rm -rf htmlcov/
 	rm -rf .pytest_cache/
 
+# Docker
+.PHONY: docker-build
+docker-build: ## Build Docker image
+	./docker-helper.sh build
+
+.PHONY: docker-run
+docker-run: ## Run Docker container
+	./docker-helper.sh run
+
+.PHONY: docker-stop
+docker-stop: ## Stop Docker container
+	./docker-helper.sh stop
+
+.PHONY: docker-logs
+docker-logs: ## View Docker container logs
+	./docker-helper.sh logs
+
+.PHONY: docker-shell
+docker-shell: ## Open shell in Docker container
+	./docker-helper.sh shell
+
+.PHONY: docker-test
+docker-test: ## Run tests in Docker container
+	./docker-helper.sh test
+
+.PHONY: docker-clean
+docker-clean: ## Clean Docker container and volumes
+	./docker-helper.sh clean
+
+.PHONY: compose-up
+compose-up: ## Start services with docker-compose
+	docker-compose up -d
+
+.PHONY: compose-down
+compose-down: ## Stop services with docker-compose
+	docker-compose down
+
+.PHONY: compose-logs
+compose-logs: ## View docker-compose logs
+	docker-compose logs -f
+
 # Help
 .PHONY: help
 help: ## Show this help message

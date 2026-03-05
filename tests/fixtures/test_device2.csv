@@ -1,0 +1,11 @@
+Reference Point Name,Volttron Point Name,Units,Unit Details,BACnet Object Type,Property,Writable,Index,Write Priority,Notes
+Light Sensor Level,LightSensorLevel,noUnits,,analogInput,presentValue,FALSE,2,,
+Relative Humidity Raw Value,RelativeHumidityRawValue,percentRelativeHumidity,,analogInput,presentValue,FALSE,4,,
+Effective Setpoint,EffectiveSetpoint,degreesFahrenheit,,analogInput,presentValue,FALSE,329,,
+PI Heating Demand,HeatingDemand,percent,(default 100.0),analogOutput,presentValue,FALSE,21,,
+PI Cooling Demand,CoolingDemand,percent,(default 0.0),analogOutput,presentValue,FALSE,22,,
+Occupied Cool Setpoint,OccupiedCoolSetpoint,degreesFahrenheit,(default 72.0),analogValue,presentValue,FALSE,40,,
+Occupied Heat Setpoint,OccupiedHeatSetpoint,degreesFahrenheit,(default 69.0),analogValue,presentValue,FALSE,39,,
+G Fan Status,GFanStatus,Enum,0-1 (default 1),binaryOutput,presentValue,FALSE,25,,
+PIR Local Motion,PIRLocalMotion,Enum,0-1 (default 0),binaryValue,presentValue,FALSE,32,,
+Dehumidification Status,DehumidificationStatus,Enum,0-1 (default 0),binaryValue,presentValue,FALSE,38,,

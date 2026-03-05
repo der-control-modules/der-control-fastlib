@@ -17,9 +17,10 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.8.5
     hooks:
-      # Run the linter on all files
+      # Run the linter, excluding tests to avoid line-length and style noise
       - id: ruff
         args: [--fix]
+        exclude: ^tests/
       # Run the formatter but exclude test files to avoid assert reformatting
       - id: ruff-format
         exclude: ^tests/

@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  aems-fastlib-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aems-fastapi:latest
+    container_name: aems-fastlib-server
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount VOLTTRON_HOME for persistent config storage
+      - volttron-home:/var/volttron
+      # Optional: Mount local config directory
+      # - ./configs:/var/volttron/aems_config_store
+      # Optional: Mount logs directory
+      # - ./logs:/app/logs
+    environment:
+      - VOLTTRON_HOME=/var/volttron
+      - AEMS_PORT=8000
+      # Optional: Add JWT secret for production
+      # - JWT_SECRET_KEY=your-secret-key-change-in-production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - aems-network
+
+  # Optional: Add a legacy agent example
+  # Uncomment and customize as needed
+  # Note: VOLTTRON 9.0.4 is included in the image at /volttron
+  # aems-listener:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   image: aems-fastapi:latest
+  #   container_name: aems-listener
+  #   volumes:
+  #     - volttron-home:/var/volttron
+  #   environment:
+  #     - VOLTTRON_HOME=/var/volttron
+  #   command: [
+  #     "python", "/app/start-legacy.py",
+  #     "--agent-dir", "/volttron/examples/ListenerAgent",
+  #     "--config", "config",
+  #     "--identity", "listener",
+  #     "--address", "ws://aems-server:8000"
+  #   ]
+  #   depends_on:
+  #     aems-server:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+  #   networks:
+  #     - aems-network
+
+volumes:
+  volttron-home:
+    driver: local
+
+networks:
+  aems-network:
+    driver: bridge

@@ -1,0 +1,93 @@
+# Example .dockerignore file
+# This is the actual .dockerignore being used
+# You can customize this for your specific needs
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing (exclude from image)
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.cover
+.hypothesis/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation (exclude to reduce image size)
+docs/
+*.md
+*.txt
+!requirements.txt
+*.pptx
+
+# Logs (will be in volumes instead)
+*.log
+log_*.log
+*.log.*
+
+# VOLTTRON specific
+.volttron_home/
+credentials_store/
+
+# Development files
+.github/
+.pre-commit-config.yaml
+Makefile
+ruff.toml
+.bandit
+
+# Test files (exclude to reduce image size)
+tests/
+test-*.sh
+run-*.sh
+dev.py
+
+# Example files
+example-from-volttron/
+
+# Cache
+.ruff_cache/
+.mypy_cache/
+*.tmp
+
+# Certificates (manage separately, security)
+certs/
+
+# Database files (will be in volumes)
+*.db
+*.sqlite
+*.sqlite3
+
+# Optional: Start scripts
+# Uncomment to exclude specific start scripts
+# start-legacy-*.sh
+# start-manager

@@ -1,0 +1,14 @@
+export VOLTTRON_HOME=/home/volttron/aems-nf/aems-edge/Manager/volttron_home
+export GEVENT_SUPPORT=True
+source .venv-edge/bin/activate
+cd Manager
+
+python -m manager.main_manager --config /home/volttron/aems-nf/aems-edge/configurations/thermostats/schneider.config --host localhost --port 8000 --identity manager.rtu02 > ../logs/rtu02.log 2>&1&
+disown
+
+cd ../Normal
+
+python -m nf.driver --config /home/volttron/aems-nf/aems-edge/Normal/config --host localhost --port 8000 --identity platform.driver > ../logs/driver.log 2>&1&
+disown
+
+cd ../

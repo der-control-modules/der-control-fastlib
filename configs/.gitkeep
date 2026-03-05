@@ -1,0 +1,2 @@
+# This file ensures the configs directory is tracked by git
+# Actual config files (config, not config.example) should be in .gitignore

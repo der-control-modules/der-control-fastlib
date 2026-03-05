@@ -32,5 +32,26 @@ example-from-volttron/
 # Daily notes and temporary documentation
 END_OF_DAY_*.md
 
-# Executable scripts (uncomment if you want to track start-manager)
-# start-manager
+# Agent configuration files (keep examples, ignore actual configs)
+configs/*/config
+configs/**/config
+!configs/**/*.example
+!configs/**/README.md
+!configs/.gitkeep
+
+# Docker generated files
+docker-compose.yml.backup
+
+# Logs directory
+logs/
+
+# Auto-generated documentation (AI session artifacts)
+DOCKER*.md
+AGENTS_CONFIG*.md
+CONFIG_FILE_OPTIONS.md
+PORT_MAPPING_GUIDE.md
+docker-architecture.txt
+DOCKER_FILES.txt
+
+# BACnet investigation notes (tests/)
+tests/BACNET_*.md

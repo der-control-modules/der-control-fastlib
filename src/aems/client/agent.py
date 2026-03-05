@@ -3545,8 +3545,7 @@ class Agent:
                         result = async_result.get(timeout=30)
                         # Log the result at INFO level
                         _log.info(
-                            f"Agent {self.identity} RPC {method_name} completed, returning: {result} "
-                            f"[msg_id: {msg_id}]"
+                            f"Agent {self.identity} RPC {method_name} completed, returning: {result} [msg_id: {msg_id}]"
                         )
                         # Send successful response
                         _log.debug(f"Agent {self.identity} sending RPC response for msg_id {msg_id}: {result}")
