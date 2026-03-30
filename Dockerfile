@@ -3,6 +3,9 @@
 
 FROM debian:bookworm-slim
 
+# Build arg for Docker socket group GID (match host docker group)
+ARG DOCKER_GID=125
+
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -28,6 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create application directory, volttron home, and directories for git repos
 RUN mkdir -p /app /var/volttron/aems_config_store /volttron /volttron-pnnl-aems /volttron-pnnl-applications && \
     useradd -m -u 1000 -s /bin/bash volttron && \
+    groupadd -g ${DOCKER_GID} docker-host 2>/dev/null || true && \
+    usermod -aG docker-host volttron && \
     chown -R volttron:volttron /app /var/volttron /volttron /volttron-pnnl-aems /volttron-pnnl-applications
 
 # Clone VOLTTRON repository (version 9.0.4 tag) for legacy agent support

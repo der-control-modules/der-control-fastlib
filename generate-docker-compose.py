@@ -54,12 +54,15 @@ def generate_server_service() -> str:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        DOCKER_GID: "125"
     image: aems-fastapi:latest
     container_name: aems-fastlib-server
     ports:
       - "5410:8000"
     volumes:
       - volttron-home:/var/volttron
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - VOLTTRON_HOME=/var/volttron
       - AEMS_PORT=8000

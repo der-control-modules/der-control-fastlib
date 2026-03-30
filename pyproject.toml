@@ -43,6 +43,7 @@ dependencies = [
     "pytz>=2023.3",            # For VOLTTRON compatibility layer (datetime timezone handling)
     "tzlocal>=4.0",            # For VOLTTRON base_historian (local timezone detection)
     "psutil>=5.9.0",           # For VOLTTRON platform layer
+    "aiodocker>=0.21.0",       # For Docker container log API endpoints (async)
     # Security: Ensure minimum versions for transitive dependencies
     "starlette>=0.47.2",     # Fixes GHSA-2c2j-9gv5-cj73 (blocking thread issue)
     "cryptography>=44.0.1",  # Security: enforce minimum cryptography version

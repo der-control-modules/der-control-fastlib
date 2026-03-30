@@ -804,6 +804,102 @@ class FastAPIMessageBus(MessageBus):
                 "timestamp": datetime.datetime.now().isoformat(),
             }
 
+        @self.app.get("/api/containers")
+        async def list_containers():
+            """List all running Docker containers."""
+            try:
+                import aiodocker
+
+                async with aiodocker.Docker() as docker:
+                    containers = await docker.containers.list()
+                    result = []
+                    for c in containers:
+                        info = c._container
+                        result.append(
+                            {
+                                "id": info.get("Id", "")[:12],
+                                "name": info.get("Names", [""])[0].lstrip("/"),
+                                "image": info.get("Image", ""),
+                                "status": info.get("Status", ""),
+                                "state": info.get("State", ""),
+                            }
+                        )
+                    return {"containers": result, "count": len(result)}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Docker error: {e}")
+
+        @self.app.get("/api/containers/{container_name}/logs")
+        async def get_container_logs(
+            container_name: str,
+            tail: int = Query(default=100, ge=1, le=5000),
+            since: str = Query(default=None, description="Time filter e.g. '1h', '30m', '2024-01-01T00:00:00'"),
+        ):
+            """Get logs from a Docker container."""
+            try:
+                import aiodocker
+
+                async with aiodocker.Docker() as docker:
+                    containers = await docker.containers.list()
+                    container = None
+                    for c in containers:
+                        names = c._container.get("Names", [])
+                        if any(n.lstrip("/") == container_name for n in names):
+                            container = c
+                            break
+                    if container is None:
+                        raise HTTPException(status_code=404, detail=f"Container '{container_name}' not found")
+
+                    kwargs = {"stdout": True, "stderr": True, "tail": tail, "follow": False}
+                    if since:
+                        kwargs["since"] = since
+
+                    log_lines = await container.log(**kwargs)
+                    return {
+                        "container": container_name,
+                        "tail": tail,
+                        "lines": len(log_lines),
+                        "logs": log_lines,
+                    }
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Docker error: {e}")
+
+        from fastapi.responses import StreamingResponse
+
+        @self.app.get("/api/containers/{container_name}/logs/stream")
+        async def stream_container_logs(
+            container_name: str,
+            tail: int = Query(default=50, ge=1, le=1000),
+        ):
+            """Stream logs from a Docker container as Server-Sent Events."""
+            try:
+                import aiodocker
+
+                async def event_generator():
+                    async with aiodocker.Docker() as docker:
+                        containers = await docker.containers.list()
+                        container = None
+                        for c in containers:
+                            names = c._container.get("Names", [])
+                            if any(n.lstrip("/") == container_name for n in names):
+                                container = c
+                                break
+                        if container is None:
+                            yield f"event: error\ndata: Container '{container_name}' not found\n\n"
+                            return
+
+                        async for line in container.log(stdout=True, stderr=True, tail=tail, follow=True):
+                            yield f"data: {line}\n\n"
+
+                return StreamingResponse(
+                    event_generator(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Docker error: {e}")
+
         @self.app.post("/authenticate", response_model=AuthResponse)
         async def authenticate(request: Request):
             """Authenticate a user with username and password.
