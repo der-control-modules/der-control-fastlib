@@ -1,4 +1,7 @@
 # Add patterns for files to ignore
+
+# Site-specific config (copy from config.ini.example)
+config.ini
 *.log
 log.*
 credentials_store/

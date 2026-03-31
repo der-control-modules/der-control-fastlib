@@ -120,7 +120,7 @@ registry = dent.csv
 [database]
 db_name = volttron
 db_user = volttron
-db_password = volttron
+db_password = CHANGE_ME
 db_address = localhost
 db_port = 5432
 

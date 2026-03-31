@@ -19,7 +19,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Schema validation (uses only the stdlib; no jsonschema dependency)
 # ---------------------------------------------------------------------------
@@ -48,8 +47,8 @@ VOLTTRON_AGENTS = {
 }
 
 # Map from config.ini agent key to its default type
-AGENT_TYPE_MAP = {name: "aems-edge" for name in AEMS_EDGE_AGENTS}
-AGENT_TYPE_MAP.update({name: "volttron" for name in VOLTTRON_AGENTS})
+AGENT_TYPE_MAP = dict.fromkeys(AEMS_EDGE_AGENTS, "aems-edge")
+AGENT_TYPE_MAP.update(dict.fromkeys(VOLTTRON_AGENTS, "volttron"))
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +254,7 @@ def generate_agents_config(ini: configparser.ConfigParser) -> dict[str, Any]:
     """Build the full agents-config.json structure from the parsed ini."""
 
     # --- [site] ---
-    site = ini["site"] if ini.has_section("site") else {}
+    _site = ini["site"] if ini.has_section("site") else {}  # noqa: F841
     # site values are informational; they don't directly appear in the output
     # but downstream generators (generate_configs.py) use them.
 
