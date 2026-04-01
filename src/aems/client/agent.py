@@ -3286,16 +3286,16 @@ class Agent:
         self.vip.rpc._register_decorated_methods(self.config)
 
     def connect(self):
-        """Connect to the message bus."""
+        """Connect to the message bus.
+
+        The WebSocket on_open callback (__on_ws_open__) fires the onconnected
+        event and loads configurations.  We must NOT duplicate those here,
+        otherwise lifecycle handlers see onconnected/onconfigure twice.
+        """
         self._manual_disconnect = False  # Reset the flag for fresh connections
         self._internal_connect()
 
-        # Fire the onconnected event with self as sender
-        self.core.fire_event("onconnected", sender=self)
-
-        # After onconnected but before onstart, load configurations
-        self._load_configs()
-
+        # __on_ws_open__ already fired onconnected and loaded configs.
         # Fire the onstart event with self as sender
         self.core.fire_event("onstart", sender=self)
 

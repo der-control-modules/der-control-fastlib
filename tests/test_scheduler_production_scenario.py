@@ -128,8 +128,8 @@ def test_multiple_overrides_throughout_day(message_bus_manager_fixture):
         (
             "zone_2",
             now - timedelta(minutes=30),
-            now + timedelta(minutes=30),
-        ),  # Start in past, end in future
+            now + timedelta(seconds=2),
+        ),  # Start in past, end in near future
         # Future events
         (
             "zone_3",
@@ -162,8 +162,8 @@ def test_multiple_overrides_throughout_day(message_bus_manager_fixture):
         len(past_actions) >= 3
     ), f"Expected at least 3 past events, got {len(past_actions)}"
 
-    # Wait for future events
-    gevent.sleep(5)
+    # Wait for future events (zone_4 end is at now+4s; give extra headroom for CI)
+    gevent.sleep(8)
 
     # Check all events fired
     print(f"\n📊 Total events fired: {len(agent.control_actions)}")

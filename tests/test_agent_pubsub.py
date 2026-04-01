@@ -177,7 +177,7 @@ class TestAgentPubSub:
             "dict": {"nested": "value"},
         }
 
-        self.publisher.vip.pubsub.publish("", "data/test", test_data).get()
+        self.publisher.vip.pubsub.publish("", "data/test", message=test_data).get()
         gevent.sleep(2)
 
         # Verify message content
