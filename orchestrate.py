@@ -232,19 +232,28 @@ def step1_generate_configs(
         print("  [DRY RUN] Skipping execution.")
         return
 
-    # Write the flat config to a temp directory and run from there so
-    # configargparse discovers it as 'config.ini' in the CWD.
+    # Write the flat config into the aems-edge script directory and run
+    # from there so configargparse discovers it as 'config.ini' in the
+    # CWD.  The script also needs sibling files (CSVs, docker-compose
+    # YAMLs) that live alongside generate_configs.py.
     # Use os.open with 0o600 to ensure the file is not world-readable
     # (it may contain database passwords).
-    with tempfile.TemporaryDirectory(prefix="aems-orchestrate-") as tmpdir:
-        flat_config_path = Path(tmpdir) / "config.ini"
+    script_cwd = gen_script.resolve().parent
+    flat_config_path = script_cwd / "config.ini"
+    wrote_flat_config = False
+    try:
         fd = os.open(str(flat_config_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             os.write(fd, flat_config_text.encode())
         finally:
             os.close(fd)
+        wrote_flat_config = True
 
-        result = subprocess.run(cmd, cwd=tmpdir)
+        result = subprocess.run(cmd, cwd=str(script_cwd))
+    finally:
+        # Clean up the temporary flat config to avoid leaving secrets on disk.
+        if wrote_flat_config and flat_config_path.is_file():
+            flat_config_path.unlink()
 
     if result.returncode != 0:
         print(f"\nError: generate_configs.py exited with code {result.returncode}", file=sys.stderr)

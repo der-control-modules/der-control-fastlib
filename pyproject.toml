@@ -101,6 +101,13 @@ weather = [
     "pint>=0.17",              # For WeatherDotGov agent (unit conversion and handling)
 ]
 
+# Dependencies for the orchestrator pipeline (Step 1: generate_configs.py)
+pipeline = [
+    "configargparse>=1.5.3",
+    "netifaces>=0.11.0",
+    "pyyaml>=6.0",
+]
+
 # Dependencies for AEMS Manager agent
 manager = [
     "pandas>=2.0.0",           # Data analysis and CSV handling
