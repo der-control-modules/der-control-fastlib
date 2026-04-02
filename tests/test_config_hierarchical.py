@@ -111,15 +111,14 @@ class TestHierarchicalConfigNames:
         raw_data = response.json()["data"]
         assert raw_data == csv_data
 
-        # Retrieve as parsed data (CSV is returned as list of rows)
+        # Retrieve as parsed data (CSV is returned as list of dicts via DictReader)
         response = requests.get(url)
         assert response.status_code == 200
         parsed = response.json()["data"]
-        # CSV returns list of rows: [header_row, data_row1, data_row2]
-        assert len(parsed) == 3
-        assert parsed[0] == ["Point", "Type", "Unit"]
-        assert parsed[1] == ["Temp", "Analog", "F"]
-        assert parsed[2] == ["Pressure", "Analog", "PSI"]
+        # CSV returns list of dicts keyed by header row
+        assert len(parsed) == 2
+        assert parsed[0] == {"Point": "Temp", "Type": "Analog", "Unit": "F"}
+        assert parsed[1] == {"Point": "Pressure", "Type": "Analog", "Unit": "PSI"}
 
     def test_deep_hierarchy(self):
         """Test deeply nested hierarchical config names."""

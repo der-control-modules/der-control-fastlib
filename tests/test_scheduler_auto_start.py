@@ -100,7 +100,7 @@ def test_scheduler_handles_past_event_without_running(message_bus_manager_fixtur
     )
 
     # Manually connect WebSocket but skip the onstart/periodic tasks
-    agent._connect_websocket()
+    agent._internal_connect()
     gevent.sleep(0.5)
 
     # Verify scheduler is not running

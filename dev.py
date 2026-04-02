@@ -22,7 +22,9 @@ Run `dev.py help` for a full list of available commands.
 """
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import urllib.parse
@@ -724,6 +726,30 @@ def update():
     return True
 
 
+def _find_tool(name):
+    """
+    Locate a development tool, preferring the local virtualenv.
+
+    Checks ``.venv/bin/<name>`` first (local dev workflow), then falls back
+    to ``shutil.which`` so the tool is found when installed globally (CI).
+
+    Parameters
+    ----------
+    name : str
+        The executable name to locate (e.g. ``"ruff"``).
+
+    Returns
+    -------
+    str
+        The resolved path or bare name as a last resort.
+    """
+    venv_path = os.path.join(".venv", "bin", name)
+    if os.path.isfile(venv_path):
+        return venv_path
+    found = shutil.which(name)
+    return found if found else name
+
+
 def format_code():
     """
     Format code with ruff.
@@ -735,7 +761,8 @@ def format_code():
     -------
         bool: True if formatting was successful, False otherwise
     """
-    return run_command(".venv/bin/ruff format src/ tests/", "Formatting code")
+    ruff = _find_tool("ruff")
+    return run_command(f"{ruff} format src/ tests/", "Formatting code")
 
 
 def lint():
@@ -752,8 +779,9 @@ def lint():
     """
     print("🔍 Running linting checks...")
 
+    ruff = _find_tool("ruff")
     print("🔄 Running ruff check...")
-    ruff_process = subprocess.run(".venv/bin/ruff check src/ tests/", shell=True, text=True)
+    ruff_process = subprocess.run(f"{ruff} check src/ tests/", shell=True, text=True)
     ruff_ok = ruff_process.returncode == 0
 
     if ruff_ok:

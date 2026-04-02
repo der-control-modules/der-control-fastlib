@@ -243,6 +243,11 @@ class TestBACnetProxyIntegration:
             if not start_legacy_script.exists():
                 pytest.skip(f"start-legacy.py not found at {start_legacy_script}")
 
+            # Check for venv python early so we skip before doing expensive work
+            venv_python = script_dir / ".venv" / "bin" / "python"
+            if not venv_python.exists():
+                pytest.skip(f"Venv python not found at {venv_python}")
+
             # Verify WebSocket endpoint is actually working by connecting a test agent
             print(f"Verifying WebSocket endpoint is ready on port {test_port}...")
             test_agent = message_bus_manager_fixture.create_connected_agent("test.connectivity_check")

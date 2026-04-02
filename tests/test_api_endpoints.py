@@ -202,7 +202,7 @@ class TestFrameworkConnector:
         gevent.sleep(1)
 
         # Test publish/subscribe
-        sender_agent.vip.pubsub.publish("", "test/topic", {"data": "test_message"})
+        sender_agent.vip.pubsub.publish("", "test/topic", message={"data": "test_message"})
 
         # Allow time for message to be delivered
         gevent.sleep(1)

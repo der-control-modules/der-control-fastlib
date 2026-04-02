@@ -1,0 +1,200 @@
+# =============================================================================
+# AEMS Agent Configuration - Sample config.ini
+# =============================================================================
+# This file drives the full orchestration pipeline:
+#   orchestrate.py → generate_configs.py → generate-agents-config.py
+#                  → generate-docker-compose.py
+#
+# Sections:
+#   [site]       - Campus/building/timezone/network identifiers
+#   [global]     - Server and container runtime settings
+#   [agents]     - Enable/disable individual agents
+#   [nf_driver]  - Normal Framework BACnet driver settings
+#   [platform_driver] - Legacy VOLTTRON platform driver settings
+#   [device:N]   - Per-device BACnet configuration (N = 1, 2, ...)
+#   [meter]      - Power meter device configuration
+#   [database]   - Database connection for historian (used by generate_configs.py)
+#   [historian]  - SQL historian agent settings
+#   [mqtt_historian] - MQTT historian settings
+#   [weather]    - Weather.gov polling configuration
+#   [ilc]        - Intelligent Load Control settings
+#   [emailer]    - Email notification settings
+#   [listener]   - Simple pub/sub listener (debug/example)
+# =============================================================================
+
+[site]
+campus = PNNL
+building = SEB
+timezone = America/Los_Angeles
+# Gateway IP for BACnet device network (used by generate_configs.py)
+gateway_address = 192.168.1.1
+# Thermostat type: schneider or openstat
+stat_type = schneider
+
+[global]
+server_address = ws://aems-fastlib-server:8000
+volttron_home = /var/volttron
+config_base_dir = /app
+restart_policy = unless-stopped
+log_dir = /var/log/aems
+enable_agent_logs = true
+
+# ---------------------------------------------------------------------------
+# Agent toggles — set to true/false to enable/disable each agent.
+# ---------------------------------------------------------------------------
+[agents]
+listener = true
+platform_driver = false
+nf_driver = true
+sql_historian = true
+mqtt_historian = false
+aems_manager = true
+weather_dot_gov = true
+ilc = true
+emailer = false
+scheduler_example = false
+web_agent_example = false
+
+# ---------------------------------------------------------------------------
+# Normal Framework BACnet Driver (aems-edge native)
+# ---------------------------------------------------------------------------
+[nf_driver]
+agent_dir = /volttron-pnnl-aems/aems-edge/Normal
+identity = platform.driver
+config_file = configs/nf-driver/config
+description = Normal Framework BACnet driver (AEMS-native)
+
+# ---------------------------------------------------------------------------
+# Legacy VOLTTRON Platform Driver
+# ---------------------------------------------------------------------------
+[platform_driver]
+agent_dir = /volttron/services/core/PlatformDriverAgent
+identity = platform.driver
+config_file = configs/platform-driver/config
+description = Device driver framework for BACnet, Modbus, etc.
+
+# ---------------------------------------------------------------------------
+# AEMS Manager — one per managed device.
+# Set num_devices to generate manager.rtuXX identities automatically.
+# Prefix controls the naming: prefix=rtu, num_devices=3 => rtu01, rtu02, rtu03.
+# ---------------------------------------------------------------------------
+[aems_manager]
+agent_dir = /volttron-pnnl-aems/aems-edge/Manager
+config_file = configs/aems-manager/config
+description = AEMS Edge Manager agent
+prefix = rtu
+num_devices = 1
+# When num_devices > 1 each device gets identity "manager.<prefix>XX"
+# When num_devices == 1 (default) a single identity is used:
+identity = manager.rtu02
+
+# ---------------------------------------------------------------------------
+# Per-device BACnet configuration.
+# Repeat [device:N] sections for each thermostat / RTU.
+# These are informational and can be used by downstream config generators.
+# ---------------------------------------------------------------------------
+[device:1]
+name = rtu01
+address = 192.168.1.101
+device_id = 1
+stat_type = schneider
+
+[device:2]
+name = rtu02
+address = 192.168.1.102
+device_id = 2
+stat_type = schneider
+
+# ---------------------------------------------------------------------------
+# Power Meter
+# ---------------------------------------------------------------------------
+[meter]
+name = meter
+address = 192.168.1.100
+device_id = 100
+registry = dent.csv
+
+# ---------------------------------------------------------------------------
+# Database connection (used by generate_configs.py for historian config files)
+# ---------------------------------------------------------------------------
+[database]
+db_name = volttron
+db_user = volttron
+db_password = CHANGE_ME
+db_address = localhost
+db_port = 5432
+
+# ---------------------------------------------------------------------------
+# SQL Historian
+# ---------------------------------------------------------------------------
+[historian]
+agent_dir = /volttron/services/core/SQLHistorian
+identity = platform.historian
+config_file = configs/historian/config
+description = SQL database historian
+volumes = ./data:/var/volttron/data
+
+# ---------------------------------------------------------------------------
+# MQTT Historian
+# ---------------------------------------------------------------------------
+[mqtt_historian]
+agent_dir = /volttron/services/core/MQTTHistorian
+identity = platform.mqtt_historian
+config_file = configs/mqtt-historian/config
+description = MQTT historian
+
+# ---------------------------------------------------------------------------
+# Weather.gov
+# ---------------------------------------------------------------------------
+[weather]
+agent_dir = /volttron/services/core/WeatherDotGov
+identity = platform.weather
+config_file = configs/weather/config
+description = Weather data collection from weather.gov API
+station = KRIC
+
+# ---------------------------------------------------------------------------
+# Intelligent Load Control
+# ---------------------------------------------------------------------------
+[ilc]
+agent_dir = /volttron-pnnl-applications/GridServices/Control/ILCAgent
+identity = ilc.platform
+config_file = configs/ilc/config
+description = Intelligent Load Control agent with topic watching
+depends_on = nf_driver
+
+# ---------------------------------------------------------------------------
+# Emailer
+# ---------------------------------------------------------------------------
+[emailer]
+agent_dir = /volttron/services/ops/EmailerAgent
+identity = platform.emailer
+config_file = configs/emailer/config
+description = Email notification agent
+
+# ---------------------------------------------------------------------------
+# Listener (example / debug agent)
+# ---------------------------------------------------------------------------
+[listener]
+agent_dir = /volttron/examples/ListenerAgent
+identity = listener
+description = Simple pub/sub example agent
+
+# ---------------------------------------------------------------------------
+# Scheduler Example (disabled by default)
+# ---------------------------------------------------------------------------
+[scheduler_example]
+agent_dir = /volttron/examples/SchedulerExampleAgent
+identity = scheduler_example
+config_file = /volttron/examples/SchedulerExampleAgent/schedulerexample.config
+description = Scheduler example using config from VOLTTRON repo (absolute path)
+
+# ---------------------------------------------------------------------------
+# Web Agent Example (disabled by default)
+# ---------------------------------------------------------------------------
+[web_agent_example]
+agent_dir = /volttron/examples/SomeWebAgent
+identity = web.agent
+config_file =
+description = Example agent with web interface (exposes ports 8081 and 8444)
+ports = 8081:8080,8444:8443
