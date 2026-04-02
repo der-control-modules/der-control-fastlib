@@ -56,6 +56,12 @@ Step 1 (`generate_configs.py`) requires:
 - `netifaces`
 - `pyyaml`
 
+Install them (along with the orchestrator itself) via the `pipeline` extra:
+
+```bash
+pip install -e .[pipeline]
+```
+
 Steps 2 and 3 use only the Python standard library (no extra packages).
 
 ### Docker
