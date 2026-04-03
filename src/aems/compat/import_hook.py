@@ -141,6 +141,48 @@ class VolttronImportRedirector(MetaPathFinder, Loader):
 _redirector = None
 
 
+def _install_bacpypes_compat():
+    """
+    Install bacpypes compatibility shims for version differences.
+
+    bacpypes 0.19 moved LocalDeviceObject from bacpypes.service.device
+    to bacpypes.local.device. This shim ensures the old import path works
+    regardless of which bacpypes version is installed, so VOLTTRON's BACnet
+    proxy agent can use `from bacpypes.service.device import LocalDeviceObject`.
+    """
+    # Only shim if the old import path doesn't work natively
+    try:
+        importlib.import_module("bacpypes.service.device")
+        _log.debug("bacpypes.service.device exists natively, no shim needed")
+        return
+    except ImportError:
+        pass
+
+    # Try to load from the new location (bacpypes 0.19+)
+    try:
+        local_device_mod = importlib.import_module("bacpypes.local.device")
+    except ImportError:
+        _log.debug("Neither bacpypes.service.device nor bacpypes.local.device found, skipping shim")
+        return
+
+    # Create fake bacpypes.service package if it doesn't exist
+    if "bacpypes.service" not in sys.modules:
+        bacpypes_service = ModuleType("bacpypes.service")
+        bacpypes_service.__path__ = []
+        bacpypes_service.__package__ = "bacpypes.service"
+        bacpypes_service.__file__ = "<bacpypes-compat>"
+        sys.modules["bacpypes.service"] = bacpypes_service
+        _log.debug("Created bacpypes.service shim package")
+
+    # Create fake bacpypes.service.device module with LocalDeviceObject
+    bacpypes_service_device = ModuleType("bacpypes.service.device")
+    bacpypes_service_device.__package__ = "bacpypes.service"
+    bacpypes_service_device.__file__ = "<bacpypes-compat>"
+    bacpypes_service_device.LocalDeviceObject = local_device_mod.LocalDeviceObject
+    sys.modules["bacpypes.service.device"] = bacpypes_service_device
+    _log.info("Installed bacpypes compat shim: bacpypes.service.device -> bacpypes.local.device")
+
+
 def install_volttron_compatibility():
     """
     Install the VOLTTRON import redirector.
@@ -167,6 +209,9 @@ def install_volttron_compatibility():
             volttron_module.__file__ = "<aems-compat>"
             sys.modules["volttron"] = volttron_module
             _log.debug("Created volttron top-level package")
+
+        # Install bacpypes version compatibility shims
+        _install_bacpypes_compat()
 
         _log.info("VOLTTRON compatibility layer installed")
     else:
