@@ -72,7 +72,7 @@ historians = [
     "ply>=3.11",               # For SQLHistorian (lexer/parser for table definitions)
     # Optional database drivers - install only what you need:
     # "mysql-connector-python>=8.0.33",  # For SQLHistorian with MySQL backend
-    # "psycopg2-binary>=2.9.0",          # For SQLHistorian with PostgreSQL/Redshift backend
+    "psycopg2-binary>=2.9.0",          # For SQLHistorian with PostgreSQL/Redshift backend
     # "paho-mqtt>=1.6.0",                # For MQTTHistorian
 ]
 

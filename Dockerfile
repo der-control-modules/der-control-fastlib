@@ -75,9 +75,8 @@ RUN /app/.venv/bin/pip install -e ".[historians,drivers,ilc,weather,manager]"
 # Expose the default AEMS server port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health/ || exit 1
+# Note: Healthchecks are defined per-container in docker-compose.yml
+# The server checks localhost:8000/health/; agents check their connection via the server.
 
 # Set the PATH to include the virtual environment
 ENV PATH="/app/.venv/bin:$PATH"

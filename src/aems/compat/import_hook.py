@@ -34,6 +34,9 @@ class VolttronImportRedirector(MetaPathFinder, Loader):
         "volttron.platform.agent": "aems.compat.shims.platform_agent",
         # Database utilities
         "volttron.platform.dbutils": "aems.compat.shims.dbutils",
+        "volttron.platform.dbutils.basedb": "aems.compat.shims.dbutils_basedb",
+        "volttron.platform.dbutils.sqlutils": "aems.compat.shims.dbutils_sqlutils",
+        "volttron.platform.dbutils.postgresqlfuncts": "aems.compat.shims.dbutils_postgresqlfuncts",
         # Messaging and health
         "volttron.platform.messaging.headers": "aems.compat.shims.messaging_headers",
         "volttron.platform.messaging.health": "aems.compat.shims.health",
