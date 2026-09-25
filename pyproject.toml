@@ -40,7 +40,7 @@ dynamic = ["version"]
 [project.optional-dependencies]
 # Dependencies for development
 dev = [
-    "black>=24.0.0",
+    "black>=26.5.1",
     "pylint>=3.0.0",
     "flake8>=7.0.0",
     "flake8-pyproject>=1.2.0",
