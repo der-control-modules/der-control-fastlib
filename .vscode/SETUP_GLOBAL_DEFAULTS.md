@@ -7,7 +7,7 @@ Since you're on a remote system, you can configure VSCode to use Ruff by default
 1. **Open User Settings (Remote)**
    - Press `Ctrl+Shift+P` (Command Palette)
    - Type: "Preferences: Open Remote Settings (SSH: hostname)"
-   - Or: File → Preferences → Settings → Make sure you're on the "Remote" tab
+   - Or: File -> Preferences -> Settings -> Make sure you're on the "Remote" tab
 
 2. **Search and Configure**
    - Search for: `python.linting.pylintEnabled`
@@ -23,7 +23,7 @@ Since you're on a remote system, you can configure VSCode to use Ruff by default
    - Set Default Formatter to: `Ruff`
 
 3. **Install Ruff Extension**
-   - Extensions → Search "Ruff" → Install
+   - Extensions -> Search "Ruff" -> Install
    - This installs on the remote server
 
 ## Method 2: Edit Settings JSON Directly (Faster)
@@ -70,7 +70,7 @@ Since you're on a remote system, you can configure VSCode to use Ruff by default
 
 3. **Save and Reload**
    - Save the file
-   - Press `Ctrl+Shift+P` → "Developer: Reload Window"
+   - Press `Ctrl+Shift+P` -> "Developer: Reload Window"
 
 ## Method 3: Create a Python Profile (VSCode Profiles)
 
@@ -87,7 +87,7 @@ VSCode Profiles let you save and reuse settings across projects.
    - Install the Ruff extension
 
 3. **Use the Profile**
-   - Click the gear icon (⚙️) in bottom left
+   - Click the gear icon in bottom left
    - Select: "Python with Ruff"
    - This profile is now active and can be used in any workspace
 
@@ -127,16 +127,16 @@ If you want to use THIS project's exact settings globally:
 
 ```bash
 # View current project settings
-cat /home/volttron/aems-lib-fastapi/.vscode/settings.json
+cat /path/to/der-control-fastlib/.vscode/settings.json
 
 # Copy to remote user settings
-cp /home/volttron/aems-lib-fastapi/.vscode/settings.json ~/.vscode-server/data/Machine/settings.json
+cp /path/to/der-control-fastlib/.vscode/settings.json ~/.vscode-server/data/Machine/settings.json
 
 # Reload VSCode
-# Ctrl+Shift+P → "Developer: Reload Window"
+# Ctrl+Shift+P -> "Developer: Reload Window"
 ```
 
-⚠️ **Warning:** This will overwrite your existing global settings!
+**Warning:** This will overwrite your existing global settings!
 
 ## Recommended Approach
 
@@ -147,10 +147,10 @@ cp /home/volttron/aems-lib-fastapi/.vscode/settings.json ~/.vscode-server/data/M
 4. All future Python projects will use Ruff by default
 
 **Benefits:**
-- ✅ Works for all Python projects on this remote
-- ✅ Individual projects can override if needed (via workspace settings)
-- ✅ No need to configure each project
-- ✅ Consistent development experience
+- Works for all Python projects on this remote
+- Individual projects can override if needed (via workspace settings)
+- No need to configure each project
+- Consistent development experience
 
 ## Testing
 

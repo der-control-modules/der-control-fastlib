@@ -6,24 +6,24 @@ This repository uses GitHub Actions for automated testing, building, and releasi
 
 ### 1. CI (`ci.yml`)
 **Triggers**: Push to main/develop, Pull Requests
-- ✅ Runs tests on Python 3.10, 3.11, 3.12
-- ✅ Code formatting checks (Black)
-- ✅ Linting (Pylint + flake8)
-- ✅ Security scanning (Safety + Bandit)
-- ✅ Build verification
+- Runs tests on Python 3.10, 3.11, 3.12
+- Code formatting checks (Black)
+- Linting (Pylint + flake8)
+- Security scanning (Safety + Bandit)
+- Build verification
 
 ### 2. Release (`release.yml`)
 **Triggers**: Git tag push (v*)
-- ✅ Tag verification (matches expected branch)
-- ✅ Quality checks and build
-- ✅ GitHub Release creation
-- ✅ PyPI publishing (final releases only)
-- ✅ Test server notifications (pre-releases only)
+- Tag verification (matches expected branch)
+- Quality checks and build
+- GitHub Release creation
+- PyPI publishing (final releases only)
+- Test server notifications (pre-releases only)
 
 ### 3. Dependency Updates (`update-deps.yml`)
 **Triggers**: Weekly schedule + manual
-- ✅ Automated dependency updates
-- ✅ Pull request creation
+- Automated dependency updates
+- Pull request creation
 
 ## Release Workflow
 
@@ -71,7 +71,7 @@ git push origin v1.2.3
 
 - **`main`**: Production-ready code, **final releases only**
 - **`develop`**: Integration branch, **pre-releases and testing**
-- **Feature branches**: `feature/xyz` → merge to `develop`
+- **Feature branches**: `feature/xyz` -> merge to `develop`
 
 ## Complete Development Workflow
 
@@ -116,12 +116,12 @@ git push origin v0.2.1-alpha.1
 ```
 
 **What happens**:
-- ✅ **Tag created**: `v0.2.1-alpha.1`
-- ✅ GitHub Actions triggers release workflow
-- ✅ Creates GitHub **pre-release**
-- ✅ Notifies test servers via webhook
-- ❌ Does NOT publish to PyPI
-- ❌ Does NOT affect main branch
+- **Tag created**: `v0.2.1-alpha.1`
+- GitHub Actions triggers release workflow
+- Creates GitHub **pre-release**
+- Notifies test servers via webhook
+- Does NOT publish to PyPI
+- Does NOT affect main branch
 
 ### 4. Test and Iterate Pre-releases
 ```bash
@@ -143,34 +143,34 @@ git merge develop
 git push origin main
 
 # Create final production release
-./dev.py version release    # v0.2.1-beta.1 → v0.2.1
+./dev.py version release    # v0.2.1-beta.1 -> v0.2.1
 # OR
-./dev.py version minor      # v0.2.0 → v0.3.0 (if significant changes)
+./dev.py version minor      # v0.2.0 -> v0.3.0 (if significant changes)
 
 git push origin v0.3.0
 ```
 
 **What happens**:
-- ✅ **Tag created**: `v0.3.0` (final release)
-- ✅ GitHub Actions triggers release workflow
-- ✅ Creates GitHub **release** (not pre-release)
-- ✅ Publishes to PyPI (requires manual approval)
-- ❌ Does NOT notify test servers (production is live)
+- **Tag created**: `v0.3.0` (final release)
+- GitHub Actions triggers release workflow
+- Creates GitHub **release** (not pre-release)
+- Publishes to PyPI (requires manual approval)
+- Does NOT notify test servers (production is live)
 
 ## Tag Strategy Summary
 
 | Branch | Tag Type | Example | Purpose | PyPI | Test Servers |
 |--------|----------|---------|---------|------|--------------|
-| `feature/*` | ❌ None | - | Development | ❌ | ❌ |
-| `develop` | 🧪 Pre-release | `v0.3.0-alpha.1` | Testing | ❌ | ✅ |
-| `develop` | 🧪 Pre-release | `v0.3.0-beta.1` | Staging | ❌ | ✅ |
-| `main` | 🚀 Final | `v0.3.0` | Production | ✅ | ❌ |
+| `feature/*` | None | - | Development | No | No |
+| `develop` | Pre-release | `v0.3.0-alpha.1` | Testing | No | Yes |
+| `develop` | Pre-release | `v0.3.0-beta.1` | Staging | No | Yes |
+| `main` | Final | `v0.3.0` | Production | Yes | No |
 
 ## Real-World Example: Adding Version Endpoints
 
 Let's trace through exactly what we just did:
 
-### Step 1: Feature Development ✅ (Completed)
+### Step 1: Feature Development (Completed)
 ```bash
 # We added version endpoints to the code
 # We have fork management commands
@@ -190,24 +190,24 @@ Since we have significant new features (version endpoints, fork management), we 
 
 ```bash
 # Option A: Direct production release (if confident)
-./dev.py version minor      # v0.2.0 → v0.3.0
+./dev.py version minor      # v0.2.0 -> v0.3.0
 git push origin v0.3.0
 
 # Option B: Start with pre-release testing (safer)
-./dev.py version alpha      # v0.2.0 → v0.2.1-alpha.1
+./dev.py version alpha      # v0.2.0 -> v0.2.1-alpha.1
 git push origin v0.2.1-alpha.1
 ```
 
 ### Step 4: After New Tag is Created
-- ✅ `/version` endpoint will return the new version
-- ✅ GitHub Actions will trigger
-- ✅ Release will be created with our new features
-- ✅ Version detection works perfectly
+- `/version` endpoint will return the new version
+- GitHub Actions will trigger
+- Release will be created with our new features
+- Version detection works perfectly
 
 ## Key Insight: Tags Follow Features, Not Branches
 
-- 🚫 **Wrong thinking**: "I need a tag to merge to develop"
-- ✅ **Correct thinking**: "I have new features, so I need a tag to release them"
+- **Wrong thinking**: "I need a tag to merge to develop"
+- **Correct thinking**: "I have new features, so I need a tag to release them"
 
 **Your version detection is working perfectly!** It's showing `v0.2.0` because that's the latest tag, and we haven't tagged our new features yet.
 
@@ -225,7 +225,7 @@ The system can automatically notify test servers when pre-releases are created:
 {
   "action": "deploy",
   "version": "1.2.3-alpha.1",
-  "repository": "aems-lib-fastapi",
+  "repository": "der-control-fastlib",
   "timestamp": "2025-08-01T10:30:00+00:00"
 }
 ```

@@ -59,10 +59,10 @@ jobs:
           echo "Expected branch: $EXPECTED_BRANCH"
 
           if [ "$TAG_COMMIT" != "$BRANCH_COMMIT" ]; then
-            echo "⚠️ Warning: Tag doesn't match expected branch head"
+            echo "Warning: Tag doesn't match expected branch head"
             echo "This may indicate the tag was created from an unexpected commit"
           else
-            echo "✅ Tag matches expected branch head"
+            echo "Tag matches expected branch head"
           fi
 
   build-and-test:
@@ -126,14 +126,14 @@ jobs:
           else
             echo "## Initial Release" > release_notes.md
             echo "" >> release_notes.md
-            echo "First release of aems-lib-fastapi" >> release_notes.md
+            echo "First release of der-control-fastlib" >> release_notes.md
           fi
 
           echo "" >> release_notes.md
           echo "## Installation" >> release_notes.md
           echo "" >> release_notes.md
           echo "\`\`\`bash" >> release_notes.md
-          echo "pip install aems-lib-fastapi==$VERSION" >> release_notes.md
+          echo "pip install der-control-fastlib==$VERSION" >> release_notes.md
           echo "\`\`\`" >> release_notes.md
 
       - name: Create GitHub Release
@@ -166,10 +166,10 @@ jobs:
           TEST_SERVER_TOKEN: ${{ secrets.TEST_SERVER_TOKEN }}
         run: |
           if [ -n "$TEST_SERVER_URL" ]; then
-            echo "🔄 Notifying test servers of new pre-release..."
-            python dev.py trigger-update "$TEST_SERVER_URL" "$TEST_SERVER_TOKEN" || echo "⚠️ Failed to notify test server"
+            echo "Notifying test servers of new pre-release..."
+            python dev.py trigger-update "$TEST_SERVER_URL" "$TEST_SERVER_TOKEN" || echo "Failed to notify test server"
           else
-            echo "ℹ️ No test server webhook configured"
+            echo "No test server webhook configured"
           fi
 
   publish-to-pypi:
