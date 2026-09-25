@@ -9,6 +9,6 @@ export VOLTTRON_HOME="$SCRIPT_DIR/.volttron_home"
 echo "Starting AEMS Server..."
 echo "VOLTTRON_HOME: $VOLTTRON_HOME"
 
-"$SCRIPT_DIR/.venv/bin/python" -m aems.server.fastapi_message_bus \
+"$SCRIPT_DIR/.venv/bin/python" -m derhost.server.fastapi_message_bus \
     --host 0.0.0.0 \
     --port 8000

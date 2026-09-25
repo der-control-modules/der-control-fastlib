@@ -6,7 +6,7 @@ Test to check if onstart is still being called twice
 import gevent
 import pytest
 
-from aems.client.agent import Agent, Core
+from derhost.client.agent import Agent, Core
 
 
 class DuplicateTestAgent(Agent):

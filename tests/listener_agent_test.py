@@ -7,7 +7,7 @@ import sys
 import gevent
 from listener_agent import ListenerAgent
 
-from aems.client.agent import Agent
+from derhost.client.agent import Agent
 
 
 def run_listener_test():

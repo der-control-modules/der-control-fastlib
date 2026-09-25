@@ -6,7 +6,7 @@ Test configuration subscription and UPDATE notification behavior
 import gevent
 import pytest
 
-from aems.client.agent import Agent
+from derhost.client.agent import Agent
 
 
 class ConfigSubscriptionTestAgent(Agent):

@@ -8,8 +8,8 @@ import socket
 import tempfile
 import time
 
-from aems.client.agent import Agent
-from aems.server.fastapi_message_bus import FastAPIMessageBus
+from derhost.client.agent import Agent
+from derhost.server.fastapi_message_bus import FastAPIMessageBus
 
 
 def get_random_open_port() -> int:

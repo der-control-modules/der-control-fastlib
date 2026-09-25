@@ -6,7 +6,7 @@ import time
 
 import httpx
 
-from aems.client.agent import Agent, Core
+from derhost.client.agent import Agent, Core
 from tests.utils import (
     MessageBusManager,
     create_connected_test_agent,

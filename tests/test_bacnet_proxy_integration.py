@@ -18,8 +18,8 @@ import gevent
 import pytest
 from gevent.event import AsyncResult
 
-from aems.client.agent import Agent
-from aems.compat.import_hook import install_volttron_compatibility
+from derhost.client.agent import Agent
+from derhost.compat.import_hook import install_volttron_compatibility
 
 # Install VOLTTRON compatibility hooks for BACnet proxy imports
 install_volttron_compatibility()

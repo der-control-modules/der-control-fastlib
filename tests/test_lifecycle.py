@@ -6,7 +6,7 @@ Comprehensive test for agent lifecycle signals
 import gevent
 import pytest
 
-from aems.client.agent import Agent, Core
+from derhost.client.agent import Agent, Core
 
 
 class LifecycleTestAgent(Agent):

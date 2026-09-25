@@ -6,7 +6,7 @@ Tests fnmatch-style patterns for config callbacks.
 import gevent
 import pytest
 
-from aems.client.agent import Agent
+from derhost.client.agent import Agent
 
 
 class PatternMatchingAgent(Agent):

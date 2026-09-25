@@ -5,8 +5,8 @@ Provides: platform namespace as a proper package
 """
 
 # Import submodules to make them available as attributes
-from aems.client.jsonrpc import RemoteError
-from aems.compat.shims import messaging as messaging_module, platform_agent, vip as vip_module
+from derhost.client.jsonrpc import RemoteError
+from derhost.compat.shims import messaging as messaging_module, platform_agent, vip as vip_module
 
 # Make submodules available as package attributes
 agent = platform_agent

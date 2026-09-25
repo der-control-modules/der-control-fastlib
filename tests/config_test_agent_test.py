@@ -5,7 +5,7 @@ import sys
 import gevent
 from config_test_agent import ConfigTestAgent
 
-from aems.client.agent import Agent
+from derhost.client.agent import Agent
 
 
 def run_config_test():

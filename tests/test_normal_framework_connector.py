@@ -6,7 +6,7 @@ Test to simulate the NormalFrameworkConnector agent onstart issue
 import gevent
 import pytest
 
-from aems.client.agent import Agent, Core
+from derhost.client.agent import Agent, Core
 
 
 class MockNormalFrameworkConnector(Agent):

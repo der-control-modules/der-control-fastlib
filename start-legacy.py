@@ -95,12 +95,12 @@ def setup_logging(debug=False, log_file=None, keep=False):
     # Also enable for __main__ since agents run as main module
     logging.getLogger("__main__").setLevel(logging.DEBUG)
     # Enable DEBUG for platform shims to see AsyncCall activity
-    logging.getLogger("aems.compat.shims.platform").setLevel(logging.DEBUG)
+    logging.getLogger("derhost.compat.shims.platform").setLevel(logging.DEBUG)
 
     if debug:
         # Enable debug logging for key AEMS modules
-        logging.getLogger("aems.client.agent").setLevel(logging.DEBUG)
-        logging.getLogger("aems.compat").setLevel(logging.DEBUG)
+        logging.getLogger("derhost.client.agent").setLevel(logging.DEBUG)
+        logging.getLogger("derhost.compat").setLevel(logging.DEBUG)
         logging.getLogger("websocket").setLevel(logging.DEBUG)
     else:
         # Keep websocket quiet unless in debug mode
@@ -417,12 +417,12 @@ def main():
             sys.path.insert(0, str(src_path))
             _log.debug(f"Added to sys.path for AEMS modules: {src_path}")
 
-        from aems.compat import install_volttron_compatibility
+        from derhost.compat import install_volttron_compatibility
 
         install_volttron_compatibility()
         _log.debug("VOLTTRON compatibility layer installed")
 
-        from aems.compat.shims.platform_agent import utils  # noqa: F401
+        from derhost.compat.shims.platform_agent import utils  # noqa: F401
 
     except ImportError as e:
         _log.error(f"Failed to import AEMS compatibility layer: {e}")

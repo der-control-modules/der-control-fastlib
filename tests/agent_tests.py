@@ -2,7 +2,7 @@
 
 import gevent
 
-from aems.client.agent import Agent
+from derhost.client.agent import Agent
 
 
 def run_publisher_subscriber_test():

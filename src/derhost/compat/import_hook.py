@@ -25,31 +25,31 @@ class VolttronImportRedirector(MetaPathFinder, Loader):
     # Mapping of VOLTTRON modules to AEMS equivalents
     REDIRECT_MAP = {
         # Core agent imports
-        "volttron.platform.vip.agent.errors": "aems.compat.shims.vip_agent_errors",
-        "volttron.platform.vip.agent": "aems.compat.shims.vip_agent",
-        "volttron.platform.agent.base_historian": "aems.compat.shims.base_historian",
-        "volttron.platform.agent.base_weather": "aems.compat.shims.base_weather",
-        "volttron.platform.agent.math_utils": "aems.compat.shims.math_utils",
-        "volttron.platform.agent.known_identities": "aems.compat.shims.known_identities",
-        "volttron.platform.agent": "aems.compat.shims.platform_agent",
+        "volttron.platform.vip.agent.errors": "derhost.compat.shims.vip_agent_errors",
+        "volttron.platform.vip.agent": "derhost.compat.shims.vip_agent",
+        "volttron.platform.agent.base_historian": "derhost.compat.shims.base_historian",
+        "volttron.platform.agent.base_weather": "derhost.compat.shims.base_weather",
+        "volttron.platform.agent.math_utils": "derhost.compat.shims.math_utils",
+        "volttron.platform.agent.known_identities": "derhost.compat.shims.known_identities",
+        "volttron.platform.agent": "derhost.compat.shims.platform_agent",
         # Database utilities
-        "volttron.platform.dbutils": "aems.compat.shims.dbutils",
+        "volttron.platform.dbutils": "derhost.compat.shims.dbutils",
         # Messaging and health
-        "volttron.platform.messaging.headers": "aems.compat.shims.messaging_headers",
-        "volttron.platform.messaging.health": "aems.compat.shims.health",
-        "volttron.platform.messaging": "aems.compat.shims.messaging",
+        "volttron.platform.messaging.headers": "derhost.compat.shims.messaging_headers",
+        "volttron.platform.messaging.health": "derhost.compat.shims.health",
+        "volttron.platform.messaging": "derhost.compat.shims.messaging",
         # Subsystems
-        "volttron.platform.vip.agent.subsystems.query": "aems.compat.shims.query",
-        "volttron.platform.vip.agent.subsystems.heartbeat": "aems.compat.shims.heartbeat",
-        "volttron.platform.vip.agent.subsystems": "aems.compat.shims.subsystems",
+        "volttron.platform.vip.agent.subsystems.query": "derhost.compat.shims.query",
+        "volttron.platform.vip.agent.subsystems.heartbeat": "derhost.compat.shims.heartbeat",
+        "volttron.platform.vip.agent.subsystems": "derhost.compat.shims.subsystems",
         # VIP base
-        "volttron.platform.vip": "aems.compat.shims.vip",
+        "volttron.platform.vip": "derhost.compat.shims.vip",
         # Platform base
-        "volttron.platform.jsonapi": "aems.compat.shims.jsonapi",
-        "volttron.platform": "aems.compat.shims.platform",
+        "volttron.platform.jsonapi": "derhost.compat.shims.jsonapi",
+        "volttron.platform": "derhost.compat.shims.platform",
         # Utils
-        "volttron.utils.docs": "aems.compat.shims.utils_docs",
-        "volttron.utils": "aems.compat.shims.utils",
+        "volttron.utils.docs": "derhost.compat.shims.utils_docs",
+        "volttron.utils": "derhost.compat.shims.utils",
     }
 
     def __init__(self):
