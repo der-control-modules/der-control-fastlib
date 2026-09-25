@@ -75,7 +75,7 @@ def trigger_update(server_url=None, token=None):
         payload = {
             "action": "deploy",
             "version": current_version,
-            "repository": "aems-lib-fastapi",
+            "repository": "der-control-fastlib",
             "timestamp": subprocess.run("date -Iseconds", shell=True, capture_output=True, text=True).stdout.strip(),
         }
 
@@ -433,12 +433,12 @@ def setup_upstream(upstream_url=None):
 
     Examples
     --------
-        >>> setup_upstream("https://github.com/VOLTTRON/aems-lib-fastapi.git")
+        >>> setup_upstream("https://github.com/der-control-modules/der-control-fastlib.git")
     """
     if not upstream_url:
         print("Error: No upstream URL provided")
         print("Usage: ./dev.py setup-upstream <upstream_url>")
-        print("Example: ./dev.py setup-upstream https://github.com/VOLTTRON/aems-lib-fastapi.git")
+        print("Example: ./dev.py setup-upstream https://github.com/der-control-modules/der-control-fastlib.git")
         return False
 
     # Check if upstream already exists
@@ -660,7 +660,7 @@ def prepare_pr():
             return False
 
     print("Branch is ready for pull request!")
-    print(f"Create PR at: https://github.com/VOLTTRON/aems-lib-fastapi/compare/{current_branch}")
+    print(f"Create PR at: https://github.com/der-control-modules/der-control-fastlib/compare/{current_branch}")
     return True
 
 
@@ -1020,7 +1020,7 @@ Server Integration:
   ./dev.py trigger-update <url> <tok> # With authentication token
 
 Fork Workflow:
-  ./dev.py setup-upstream https://github.com/VOLTTRON/aems-lib-fastapi.git
+  ./dev.py setup-upstream https://github.com/der-control-modules/der-control-fastlib.git
   ./dev.py sync-fork                  # Sync with upstream changes
   ./dev.py create-pr-branch feature/my-feature # Create feature branch
   ./dev.py prepare-pr                 # Quality check and push for PR
