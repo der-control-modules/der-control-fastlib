@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GENERATOR = REPO_ROOT / "generate-docker-compose.py"
 START_SERVER = REPO_ROOT / "start-server"
@@ -56,6 +58,25 @@ def test_generator_publish_host_override_is_not_loopback() -> None:
     assert line.startswith('- "0.0.0.0:'), line
 
 
+def test_generator_publish_host_empty_is_loopback() -> None:
+    # An explicitly empty value is unset, not a literal address to publish.
+    line = _server_port_line(_generate({"DERHOST_PUBLISH_HOST": ""}))
+    assert line.startswith('- "127.0.0.1:'), line
+
+
+def test_generator_publish_host_rejects_non_ip() -> None:
+    # Control: a well-formed override (the test above) succeeds, so a
+    # failure here is the rejection, not an unrelated crash.
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
+        _generate({"DERHOST_PUBLISH_HOST": "not-an-ip"})
+    assert "not a valid IP address" in excinfo.value.stderr
+
+
+def test_generator_publish_host_ipv6_is_bracketed() -> None:
+    line = _server_port_line(_generate({"DERHOST_PUBLISH_HOST": "::1"}))
+    assert line.startswith('- "[::1]:'), line
+
+
 def _start_server_host_arg(tmp_path: Path, extra_env: dict[str, str] | None = None) -> str:
     """Run start-server against a stub python that records its --host value."""
     venv_bin = tmp_path / ".venv" / "bin"
@@ -85,6 +106,8 @@ def test_start_server_binds_loopback_by_default(tmp_path: Path) -> None:
 
 
 def test_start_server_host_override(tmp_path: Path) -> None:
-    # Control: proves the assertion above can fail, since the override must
-    # differ from the default.
-    assert _start_server_host_arg(tmp_path, {"DERHOST_HOST": "0.0.0.0"}) == "0.0.0.0"
+    # Control: proves the assertion above can fail. A non-default value is
+    # required here: base hardcodes --host 0.0.0.0 and ignores DERHOST_HOST
+    # entirely, so an override of "0.0.0.0" would pass on base too, by
+    # coincidence rather than because the override is wired.
+    assert _start_server_host_arg(tmp_path, {"DERHOST_HOST": "192.0.2.1"}) == "192.0.2.1"
