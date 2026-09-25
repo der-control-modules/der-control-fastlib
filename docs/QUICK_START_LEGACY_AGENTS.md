@@ -1,6 +1,6 @@
 # Quick Start: Running Legacy VOLTTRON Agents on AEMS
 
-## ⚠️ Important Prerequisites
+## Important Prerequisites
 
 ### You MUST Have a VOLTTRON Clone
 
@@ -141,17 +141,17 @@ pip install -e ".[ilc]"
 
 ## Supported Features
 
-✅ `@RPC.export` - Export RPC methods
-✅ `@PubSub.subscribe()` - Subscribe to topics
-✅ `@Core.receiver()` - Handle lifecycle events
-✅ `@Core.periodic()` - Periodic tasks
-✅ `utils.load_config()` - Load configuration
-✅ `utils.vip_main()` - Main entry point
-✅ `vip.heartbeat` - Heartbeat publishing
-✅ `vip.health` - Health status
-✅ `vip.rpc.call()` - RPC calls
-✅ `vip.pubsub.publish()` - Publish messages
-✅ Config Store integration - Agent configs auto-loaded
+- `@RPC.export` - Export RPC methods
+- `@PubSub.subscribe()` - Subscribe to topics
+- `@Core.receiver()` - Handle lifecycle events
+- `@Core.periodic()` - Periodic tasks
+- `utils.load_config()` - Load configuration
+- `utils.vip_main()` - Main entry point
+- `vip.heartbeat` - Heartbeat publishing
+- `vip.health` - Health status
+- `vip.rpc.call()` - RPC calls
+- `vip.pubsub.publish()` - Publish messages
+- Config Store integration - Agent configs auto-loaded
 
 ## Command-Line Options
 
@@ -211,9 +211,9 @@ curl http://localhost:8000/health/
 ```bash
 # Ensure agent directory has proper structure:
 # AgentDir/
-#   ├── package_name/
-#   │   ├── __init__.py
-#   │   └── agent.py
+#   +-- package_name/
+#   |   +-- __init__.py
+#   |   +-- agent.py
 ```
 
 ### "Config file not found"

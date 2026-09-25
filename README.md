@@ -4,7 +4,7 @@
 
 AEMS FastAPI provides a **100% VOLTTRON-compatible agent communication library** built on modern FastAPI and WebSocket technology. This library enables Python applications to use VOLTTRON's proven agent patterns (RPC, PubSub, Config Store, Scheduling) without requiring the full VOLTTRON platform infrastructure.
 
-> **⚠️ Important for Legacy Agent Users:**
+> **Important for Legacy Agent Users:**
 >
 > To run existing VOLTTRON agents with the legacy launcher (`start-legacy.py`), you **must have a local clone of VOLTTRON**. The launcher provides the runtime platform, but the agent source code comes from the VOLTTRON repository.
 >
@@ -16,22 +16,22 @@ AEMS FastAPI provides a **100% VOLTTRON-compatible agent communication library**
 > ```
 
 **Key Benefits:**
-- ✅ **Drop-in VOLTTRON compatibility** - Use familiar `@RPC.export`, `@config.subscribe`, `@periodic` decorators
-- ✅ **Modern FastAPI backend** - WebSocket-based communication, REST APIs, automatic OpenAPI docs
-- ✅ **Zero infrastructure overhead** - No ZMQ brokers, no complex platform setup
-- ✅ **Production ready** - Comprehensive test coverage, proven in AEMS energy management systems
+- **Drop-in VOLTTRON compatibility** - Use familiar `@RPC.export`, `@config.subscribe`, `@periodic` decorators
+- **Modern FastAPI backend** - WebSocket-based communication, REST APIs, automatic OpenAPI docs
+- **Zero infrastructure overhead** - No ZMQ brokers, no complex platform setup
+- **Production ready** - Comprehensive test coverage, proven in AEMS energy management systems
 
 ## Architecture
 
 ```
-┌─────────────────────┐    WebSocket    ┌──────────────────────────┐
-│   VOLTTRON Agent    │ ──────────────→ │   FastAPI Message Bus    │
-│                     │                 │                          │
-│ • RPC Methods       │                 │ • Agent Management       │
-│ • PubSub Topics     │                 │ • Message Routing        │
-│ • Config Store      │ ←────────────── │ • Config Store           │
-│ • Periodic Tasks    │    HTTP REST    │ • Health Monitoring      │
-└─────────────────────┘                 └──────────────────────────┘
++---------------------+    WebSocket    +--------------------------+
+|   VOLTTRON Agent    | --------------> |   FastAPI Message Bus    |
+|                     |                 |                          |
+| * RPC Methods       |                 | * Agent Management       |
+| * PubSub Topics     |                 | * Message Routing        |
+| * Config Store      | <-------------- | * Config Store           |
+| * Periodic Tasks    |    HTTP REST    | * Health Monitoring      |
++---------------------+                 +--------------------------+
 ```
 
 ## Quick Start
@@ -75,7 +75,7 @@ aems-server --host 0.0.0.0 --port 9000
 
 **Option A: Run Existing VOLTTRON Agents (No Code Changes)**
 
-> **⚠️ Important:** You must have a local clone of VOLTTRON to use the legacy agent launcher. The launcher runs agents from the VOLTTRON source code repository.
+> **Important:** You must have a local clone of VOLTTRON to use the legacy agent launcher. The launcher runs agents from the VOLTTRON source code repository.
 
 ```bash
 # First, clone VOLTTRON if you don't have it
@@ -134,7 +134,7 @@ except KeyboardInterrupt:
 
 ## Core Features
 
-### 🔄 **RPC (Remote Procedure Calls)**
+### **RPC (Remote Procedure Calls)**
 ```python
 # Export methods for other agents to call
 @RPC.export
@@ -145,7 +145,7 @@ def calculate_setpoint(self, current_temp, target_temp):
 result = agent.vip.rpc.call("thermostat_agent", "set_temperature", 72.5)
 ```
 
-### 📢 **PubSub (Publish/Subscribe Messaging)**
+### **PubSub (Publish/Subscribe Messaging)**
 ```python
 # Subscribe to topics
 agent.vip.pubsub.subscribe("", "sensors/temperature", self.on_temperature)
@@ -154,7 +154,7 @@ agent.vip.pubsub.subscribe("", "sensors/temperature", self.on_temperature)
 agent.vip.pubsub.publish("", "actuators/damper", {"position": 45})
 ```
 
-### ⚙️ **Config Store**
+### **Config Store**
 ```python
 # React to configuration changes
 @config.subscribe("device_settings")
@@ -166,7 +166,7 @@ def on_device_config(self, config_name, action, contents):
 config = agent.vip.config.get("device_settings")
 ```
 
-### ⏰ **Scheduling & Periodic Tasks**
+### **Scheduling & Periodic Tasks**
 ```python
 # Periodic execution
 @periodic(60)  # Every 60 seconds
@@ -182,7 +182,7 @@ agent.core.schedule("0 */6 * * *", self.daily_report)  # Every 6 hours
 
 The **start-legacy.py** script enables running existing VOLTTRON agents without any code modifications. It provides a compatibility layer that transparently redirects VOLTTRON imports to AEMS equivalents.
 
-> **📋 Prerequisites:**
+> **Prerequisites:**
 > - AEMS installed with optional dependencies (if needed): `pip install -e ".[historians,drivers,ilc]"`
 > - **A local clone of VOLTTRON** containing the agent source code
 >
@@ -229,9 +229,9 @@ This makes it easy to verify the agent is reading from the correct location.
 ### Supported Agents
 
 Successfully tested with:
-- ✅ **ListenerAgent** - Basic agent with pub/sub
-- ✅ **PlatformDriverAgent** - Complex agent with custom `__init__` parameters
-- ✅ **Custom agents** - Any VOLTTRON agent following standard patterns
+- **ListenerAgent** - Basic agent with pub/sub
+- **PlatformDriverAgent** - Complex agent with custom `__init__` parameters
+- **Custom agents** - Any VOLTTRON agent following standard patterns
 
 ### Graceful Shutdown
 
@@ -247,13 +247,13 @@ This library provides **100% API compatibility** with VOLTTRON's core agent comm
 
 | VOLTTRON Feature | Compatibility | Status |
 |------------------|---------------|---------|
-| `@RPC.export` decorator | ✅ 100% | All method signatures and behaviors match |
-| `vip.rpc.call()` | ✅ 100% | Peer-to-peer RPC with identical interface |
-| `vip.pubsub` subscribe/publish | ✅ 100% | Topic patterns, message routing, headers |
-| `@config.subscribe()` | ✅ 100% | Configuration callbacks without duplicates |
-| `@periodic()` decorator | ✅ 100% | Interval-based tasks with proper cleanup |
-| `core.schedule()` cron | ✅ 100% | Cron expressions and event scheduling |
-| Agent lifecycle | ✅ 100% | Connect, disconnect, health monitoring |
+| `@RPC.export` decorator | 100% | All method signatures and behaviors match |
+| `vip.rpc.call()` | 100% | Peer-to-peer RPC with identical interface |
+| `vip.pubsub` subscribe/publish | 100% | Topic patterns, message routing, headers |
+| `@config.subscribe()` | 100% | Configuration callbacks without duplicates |
+| `@periodic()` decorator | 100% | Interval-based tasks with proper cleanup |
+| `core.schedule()` cron | 100% | Cron expressions and event scheduling |
+| Agent lifecycle | 100% | Connect, disconnect, health monitoring |
 
 **Not Included:** VOLTTRON platform security features (ZMQ encryption, ZAP authentication) - use standard web security practices instead.
 
@@ -341,29 +341,29 @@ The config store is located at `$VOLTTRON_HOME/aems_config_store/` by default. E
 
 ```
 ~/.volttron/aems_config_store/
-├── platform.driver/
-│   ├── devices/PNNL/BUILDING/DEVICE
-│   └── registry_configs/device.csv
-├── platform.historian/
-│   └── config
-└── ilc.platform/
-    └── config
++-- platform.driver/
+|   +-- devices/PNNL/BUILDING/DEVICE
+|   +-- registry_configs/device.csv
++-- platform.historian/
+|   +-- config
++-- ilc.platform/
+    +-- config
 ```
 
 ## Use Cases
 
-### 🏢 **Building Energy Management**
+### **Building Energy Management**
 - HVAC control agents communicating via RPC
 - Sensor data published via PubSub topics
 - Configuration-driven device management
 - Scheduled optimization routines
 
-### 🔌 **IoT Device Integration**
+### **IoT Device Integration**
 - Lightweight agent communication without VOLTTRON platform
 - Modern web-based APIs for external integration
 - Real-time data streaming via WebSockets
 
-### 🧪 **VOLTTRON Development & Testing**
+### **VOLTTRON Development & Testing**
 - Test VOLTTRON agent logic without full platform setup
 - Develop agents with modern Python tooling
 - Prototype agent interactions quickly
@@ -397,12 +397,12 @@ Use the **legacy agent launcher** to run existing VOLTTRON agents with zero code
 ```
 
 **Features:**
-- ✅ **Zero code changes** - Run existing VOLTTRON agents as-is
-- ✅ **Auto-detection** - Automatically finds agent module and class
-- ✅ **Import compatibility** - Transparent redirection of VOLTTRON imports to AEMS
-- ✅ **Config support** - Loads agent configs and intelligently passes parameters
-- ✅ **Graceful shutdown** - Ctrl+C properly stops agents and cleans up
-- ✅ **Config store integration** - Shows which config store directory is being used
+- **Zero code changes** - Run existing VOLTTRON agents as-is
+- **Auto-detection** - Automatically finds agent module and class
+- **Import compatibility** - Transparent redirection of VOLTTRON imports to AEMS
+- **Config support** - Loads agent configs and intelligently passes parameters
+- **Graceful shutdown** - Ctrl+C properly stops agents and cleans up
+- **Config store integration** - Shows which config store directory is being used
 
 **Example:**
 ```bash
@@ -417,7 +417,7 @@ Use the **legacy agent launcher** to run existing VOLTTRON agents with zero code
 # Output shows:
 # VOLTTRON_HOME: /home/volttron/.volttron
 # Config Store:  /home/volttron/.volttron/aems_config_store/platform.driver
-# ✓ PlatformDriverAgent is running
+# PlatformDriverAgent is running
 ```
 
 See `./start-legacy.py --help` for all options.
@@ -433,7 +433,7 @@ For new development or when you want to fully migrate, update your agent code:
 
 ## Documentation
 
-### 📚 Complete Documentation
+### Complete Documentation
 
 - **[Quick Start Guide](docs/QUICK_START_LEGACY_AGENTS.md)** - Get started running legacy VOLTTRON agents in 30 seconds
 - **[Legacy Agent Support](docs/LEGACY_AGENT_SUPPORT.md)** - Comprehensive guide to running VOLTTRON agents on AEMS
@@ -443,7 +443,7 @@ For new development or when you want to fully migrate, update your agent code:
 - **[AI Transformation Journey](docs/AI_TRANSFORMATION_JOURNEY.md)** - How this library was built with AI assistance
 - **[Development Guide](CLAUDE.md)** - Developer setup and common commands
 
-### 🚀 Quick Links
+### Quick Links
 
 - [Installation](#1-installation) - Install with optional dependencies
 - [Running Legacy Agents](#legacy-agent-launcher) - Run VOLTTRON agents without modifications

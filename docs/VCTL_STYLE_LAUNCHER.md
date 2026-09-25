@@ -19,10 +19,10 @@ The enhanced `start-legacy.py` script now works **exactly like `vctl start`** in
 ```
 
 **Problems:**
-- ❌ Had to specify full module path
-- ❌ Config path from script location
-- ❌ Working directory was script location
-- ❌ Import errors with `volttron.platform.agent`
+- Had to specify full module path
+- Config path from script location
+- Working directory was script location
+- Import errors with `volttron.platform.agent`
 
 ### After (vctl-Style)
 ```bash
@@ -32,10 +32,10 @@ The enhanced `start-legacy.py` script now works **exactly like `vctl start`** in
 ```
 
 **Benefits:**
-- ✅ Auto-detects module (`listener.agent`) and class (`ListenerAgent`)
-- ✅ Config path relative to agent directory
-- ✅ Working directory **IS** the agent directory (like vctl!)
-- ✅ Proper import resolution
+- Auto-detects module (`listener.agent`) and class (`ListenerAgent`)
+- Config path relative to agent directory
+- Working directory **IS** the agent directory (like vctl!)
+- Proper import resolution
 
 ## How It Works
 
@@ -44,14 +44,14 @@ The enhanced `start-legacy.py` script now works **exactly like `vctl start`** in
 The script scans the agent directory for the standard VOLTTRON structure:
 
 ```
-ListenerAgent/                    ← --agent-dir points here
-├── listener/                     ← Auto-detected package
-│   ├── __init__.py
-│   ├── agent.py                 ← Auto-detected module
-│   │   └── class ListenerAgent  ← Auto-detected class
-│   └── settings.py
-├── config                        ← Config relative to agent dir
-└── setup.py
+ListenerAgent/                    <- --agent-dir points here
++-- listener/                     <- Auto-detected package
+|   +-- __init__.py
+|   +-- agent.py                 <- Auto-detected module
+|   |   +-- class ListenerAgent  <- Auto-detected class
+|   +-- settings.py
++-- config                        <- Config relative to agent dir
++-- setup.py
 ```
 
 **Detection logic:**
@@ -86,7 +86,7 @@ Example:
 ```bash
 --agent-dir example-from-volttron/ListenerAgent --config config
 ```
-Resolves to: `example-from-volttron/ListenerAgent/config` ✅
+Resolves to: `example-from-volttron/ListenerAgent/config`
 
 ## Usage Examples
 
@@ -146,14 +146,14 @@ Optional:
 Your agent directory must follow VOLTTRON convention:
 
 ```
-AgentName/                     ← --agent-dir points here
-├── package_name/              ← Agent package (any name)
-│   ├── __init__.py           ← Required
-│   ├── agent.py              ← Required (contains Agent class)
-│   └── ... (other modules)
-├── config                     ← Optional config file
-├── setup.py                   ← Optional
-└── ... (other files)
+AgentName/                     <- --agent-dir points here
++-- package_name/              <- Agent package (any name)
+|   +-- __init__.py           <- Required
+|   +-- agent.py              <- Required (contains Agent class)
+|   +-- ... (other modules)
++-- config                     <- Optional config file
++-- setup.py                   <- Optional
++-- ... (other files)
 ```
 
 **What gets auto-detected:**
@@ -164,10 +164,10 @@ AgentName/                     ← --agent-dir points here
 
 | Feature | vctl start | start-legacy.py |
 |---------|-----------|-----------------|
-| Change to agent dir | ✅ Yes | ✅ Yes |
-| Auto-detect module | ✅ Yes | ✅ Yes |
-| Config relative to agent dir | ✅ Yes | ✅ Yes |
-| Working directory | Agent dir | Agent dir ✅ |
+| Change to agent dir | Yes | Yes |
+| Auto-detect module | Yes | Yes |
+| Config relative to agent dir | Yes | Yes |
+| Working directory | Agent dir | Agent dir |
 | Import hooks | VOLTTRON platform | AEMS compat layer |
 
 ## Troubleshooting
@@ -182,8 +182,8 @@ FileNotFoundError: Could not find agent.py in any subdirectory
 **Solution:** Ensure your agent has the structure:
 ```
 AgentDir/
-  └── some_package/
-      └── agent.py
+  +-- some_package/
+      +-- agent.py
 ```
 
 ### "Config file not found"
@@ -224,10 +224,10 @@ ModuleNotFoundError: No module named 'listener'
 ```
 
 **Benefits of new syntax:**
-- ✅ Simpler command line
-- ✅ Matches VOLTTRON vctl behavior
-- ✅ Auto-detects module and class
-- ✅ Proper working directory handling
+- Simpler command line
+- Matches VOLTTRON vctl behavior
+- Auto-detects module and class
+- Proper working directory handling
 
 ## Testing
 
@@ -256,9 +256,9 @@ Address:       ws://localhost:8000
 Config:        /home/.../ListenerAgent/config
 ------------------------------------------------------------
 Changed working directory to: /home/.../ListenerAgent
-✓ Connected to ws://localhost:8000
+Connected to ws://localhost:8000
 ============================================================
-✓ ListenerAgent is running from ListenerAgent/
+ListenerAgent is running from ListenerAgent/
   Press Ctrl+C to stop
 ============================================================
 ```
@@ -267,9 +267,9 @@ Changed working directory to: /home/.../ListenerAgent
 
 The enhanced `start-legacy.py` now provides a **vctl-compatible experience**:
 
-✅ **Auto-detection** - No need to specify module:class
-✅ **Agent directory** - Working directory is agent's directory
-✅ **Relative configs** - Config paths relative to agent dir
-✅ **Clean syntax** - Simple, intuitive command line
+- **Auto-detection** - No need to specify module:class
+- **Agent directory** - Working directory is agent's directory
+- **Relative configs** - Config paths relative to agent dir
+- **Clean syntax** - Simple, intuitive command line
 
 This makes running VOLTTRON agents on AEMS feel natural and familiar!
