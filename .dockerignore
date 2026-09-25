@@ -67,7 +67,6 @@ ruff.toml
 tests/
 test-*.sh
 run-*.sh
-dev.py
 
 # Example files
 example-from-volttron/
