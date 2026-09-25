@@ -106,15 +106,15 @@ class VolttronImportRedirector(MetaPathFinder, Loader):
         if redirect_to:
             try:
                 # Import the AEMS compatibility module
-                aems_module = importlib.import_module(redirect_to)
+                target_module = importlib.import_module(redirect_to)
 
                 # Copy all attributes from AEMS module to the VOLTTRON module
-                for attr in dir(aems_module):
+                for attr in dir(target_module):
                     if not attr.startswith("_") or attr in ("__path__", "__package__"):
-                        setattr(module, attr, getattr(aems_module, attr))
+                        setattr(module, attr, getattr(target_module, attr))
 
                 # Mark as successfully loaded
-                module.__file__ = getattr(aems_module, "__file__", "<aems-compat>")
+                module.__file__ = getattr(target_module, "__file__", "<aems-compat>")
                 module.__loader__ = self
 
                 # IMPORTANT: Mark as a package so sub-imports work

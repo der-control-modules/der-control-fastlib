@@ -163,7 +163,7 @@ Each shim provides a VOLTTRON-compatible interface:
 
 **Agent Class:**
 ```python
-class Agent(AEMSAgent):
+class Agent(BaseAgent):
     # Extends AEMS agent with VOLTTRON subsystems
     def __init__(self, **kwargs):
         super().__init__(...)

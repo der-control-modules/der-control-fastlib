@@ -310,7 +310,7 @@ from volttron.platform.vip.agent import Agent
 
 **Enhancements:**
 ```python
-class Agent(AEMSAgent):
+class Agent(BaseAgent):
     def __init__(self, **kwargs):
         super().__init__(...)
 
