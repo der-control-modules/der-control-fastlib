@@ -52,3 +52,37 @@ class TestVersionEndpoints:
         """Test that invalid endpoints return 404."""
         response = client.get("/invalid")
         assert response.status_code == 404
+
+
+class TestWebPageEndpoints:
+    """Test the HTML web pages served via Jinja2Templates.TemplateResponse."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client for the FastAPI app."""
+        server = FastAPIMessageBus()
+        return TestClient(server.app)
+
+    def test_root_serves_config_manager_page(self, client):
+        """Test that / renders the config manager template."""
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert response.template.name == "config_manager.html"
+        assert "AEMS Config Manager" in response.text
+
+    def test_control_serves_rpc_control_page(self, client):
+        """Test that /control renders the RPC control panel template."""
+        response = client.get("/control")
+
+        assert response.status_code == 200
+        assert response.template.name == "rpc_control.html"
+        assert "AEMS RPC Control Panel" in response.text
+
+    def test_message_monitor_serves_monitor_page(self, client):
+        """Test that /message-monitor renders the message bus monitor template."""
+        response = client.get("/message-monitor")
+
+        assert response.status_code == 200
+        assert response.template.name == "message_monitor.html"
+        assert "AEMS Message Bus Monitor" in response.text
