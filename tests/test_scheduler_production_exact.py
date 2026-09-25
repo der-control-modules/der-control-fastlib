@@ -89,26 +89,28 @@ def test_production_scenario_with_existing_queue(message_bus_manager_fixture):
     gevent.sleep(2)
 
     # Step 3: Now add the occupancy override with past start time (like in production)
-    print("\nStep 3: Adding occupancy override with PAST start time (8am today)...")
+    print("\nStep 3: Adding occupancy override with a PAST start time...")
 
-    # Create 8am and 6pm times for today
-    today_8am = now.replace(hour=8, minute=0, second=0, microsecond=0)
-    today_6pm = now.replace(hour=18, minute=0, second=0, microsecond=0)
+    # Past and future relative to "now", not a fixed wall-clock hour (#18): a
+    # fixed 08:00/18:00 is only in the past/future depending on when the test
+    # runs, which made the assertion below flaky by time of day.
+    past_event_time = now - timedelta(hours=1)
+    future_event_time = now + timedelta(hours=1)
 
     print(f"  Current time: {now}")
-    print(f"  8AM time: {today_8am} (is past? {today_8am < now})")
-    print(f"  6PM time: {today_6pm} (is past? {today_6pm < now})")
+    print(f"  Past event time: {past_event_time} (is past? {past_event_time < now})")
+    print(f"  Future event time: {future_event_time} (is past? {future_event_time < now})")
 
     # Record state before scheduling
     actions_before = len(agent.control_actions)
     queue_before = len(agent.core._scheduler._event_queue)
 
-    # Schedule the occupancy override (8am should be in the past)
-    print("\nCalling agent.core.schedule() for 8AM (past event)...")
-    agent.core.schedule(today_8am, agent._do_control_action, "zone_1", "occupied")
+    # Schedule the occupancy override (the past event should already be due)
+    print("\nCalling agent.core.schedule() for the past event...")
+    agent.core.schedule(past_event_time, agent._do_control_action, "zone_1", "occupied")
 
-    print("Calling agent.core.schedule() for 6PM...")
-    agent.core.schedule(today_6pm, agent._do_control_action, "zone_1", "unoccupied")
+    print("Calling agent.core.schedule() for the future event...")
+    agent.core.schedule(future_event_time, agent._do_control_action, "zone_1", "unoccupied")
 
     # Check immediate queue state
     queue_after = len(agent.core._scheduler._event_queue)
@@ -119,7 +121,7 @@ def test_production_scenario_with_existing_queue(message_bus_manager_fixture):
         print(
             f"  Next event: {next_event.name} at {datetime.fromtimestamp(next_event.next_time)}"
         )
-        print(f"  Is it the 8AM event? {next_event.name == 'zone_1'}")
+        print(f"  Is it the past event? {next_event.name == 'zone_1'}")
 
     # Wait for past event to fire
     print("\nStep 4: Waiting 3 seconds for past event to fire...")
@@ -142,14 +144,14 @@ def test_production_scenario_with_existing_queue(message_bus_manager_fixture):
     else:
         print("\nNO CONTROL ACTIONS FIRED!")
 
-    # Check for the specific 8AM event
+    # Check for the specific past event
     past_event_fired = any(
         action["state"] == "occupied" and action["gid"] == "zone_1"
         for action in agent.control_actions
     )
 
     if not past_event_fired:
-        print("\nBUG REPRODUCED: Past 8AM event did not fire with existing queue!")
+        print("\nBUG REPRODUCED: Past event did not fire with existing queue!")
 
         # Debug info
         print("\nDebug information:")
@@ -177,7 +179,7 @@ def test_production_scenario_with_existing_queue(message_bus_manager_fixture):
     # Assert to make test fail if bug is present
     assert (
         past_event_fired
-    ), "Past 8AM event should have fired immediately even with existing queue!"
+    ), "Past event should have fired immediately even with existing queue!"
 
 
 def test_verify_scheduler_wakeup_with_queue(message_bus_manager_fixture):
