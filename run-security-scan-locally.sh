@@ -24,10 +24,10 @@ BRANCH=$(git branch --show-current)
 
 if [ "$BRANCH" = "main" ]; then
     echo "Running security scans (STRICT MODE - main branch)..."
-    python3 dev.py security --strict
+    make security-strict
 else
     echo "Running security scans (standard mode)..."
-    python3 dev.py security
+    make security
 fi
 
 echo "Security scan passed"

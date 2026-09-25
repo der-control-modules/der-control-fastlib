@@ -79,16 +79,17 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -e .[dev]
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install -e .[dev]
 
       - name: Run quality checks
         run: |
-          python dev.py check
+          make check
 
       - name: Build package
         run: |
-          python dev.py build
+          make build
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -146,31 +147,6 @@ jobs:
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  notify-test-servers:
-    needs: [verify-tag, create-release]
-    runs-on: ubuntu-latest
-    if: needs.verify-tag.outputs.is-prerelease == 'true'  # Only for pre-releases
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.10'
-
-      - name: Notify test servers
-        env:
-          TEST_SERVER_URL: ${{ secrets.TEST_SERVER_WEBHOOK_URL }}
-          TEST_SERVER_TOKEN: ${{ secrets.TEST_SERVER_TOKEN }}
-        run: |
-          if [ -n "$TEST_SERVER_URL" ]; then
-            echo "Notifying test servers of new pre-release..."
-            python dev.py trigger-update "$TEST_SERVER_URL" "$TEST_SERVER_TOKEN" || echo "Failed to notify test server"
-          else
-            echo "No test server webhook configured"
-          fi
 
   publish-to-pypi:
     needs: [verify-tag, create-release]

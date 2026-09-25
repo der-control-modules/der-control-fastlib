@@ -26,17 +26,17 @@ echo "Format check passed"
 echo ""
 
 echo "Running linting..."
-python3 dev.py lint
+make lint
 echo "Linting passed"
 echo ""
 
 echo "Running tests..."
-python3 dev.py test
+make test
 echo "Tests passed"
 echo ""
 
 echo "Testing build..."
-python3 dev.py build
+make build
 echo "Build test passed"
 echo ""
 
