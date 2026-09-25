@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import gevent
 import pytest
 
-from aems.client.agent import Agent
+from derhost.client.agent import Agent
 
 logging.basicConfig(level=logging.DEBUG)
 _log = logging.getLogger(__name__)

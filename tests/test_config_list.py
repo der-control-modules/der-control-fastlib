@@ -7,7 +7,7 @@ This test verifies that the list method returns configs from the cache instead o
 import gevent
 import pytest
 
-from aems.client.agent import Agent
+from derhost.client.agent import Agent
 
 
 class ConfigListTestAgent(Agent):

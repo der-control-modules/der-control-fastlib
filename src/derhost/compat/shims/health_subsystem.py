@@ -69,8 +69,8 @@ class Health:
             alert_key: Quasi-unique key for the alert
             statusobj: Status object with alert information
         """
-        from aems.compat.shims.health import Status
-        from aems.compat.shims.messaging import topics
+        from derhost.compat.shims.health import Status
+        from derhost.compat.shims.messaging import topics
 
         if not isinstance(statusobj, Status):
             raise ValueError("statusobj must be a Status object.")

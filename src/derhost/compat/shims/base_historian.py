@@ -81,7 +81,7 @@ if BaseHistorian is None:
     searched = [str(p) for p in VOLTTRON_SEARCH_PATHS]
     _log.warning(f"Could not load VOLTTRON BaseHistorian from source. Using AEMS shim. Searched: {searched}")
 
-    from aems.compat.shims.vip_agent import Agent as _Agent
+    from derhost.compat.shims.vip_agent import Agent as _Agent
 
     class BaseHistorian(_Agent):
         """AEMS shim for VOLTTRON BaseHistorian — inherits from Agent shim."""

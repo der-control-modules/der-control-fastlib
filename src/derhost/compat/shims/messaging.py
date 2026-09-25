@@ -5,8 +5,8 @@ Provides: messaging module namespace with topics and headers
 """
 
 # Re-export health constants explicitly
-from aems.compat.shims.health import STATUS_BAD, STATUS_GOOD, UNKNOWN
-from aems.compat.shims.messaging_utils import Topic
+from derhost.compat.shims.health import STATUS_BAD, STATUS_GOOD, UNKNOWN
+from derhost.compat.shims.messaging_utils import Topic
 
 
 # VOLTTRON messaging headers

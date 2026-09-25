@@ -5,7 +5,7 @@ Test the version and health endpoints of the FastAPI message bus
 import pytest
 from fastapi.testclient import TestClient
 
-from aems.server.fastapi_message_bus import FastAPIMessageBus
+from derhost.server.fastapi_message_bus import FastAPIMessageBus
 
 
 class TestVersionEndpoints:

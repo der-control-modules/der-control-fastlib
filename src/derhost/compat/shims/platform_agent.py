@@ -92,7 +92,7 @@ class utils:
         """
         # Apply platform driver patches (for older VOLTTRON versions)
         try:
-            from aems.compat.platform_driver_patches import apply_all_patches
+            from derhost.compat.platform_driver_patches import apply_all_patches
 
             apply_all_patches()
         except Exception as e:

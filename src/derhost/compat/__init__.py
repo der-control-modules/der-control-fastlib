@@ -5,6 +5,6 @@ This module provides import hooks and compatibility shims to run existing
 VOLTTRON agents without code modifications.
 """
 
-from aems.compat.import_hook import install_volttron_compatibility
+from derhost.compat.import_hook import install_volttron_compatibility
 
 __all__ = ["install_volttron_compatibility"]

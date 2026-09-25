@@ -98,13 +98,13 @@ git clone https://github.com/VOLTTRON/volttron.git ~/volttron
 
 ```python
 import time
-from aems.client.agent import Agent
+from derhost.client.agent import Agent
 
 # Create agent with VOLTTRON-compatible interface
 agent = Agent(identity="my_agent", address="ws://localhost:8000")
 
 # Use familiar VOLTTRON decorators
-from aems.client.agent import RPC, config, periodic
+from derhost.client.agent import RPC, config, periodic
 
 @RPC.export
 def get_status(self):
@@ -426,7 +426,7 @@ See `./start-legacy.py --help` for all options.
 
 For new development or when you want to fully migrate, update your agent code:
 
-1. **Change imports**: `from aems.client.agent import Agent, RPC, config, periodic`
+1. **Change imports**: `from derhost.client.agent import Agent, RPC, config, periodic`
 2. **Update connection**: Use WebSocket address instead of ZMQ
 3. **Keep all decorators**: `@RPC.export`, `@config.subscribe`, `@periodic` work identically
 4. **Test compatibility**: Run with `python -m pytest tests/test_volttron_compatibility.py`

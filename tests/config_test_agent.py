@@ -2,7 +2,7 @@
 
 import datetime
 
-from aems.client.agent import RPC, Agent, Core
+from derhost.client.agent import RPC, Agent, Core
 
 
 class ConfigTestAgent(Agent):

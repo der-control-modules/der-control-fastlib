@@ -25,9 +25,9 @@ except ImportError:
     # Python < 3.8
     from importlib_metadata import PackageNotFoundError, version
 
-from aems.server.config_store import ConfigStore
-from aems.server.connection_manager import ConnectionManager
-from aems.server.models import Message, MessageBus
+from derhost.server.config_store import ConfigStore
+from derhost.server.connection_manager import ConnectionManager
+from derhost.server.models import Message, MessageBus
 
 
 # Pydantic models for JSON-RPC 2.0 endpoint
@@ -187,7 +187,7 @@ _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
 
 # Enable debug logging for our application modules
-logging.getLogger("aems").setLevel(logging.DEBUG)
+logging.getLogger("derhost").setLevel(logging.DEBUG)
 
 # Turn down noisy loggers to reduce debug spam
 logging.getLogger("watchdog.observers").setLevel(logging.INFO)
@@ -200,7 +200,7 @@ def get_package_version():
     """Get the current package version."""
     try:
         # Try to get version from installed package
-        return version("aems")
+        return version("der-control-fastlib")
     except PackageNotFoundError:
         # Fallback to git if package not installed (development mode)
         try:
@@ -1343,7 +1343,7 @@ def _main():
         root_logger.setLevel(logging.INFO)  # Set to INFO to reduce uvicorn debug spam
 
         # Enable debug logging for our application modules
-        logging.getLogger("aems").setLevel(logging.DEBUG)
+        logging.getLogger("derhost").setLevel(logging.DEBUG)
 
         # Configure all uvicorn loggers
         uvicorn_loggers = {

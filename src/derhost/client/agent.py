@@ -30,7 +30,7 @@ from gevent.event import AsyncResult
 # Initialize colorama
 init(autoreset=True)
 
-from aems.client import dualmethod
+from derhost.client import dualmethod
 
 # Use volttron-core JSON-RPC utilities for compatibility
 try:
@@ -687,7 +687,7 @@ class Health:
 
     def __init__(self, agent):
         self._agent = agent
-        from aems.compat.shims.health import STATUS_GOOD, Status
+        from derhost.compat.shims.health import STATUS_GOOD, Status
 
         self._status = Status.build(STATUS_GOOD)
         self._status_callbacks = []
@@ -700,8 +700,8 @@ class Health:
             alert_key: Quasi-unique key for the alert
             statusobj: Status object with alert information
         """
-        from aems.compat.shims.health import Status
-        from aems.compat.shims.messaging import topics
+        from derhost.compat.shims.health import Status
+        from derhost.compat.shims.messaging import topics
 
         if not isinstance(statusobj, Status):
             raise ValueError("statusobj must be a Status object.")
@@ -3912,7 +3912,7 @@ class Agent:
         self._stop_event.set()
 
 
-# src/aems/client/agent.py - Updated run_agent function
+# src/derhost/client/agent.py - Updated run_agent function
 
 
 def run_agent(agent_class, config_path=None, identity=None, **kwargs):

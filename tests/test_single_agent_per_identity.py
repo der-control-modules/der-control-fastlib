@@ -5,7 +5,7 @@ Test VOLTTRON compatibility: Only one agent per identity allowed.
 import gevent
 import pytest
 
-from aems.client.agent import Agent
+from derhost.client.agent import Agent
 
 
 class TestSingleAgentPerIdentity:

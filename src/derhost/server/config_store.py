@@ -11,7 +11,7 @@ import uuid
 from copy import deepcopy
 from typing import Any, Union
 
-from aems.server.models import Message, MessageBus
+from derhost.server.models import Message, MessageBus
 
 _log = logging.getLogger(__name__)
 

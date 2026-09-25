@@ -2,14 +2,14 @@
 VOLTTRON VIP Agent compatibility shim.
 
 Provides: Agent, Core, PubSub, RPC
-Maps to: aems.client.agent equivalents
+Maps to: derhost.client.agent equivalents
 """
 
 import logging
 
-from aems.client.agent import RPC as AEMSRPC, Agent as AEMSAgent, Core as AEMSCore
-from aems.compat.shims.health_subsystem import Health
-from aems.compat.shims.heartbeat import Heartbeat
+from derhost.client.agent import RPC as AEMSRPC, Agent as AEMSAgent, Core as AEMSCore
+from derhost.compat.shims.health_subsystem import Health
+from derhost.compat.shims.heartbeat import Heartbeat
 
 _log = logging.getLogger(__name__)
 

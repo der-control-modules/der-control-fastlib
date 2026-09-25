@@ -36,7 +36,7 @@ The AEMS compatibility layer allows you to run VOLTTRON agents by:
 
 | Feature | VOLTTRON Import | AEMS Equivalent |
 |---------|----------------|-----------------|
-| Agent Base Class | `volttron.platform.vip.agent.Agent` | `aems.client.agent.Agent` |
+| Agent Base Class | `volttron.platform.vip.agent.Agent` | `derhost.client.agent.Agent` |
 | RPC Calls | `@RPC.export` | `@RPC.export` (identical) |
 | PubSub | `@PubSub.subscribe()` | Decorator + runtime subscription |
 | Core Signals | `@Core.receiver()` | `@Core.receiver()` (identical) |
@@ -152,9 +152,9 @@ from volttron.platform.agent import utils
 from volttron.platform.messaging.health import STATUS_GOOD
 
 # Gets automatically redirected to:
-from aems.compat.shims.vip_agent import Agent, Core, RPC
-from aems.compat.shims.platform_agent import utils
-from aems.compat.shims.health import STATUS_GOOD
+from derhost.compat.shims.vip_agent import Agent, Core, RPC
+from derhost.compat.shims.platform_agent import utils
+from derhost.compat.shims.health import STATUS_GOOD
 ```
 
 ### Compatibility Shims
@@ -219,8 +219,8 @@ from volttron.platform.vip.agent import Agent, Core, RPC
 from volttron.platform.agent import utils
 
 # After (AEMS):
-from aems.client.agent import Agent, Core, RPC
-from aems.compat.shims.platform_agent import utils
+from derhost.client.agent import Agent, Core, RPC
+from derhost.compat.shims.platform_agent import utils
 ```
 
 Then run directly without start-legacy.py.
@@ -404,10 +404,10 @@ def update_control(self):
 ┌────────────────────────▼─────────────────────────────────────┐
 │                   AEMS Core Libraries                        │
 │                                                              │
-│  • aems.client.agent.Agent                                  │
-│  • aems.client.agent.RPC                                    │
-│  • aems.client.agent.PubSub                                 │
-│  • aems.client.agent.Core                                   │
+│  • derhost.client.agent.Agent                                │
+│  • derhost.client.agent.RPC                                  │
+│  • derhost.client.agent.PubSub                               │
+│  • derhost.client.agent.Core                                 │
 └────────────────────────┬─────────────────────────────────────┘
                          │
                          ├─ WebSocket Connection
@@ -426,11 +426,11 @@ def update_control(self):
 
 | VOLTTRON Import | AEMS Compatibility Shim |
 |-----------------|------------------------|
-| `volttron.platform.vip.agent` | `aems.compat.shims.vip_agent` |
-| `volttron.platform.agent` | `aems.compat.shims.platform_agent` |
-| `volttron.platform.messaging.health` | `aems.compat.shims.health` |
-| `volttron.platform.vip.agent.subsystems.query` | `aems.compat.shims.query` |
-| `volttron.platform.vip.agent.subsystems.heartbeat` | `aems.compat.shims.heartbeat` |
+| `volttron.platform.vip.agent` | `derhost.compat.shims.vip_agent` |
+| `volttron.platform.agent` | `derhost.compat.shims.platform_agent` |
+| `volttron.platform.messaging.health` | `derhost.compat.shims.health` |
+| `volttron.platform.vip.agent.subsystems.query` | `derhost.compat.shims.query` |
+| `volttron.platform.vip.agent.subsystems.heartbeat` | `derhost.compat.shims.heartbeat` |
 
 ## Next Steps
 
@@ -444,4 +444,4 @@ def update_control(self):
 For issues or questions:
 - Check [README.md](README.md) for AEMS documentation
 - Review [CLAUDE.md](CLAUDE.md) for development guidance
-- See compatibility shims in `src/aems/compat/shims/`
+- See compatibility shims in `src/derhost/compat/shims/`

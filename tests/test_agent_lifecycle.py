@@ -9,7 +9,7 @@ This module tests all aspects of agent lifecycle:
 
 import gevent
 
-from aems.client.agent import Agent, Core
+from derhost.client.agent import Agent, Core
 
 # Consolidating tests from:
 # - test_lifecycle.py

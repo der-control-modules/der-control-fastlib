@@ -9,7 +9,7 @@ import time
 import gevent
 import pytest
 
-from aems.client.agent import Agent
+from derhost.client.agent import Agent
 
 _log = logging.getLogger(__name__)
 

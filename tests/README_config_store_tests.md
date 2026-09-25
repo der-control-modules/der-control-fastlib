@@ -112,7 +112,7 @@ Original test suite for basic config functionality:
 .venv/bin/pytest tests/test_*config*.py -v
 
 # Run with coverage
-.venv/bin/pytest tests/test_*config*.py --cov=aems.client.agent --cov=aems.server.config_store
+.venv/bin/pytest tests/test_*config*.py --cov=derhost.client.agent --cov=derhost.server.config_store
 ```
 
 ### Run Specific Test Suites

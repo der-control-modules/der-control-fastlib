@@ -9,7 +9,7 @@ This module tests the API endpoints and framework connectors:
 
 import httpx
 
-from aems.client.agent import RPC, Agent
+from derhost.client.agent import RPC, Agent
 
 
 class TestVersionEndpoint:

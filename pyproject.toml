@@ -3,7 +3,7 @@ requires = ["setuptools>=78.1.1", "wheel", "setuptools_scm>=6.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aems"
+name = "der-control-fastlib"
 description = "Agent Energy Management System"
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
@@ -136,7 +136,7 @@ manager = [
 # ]
 
 [project.scripts]
-aems-server = "aems.server.fastapi_message_bus:_main"
+aems-server = "derhost.server.fastapi_message_bus:_main"
 
 # [project.urls]
 # Documentation = "https://github.com/yourusername/aems"
@@ -300,7 +300,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 "scripts/**/*.py" = ["D", "T201", "T203"]   # Allow print statements
 
 [tool.ruff.lint.isort]
-known-first-party = ["aems"]
+known-first-party = ["derhost"]
 force-single-line = false
 combine-as-imports = true
 split-on-trailing-comma = false  # Consistent with format.skip-magic-trailing-comma=false

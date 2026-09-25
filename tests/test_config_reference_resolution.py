@@ -6,7 +6,7 @@ Tests the ability to reference other configs within config values.
 import gevent
 import pytest
 
-from aems.client.agent import Agent
+from derhost.client.agent import Agent
 
 
 class ReferenceResolutionAgent(Agent):

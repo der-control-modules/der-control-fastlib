@@ -133,9 +133,9 @@ pip install -e ".[ilc]"
 
 | Your VOLTTRON Code | Automatically Becomes |
 |--------------------|----------------------|
-| `from volttron.platform.vip.agent import Agent` | `from aems.compat.shims.vip_agent import Agent` |
-| `from volttron.platform.agent import utils` | `from aems.compat.shims.platform_agent import utils` |
-| `from volttron.platform.messaging.health import STATUS_GOOD` | `from aems.compat.shims.health import STATUS_GOOD` |
+| `from volttron.platform.vip.agent import Agent` | `from derhost.compat.shims.vip_agent import Agent` |
+| `from volttron.platform.agent import utils` | `from derhost.compat.shims.platform_agent import utils` |
+| `from volttron.platform.messaging.health import STATUS_GOOD` | `from derhost.compat.shims.health import STATUS_GOOD` |
 
 **You don't change anything - it happens automatically!**
 
