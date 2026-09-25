@@ -32,7 +32,7 @@ dependencies = [
     "httpx~=0.28.1",
     "pydantic~=2.12.3",
     "pydantic_core~=2.41.4",
-    "PyJWT~=2.8.0",
+    "PyJWT>=2.8,<2.15",
     "python-multipart~=0.0.12",
     "PyYAML==6.0.3",
     "watchdog==6.0.0",
