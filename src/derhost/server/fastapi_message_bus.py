@@ -195,6 +195,22 @@ logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)  # Silence all uvi
 logging.getLogger("uvicorn").setLevel(logging.INFO)
 logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
+_REDACTED = "[REDACTED]"
+_SECRET_LOG_FIELDS = {"authentication", "authorization", "token", "key", "password"}
+
+
+def _redact_secrets(value: Any) -> Any:
+    """Replace secret-bearing dict values with a fixed marker before logging.
+
+    Applied only at log call sites; stored and forwarded messages keep their
+    real values, since this must not change wire or bus behavior.
+    """
+    if isinstance(value, dict):
+        return {k: (_REDACTED if k.lower() in _SECRET_LOG_FIELDS else _redact_secrets(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_secrets(v) for v in value]
+    return value
+
 
 def get_package_version():
     """Get the current package version."""
@@ -451,7 +467,7 @@ class FastAPIMessageBus(MessageBus):
                 while True:
                     # Just wait for messages (could be used for control later)
                     data = await websocket.receive_json()
-                    _log.debug(f"Monitor {monitor_id} sent: {data}")
+                    _log.debug(f"Monitor {monitor_id} sent: {_redact_secrets(data)}")
             except WebSocketDisconnect:
                 _log.debug(f"Monitor {monitor_id} disconnected")
                 self.manager.disconnect_monitor(monitor_id)
@@ -1094,7 +1110,9 @@ class FastAPIMessageBus(MessageBus):
                     "msg_id": msg_id,
                 }
 
-                _log.debug(f"Sending HTTP RPC request to {agent_id}: {method}\nparams: {params}")
+                _log.debug(
+                    f"Sending HTTP RPC request to {agent_id}: {method}\nparams: {_redact_secrets(params.model_dump())}"
+                )
                 await self.manager.send_message(agent_id, rpc_message)
 
                 # Wait for the response (with timeout)
