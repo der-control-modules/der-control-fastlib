@@ -2,10 +2,11 @@
 
 import asyncio
 import json
-import websockets
 import uuid
-import time
-from typing import Dict, Any, Optional, Callable
+from collections.abc import Callable
+from typing import Any
+
+import websockets
 
 
 class MessageBusTestClient:
@@ -59,7 +60,7 @@ class MessageBusTestClient:
         except Exception as e:
             print(f"Error in client {self.identity} listener: {e}")
 
-    async def subscribe_prefix(self, prefix: str, callback: Optional[Callable] = None):
+    async def subscribe_prefix(self, prefix: str, callback: Callable | None = None):
         """Subscribe to a topic prefix."""
         if not self.connected:
             raise ConnectionError("Client not connected")
@@ -76,7 +77,7 @@ class MessageBusTestClient:
         print(f"Client {self.identity} subscribed to prefix: {prefix}")
         return subscription_id
 
-    async def subscribe_pattern(self, pattern: str, callback: Optional[Callable] = None):
+    async def subscribe_pattern(self, pattern: str, callback: Callable | None = None):
         """Subscribe to a topic pattern."""
         if not self.connected:
             raise ConnectionError("Client not connected")
@@ -95,7 +96,7 @@ class MessageBusTestClient:
         return subscription_id
 
     async def publish(
-        self, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""
+        self, topic: str, message: Any, headers: dict | None = None, bus: str = ""
     ):
         """Publish a message to a topic."""
         if not self.connected:
@@ -278,7 +279,9 @@ async def run_complex_test():
     await coordinator.publish(
         "control/agent1/start", {"command": "start", "parameters": {"delay": 0}}
     )
-    await coordinator.publish("control/agent2/stop", {"command": "stop", "reason": "maintenance"})
+    await coordinator.publish(
+        "control/agent2/stop", {"command": "stop", "reason": "maintenance"}
+    )
     await coordinator.publish("control/all/status", {"command": "report_status"})
 
     # Coordinator sends a broadcast

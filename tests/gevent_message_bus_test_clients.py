@@ -7,10 +7,12 @@ from gevent import monkey
 monkey.patch_all()
 
 import json
-import uuid
-import websocket
-from typing import Dict, Any, Optional, Callable
 import ssl
+import uuid
+from collections.abc import Callable
+from typing import Any
+
+import websocket
 
 
 class GeventMessageBusTestClient:
@@ -96,7 +98,7 @@ class GeventMessageBusTestClient:
             elif msg_type == "rpc_request":
                 # Handle RPC request
                 print(f"DEBUG: Client {self.identity} received RPC request: {data}")
-                sender = data.get("sender")
+                data.get("sender")
                 method_name = data.get("method")
                 args = data.get("args", [])
                 kwargs = data.get("kwargs", {})
@@ -119,14 +121,26 @@ class GeventMessageBusTestClient:
                             f"DEBUG: Client {self.identity} sending remote call response: {result}"
                         )
                         self.websocket.send(
-                            json.dumps({"type": "rpc_response", "msg_id": msg_id, "result": result})
+                            json.dumps(
+                                {
+                                    "type": "rpc_response",
+                                    "msg_id": msg_id,
+                                    "result": result,
+                                }
+                            )
                         )
                     except Exception as e:
                         # Send error back to original sender
                         error_msg = f"Remote call error: {str(e)}"
                         print(f"DEBUG: {error_msg}")
                         self.websocket.send(
-                            json.dumps({"type": "rpc_error", "msg_id": msg_id, "error": error_msg})
+                            json.dumps(
+                                {
+                                    "type": "rpc_error",
+                                    "msg_id": msg_id,
+                                    "error": error_msg,
+                                }
+                            )
                         )
                 else:
                     # This is a local method call
@@ -136,7 +150,9 @@ class GeventMessageBusTestClient:
                     if method_name in self.exported_rpc_methods:
                         try:
                             method = self.exported_rpc_methods[method_name]
-                            print(f"DEBUG: Client {self.identity} executing method {method_name}")
+                            print(
+                                f"DEBUG: Client {self.identity} executing method {method_name}"
+                            )
                             result = method(*args, **kwargs)
                             print(
                                 f"DEBUG: Client {self.identity} method {method_name} result: {result}"
@@ -152,14 +168,26 @@ class GeventMessageBusTestClient:
 
                     # Send response
                     if error:
-                        print(f"DEBUG: Client {self.identity} sending RPC error response: {error}")
+                        print(
+                            f"DEBUG: Client {self.identity} sending RPC error response: {error}"
+                        )
                         self.websocket.send(
-                            json.dumps({"type": "rpc_error", "msg_id": msg_id, "error": error})
+                            json.dumps(
+                                {"type": "rpc_error", "msg_id": msg_id, "error": error}
+                            )
                         )
                     else:
-                        print(f"DEBUG: Client {self.identity} sending RPC response: {result}")
+                        print(
+                            f"DEBUG: Client {self.identity} sending RPC response: {result}"
+                        )
                         self.websocket.send(
-                            json.dumps({"type": "rpc_response", "msg_id": msg_id, "result": result})
+                            json.dumps(
+                                {
+                                    "type": "rpc_response",
+                                    "msg_id": msg_id,
+                                    "result": result,
+                                }
+                            )
                         )
 
             elif msg_type == "rpc_response":
@@ -199,7 +227,9 @@ class GeventMessageBusTestClient:
                     msg_id = message.get("msg_id")
                     args = message.get("args", [])
                     if msg_id in self.rpc_responses and args:
-                        self.rpc_responses[msg_id] = args[0]  # Assuming first arg is result
+                        self.rpc_responses[msg_id] = args[
+                            0
+                        ]  # Assuming first arg is result
 
         except Exception as e:
             print(f"Error processing message in client {self.identity}: {e}")
@@ -236,7 +266,9 @@ class GeventMessageBusTestClient:
                     )
                 except Exception as e:
                     # Send error back via VIP
-                    self.send_vip_message(peer=peer, subsystem="rpc_error", args=[str(e), msg_id])
+                    self.send_vip_message(
+                        peer=peer, subsystem="rpc_error", args=[str(e), msg_id]
+                    )
             else:
                 # This is a local method call
                 result = None
@@ -253,7 +285,9 @@ class GeventMessageBusTestClient:
 
                 # Send response via VIP
                 if error:
-                    self.send_vip_message(peer=peer, subsystem="rpc_error", args=[error, msg_id])
+                    self.send_vip_message(
+                        peer=peer, subsystem="rpc_error", args=[error, msg_id]
+                    )
                 else:
                     self.send_vip_message(
                         peer=peer, subsystem="rpc_response", args=[result, msg_id]
@@ -266,9 +300,11 @@ class GeventMessageBusTestClient:
     def _on_close(self, ws, close_status_code, close_msg):
         """Callback when the connection is closed."""
         self.connected = False
-        print(f"Client {self.identity} connection closed: {close_status_code} {close_msg}")
+        print(
+            f"Client {self.identity} connection closed: {close_status_code} {close_msg}"
+        )
 
-    def subscribe_prefix(self, prefix: str, callback: Optional[Callable] = None):
+    def subscribe_prefix(self, prefix: str, callback: Callable | None = None):
         """Subscribe to a topic prefix."""
         if not self.connected:
             raise ConnectionError("Client not connected")
@@ -285,7 +321,7 @@ class GeventMessageBusTestClient:
         print(f"Client {self.identity} subscribed to prefix: {prefix}")
         return subscription_id
 
-    def subscribe_pattern(self, pattern: str, callback: Optional[Callable] = None):
+    def subscribe_pattern(self, pattern: str, callback: Callable | None = None):
         """Subscribe to a topic pattern."""
         if not self.connected:
             raise ConnectionError("Client not connected")
@@ -303,7 +339,9 @@ class GeventMessageBusTestClient:
         print(f"Client {self.identity} subscribed to pattern: {pattern}")
         return subscription_id
 
-    def publish(self, topic: str, message: Any, headers: Optional[Dict] = None, bus: str = ""):
+    def publish(
+        self, topic: str, message: Any, headers: dict | None = None, bus: str = ""
+    ):
         """Publish a message to a topic."""
         if not self.connected:
             raise ConnectionError("Client not connected")
@@ -393,16 +431,22 @@ class GeventMessageBusTestClient:
         timeout = 10  # seconds
         start_time = gevent.time.time()
         while self.rpc_responses.get(msg_id) is None:
-            print(f"DEBUG: Client {self.identity} waiting for response to msg_id {msg_id}")
+            print(
+                f"DEBUG: Client {self.identity} waiting for response to msg_id {msg_id}"
+            )
             gevent.sleep(0.5)  # Longer sleep for more readable debug output
             if gevent.time.time() - start_time > timeout:
-                print(f"DEBUG: Client {self.identity} RPC call timed out for msg_id {msg_id}")
+                print(
+                    f"DEBUG: Client {self.identity} RPC call timed out for msg_id {msg_id}"
+                )
                 del self.rpc_responses[msg_id]
                 raise TimeoutError(f"RPC call timed out: {method}")
 
         # Get and remove the response
         result = self.rpc_responses.pop(msg_id)
-        print(f"DEBUG: Client {self.identity} received final result for msg_id {msg_id}: {result}")
+        print(
+            f"DEBUG: Client {self.identity} received final result for msg_id {msg_id}: {result}"
+        )
 
         # Check if there was an error
         if isinstance(result, dict) and "error" in result:
@@ -421,7 +465,9 @@ class GeventMessageBusTestClient:
         # Send the RPC request via VIP
         self.send_vip_message(peer=peer, subsystem="rpc", args=[method, *args, msg_id])
 
-        print(f"Client {self.identity} sent VIP RPC call to {peer}: method={method}, args={args}")
+        print(
+            f"Client {self.identity} sent VIP RPC call to {peer}: method={method}, args={args}"
+        )
 
         # Wait for the response with a timeout
         timeout = 10  # seconds

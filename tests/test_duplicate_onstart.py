@@ -2,8 +2,10 @@
 """
 Test to check if onstart is still being called twice
 """
-import pytest
+
 import gevent
+import pytest
+
 from aems.client.agent import Agent, Core
 
 
@@ -18,11 +20,14 @@ class DuplicateTestAgent(Agent):
         print(f"ONSTART called! Count: {self.onstart_count}")
 
 
-def test_duplicate_onstart_issue(message_bus):
+def test_duplicate_onstart_issue(message_bus_manager_fixture):
     """Test that onstart is only called once."""
     print("Testing for duplicate onstart issue...")
 
-    agent = DuplicateTestAgent("test_agent", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    agent = manager.create_agent("test_agent", DuplicateTestAgent)
 
     try:
         print("1. Connecting agent...")
@@ -34,7 +39,9 @@ def test_duplicate_onstart_issue(message_bus):
         print(f"Final onstart count: {agent.onstart_count}")
 
         # Check that onstart was called exactly once
-        assert agent.onstart_count == 1, f"Expected onstart=1, got {agent.onstart_count}"
+        assert (
+            agent.onstart_count == 1
+        ), f"Expected onstart=1, got {agent.onstart_count}"
         print("✓ onstart was called exactly once!")
 
     finally:

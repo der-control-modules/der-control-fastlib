@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm>=6.0"]
+requires = ["setuptools>=78.1.1", "wheel", "setuptools_scm>=6.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -23,6 +23,7 @@ classifiers = [
 ]
 # Here's how to specify dependencies in pyproject.toml format:
 dependencies = [
+    "colorama~=0.4.6",
     "fastapi~=0.119.1",
     "uvicorn~=0.38.0",
     "websocket-client~=1.9.0",
@@ -31,25 +32,91 @@ dependencies = [
     "httpx~=0.28.1",
     "pydantic~=2.12.3",
     "pydantic_core~=2.41.4",
+    "PyJWT~=2.8.0",
+    "python-multipart~=0.0.12",
     "PyYAML==6.0.3",
     "watchdog==6.0.0",
-    "watchgod==0.8.2"
+    "watchgod==0.8.2",
+    "jinja2~=3.1.2",
+    "python-dateutil>=2.8.0",  # For timestamp parsing in VOLTTRON compatibility layer
+    "ply>=3.11",               # For VOLTTRON historian agents (lexer/parser)
+    "pytz>=2023.3",            # For VOLTTRON compatibility layer (datetime timezone handling)
+    "tzlocal>=4.0",            # For VOLTTRON base_historian (local timezone detection)
+    "psutil>=5.9.0",           # For VOLTTRON platform layer
+    "aiodocker>=0.21.0",       # For Docker container log API endpoints (async)
+    # Security: Ensure minimum versions for transitive dependencies
+    "starlette>=0.47.2",     # Fixes GHSA-2c2j-9gv5-cj73 (blocking thread issue)
+    "cryptography>=44.0.1",  # Security: enforce minimum cryptography version
 ]
 dynamic = ["version"]
 
 [project.optional-dependencies]
 # Dependencies for development
 dev = [
-    "black>=24.0.0",
-    "pylint>=3.0.0",
-    "flake8>=7.0.0",
-    "flake8-pyproject>=1.2.0",
+    "ruff>=0.8.5",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
     "build>=1.0.0",
     "tomli>=1.2.0; python_version<'3.11'",
+    "pip-audit>=2.6.0",
+    "bandit>=1.7.0",
+    "click>=8.0.0",
+    "pre-commit>=3.0.0",
 ]
+
+# Dependencies for VOLTTRON Historian agents (SQLHistorian, MQTTHistorian, etc.)
+# These are required for all historian agent types
+historians = [
+    "python-dateutil>=2.8.0",  # For timestamp parsing in BaseHistorian
+    "ply>=3.11",               # For SQLHistorian (lexer/parser for table definitions)
+    # Optional database drivers - install only what you need:
+    # "mysql-connector-python>=8.0.33",  # For SQLHistorian with MySQL backend
+    # "psycopg2-binary>=2.9.0",          # For SQLHistorian with PostgreSQL/Redshift backend
+    # "paho-mqtt>=1.6.0",                # For MQTTHistorian
+]
+
+# Dependencies for PlatformDriverAgent device interfaces
+# These are optional and only needed when using specific hardware drivers
+drivers = [
+    "bacpypes>=0.16.7",        # For PlatformDriverAgent BACnet driver interface
+    "pymodbus>=2.5.3",         # For PlatformDriverAgent Modbus driver interface
+    "modbus-tk>=1.1.2",        # For PlatformDriverAgent Modbus TK driver interface
+    "pyserial>=3.5",           # For PlatformDriverAgent serial communication (Modbus)
+    # Note: pydnp3 for DNP3/IEEE 2030.5 drivers requires manual installation
+    # Note: suds-jurko for ChargePoint driver may be needed for EV charging stations
+]
+
+# Dependencies for ILCAgent (Intelligent Load Control Agent)
+# Required for demand response and grid services control applications
+ilc = [
+    "sympy>=1.12",             # For ILCAgent (symbolic math for demand formula evaluation)
+    "transitions>=0.9.0",      # For ILCAgent (state machine library for control logic)
+]
+
+# Dependencies for WeatherDotGov agent
+# Required for weather data collection agents
+weather = [
+    "grequests>=0.7.0",        # For WeatherDotGov agent (asynchronous HTTP requests)
+    "pint>=0.17",              # For WeatherDotGov agent (unit conversion and handling)
+]
+
+# Dependencies for the orchestrator pipeline (Step 1: generate_configs.py)
+pipeline = [
+    "configargparse>=1.5.3",
+    "netifaces>=0.11.0",
+    "pyyaml>=6.0",
+]
+
+# Dependencies for AEMS Manager agent
+manager = [
+    "pandas>=2.0.0",           # Data analysis and CSV handling
+    "geopy>=2.4.0",            # Geographic calculations
+    "tzlocal>=4.0",            # Local timezone detection
+    "colorama>=0.4.4",         # Terminal color output
+    "tabulate>=0.9.0",         # Formatted table output
+]
+
 # # Dependencies for documentation
 # docs = [
 #     "sphinx>=6.1.3",
@@ -85,60 +152,8 @@ where = ["src"]
 [tool.setuptools_scm]
 # Uses git tags for versioning
 
-[tool.black]
-line-length = 100
-target-version = ["py310", "py311", "py312"]
-skip-string-normalization = false
-
-[tool.flake8]
-max-line-length = 100
-# Ignore codes that conflict with Black formatter
-extend-ignore = [
-    "E203",  # whitespace before ':'
-    "W503",  # line break before binary operator
-    "E501",  # line too long (handled by Black)
-    "W504",  # line break after binary operator
-    "E231",  # missing whitespace after ','
-    "E226",  # missing whitespace around arithmetic operator
-    "E241",  # multiple spaces after ','
-    "E242",  # multiple spaces after operator
-    "W291",  # trailing whitespace (handled by Black)
-    "W293",  # blank line contains whitespace (handled by Black)
-]
-# Enable specific checks that complement Pylint
-select = [
-    "F",     # Pyflakes errors
-    "E9",    # Runtime errors
-    "W6",    # Warnings
-]
-
-[tool.pylint.format]
-max-line-length = 100
-
-[tool.pylint.messages_control]
-disable = [
-    "trailing-whitespace",
-    "line-too-long",           # Handled by Black
-    "missing-final-newline",   # Handled by Black
-    "multiple-statements",     # Can conflict with Black's formatting
-    "too-many-arguments",      # Style preference
-    "too-few-public-methods",  # Style preference
-]
-
-# Enable useful checks that complement flake8
-enable = [
-    "useless-suppression",
-]
-
-[tool.pylint.basic]
-# Allow single-character variable names in specific contexts
-good-names = ["i", "j", "k", "ex", "Run", "_", "id", "ws"]
-
-[tool.pylint.design]
-# Reasonable limits that won't conflict with practical code
-max-args = 10
-max-locals = 20
-max-branches = 15
+# Ruff is now our primary linter and formatter
+# It replaces black, isort, flake8, and most of pylint
 
 [tool.pytest.ini_options]
 minversion = "6.0"
@@ -152,8 +167,143 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "bacnet: marks tests that require BACnet device or network (deselect with '-m \"not bacnet\"')",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
 ]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["*/tests/*", "*/site-packages/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+    "raise ImportError",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", "build", "dist"]
+skips = ["B101", "B601", "B404", "B603", "B607", "B602", "B110"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = [
+    "__pycache__",
+    ".git",
+    ".venv",
+    "build",
+    "dist",
+]
+# Respect existing formatting more
+respect-gitignore = true
+
+[tool.ruff.format]
+# Use double quotes for strings (like black default)
+quote-style = "double"
+# Use trailing commas
+skip-magic-trailing-comma = false
+# Indent with spaces
+indent-style = "space"
+# Unix line endings
+line-ending = "lf"
+# Try to respect the author's line breaking decisions
+docstring-code-format = false
+preview = false
+# Exclude test files from formatting to preserve assert statement style
+exclude = ["tests/**/*.py"]
+
+[tool.ruff.lint]
+# Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
+# Also enable:
+# - pycodestyle warnings (`W`)
+# - isort (`I`)
+# - pydocstyle (`D`)
+# - pyupgrade (`UP`) - upgrade syntax for newer Python versions
+# - flake8-bugbear (`B`) - additional bug and design problems
+# - flake8-simplify (`SIM`) - simplify code
+# - flake8-comprehensions (`C4`) - improve comprehensions
+# - flake8-pie (`PIE`) - miscellaneous lints
+# - flake8-type-checking (`TCH`) - type checking improvements
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings (includes W292 for newline at end of file)
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "PIE", # flake8-pie
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "UP",  # pyupgrade
+    "D",   # pydocstyle (docstrings)
+]
+
+# Ignore specific rules that conflict with our coding standards or Black
+ignore = [
+    "E203",   # whitespace before ':' (conflicts with Black)
+    "D100",   # Missing docstring in public module (not needed for all modules)
+    "D101",   # Missing docstring in public class (not needed for test classes)
+    "D102",   # Missing docstring in public method (not needed for test methods)
+    "D103",   # Missing docstring in public function (not needed for test functions)
+    "D104",   # Missing docstring in public package (not needed for __init__.py)
+    "D105",   # Missing docstring in magic method (not always needed)
+    "D107",   # Missing docstring in __init__ (not always needed)
+    "D200",   # One-line docstring should fit on one line
+    "D205",   # 1 blank line required between summary line and description (style preference)
+    "D212",   # Multi-line docstring summary should start at the first line
+    "D401",   # First line should be in imperative mood (style preference)
+    "B008",   # Do not perform function calls in argument defaults (common in FastAPI)
+    "B017",   # Do not assert blind exception (acceptable in tests)
+    "B904",   # raise ... from err (backward compatibility)
+    "UP007",  # Use X | Y for unions (want to maintain Python 3.10 compatibility)
+    "TC002",  # Move third-party imports into type-checking blocks (can break runtime)
+    "TC003",  # Move standard library imports into type-checking blocks (can break runtime)
+    "SIM102", # Use single if statement (style preference)
+    "SIM108", # Use ternary operator (style preference)
+    "PIE790", # Unnecessary pass statement (sometimes needed for clarity)
+    "E402",   # Module level import not at top (gevent monkey patching requires this)
+]
+
+# Allow autofix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can use more relaxed rules
+"tests/**/*.py" = [
+    "D",     # Don't require docstrings in tests
+    "SIM",   # Don't simplify test code (clarity over brevity)
+    "TCH",   # Don't enforce type checking imports in tests
+    "B011",  # Don't warn about assert False in tests
+    "PIE804", # Don't require unnecessary dict kwargs
+    "PIE800", # Don't warn about unnecessary spread
+]
+# Allow more flexibility in __init__ files
+"**/__init__.py" = [
+    "D104",  # Don't require docstring in __init__.py
+    "F401",  # Allow "unused" imports (they're often re-exports)
+    "F403",  # Allow star imports in __init__.py
+]
+# Scripts and examples can be more flexible
+"examples/**/*.py" = ["D", "T201", "T203"]  # Allow print statements
+"scripts/**/*.py" = ["D", "T201", "T203"]   # Allow print statements
+
+[tool.ruff.lint.isort]
+known-first-party = ["aems"]
+force-single-line = false
+combine-as-imports = true
+split-on-trailing-comma = false  # Consistent with format.skip-magic-trailing-comma=false
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"  # Use NumPy docstring style

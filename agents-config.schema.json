@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AEMS Agents Configuration",
+  "description": "Schema for configuring legacy VOLTTRON and AEMS Edge agents",
+  "type": "object",
+  "required": ["agents", "global"],
+  "properties": {
+    "description": {
+      "type": "string",
+      "description": "Description of this configuration file"
+    },
+    "agents": {
+      "type": "object",
+      "description": "Map of agent configurations keyed by agent name",
+      "patternProperties": {
+        "^[a-zA-Z0-9_-]+$": {
+          "type": "object",
+          "required": ["enabled", "type", "agent_dir", "identity"],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether this agent should be started"
+            },
+            "type": {
+              "type": "string",
+              "enum": ["volttron", "aems-edge"],
+              "description": "Type of agent: volttron (standard VOLTTRON agent) or aems-edge (PNNL AEMS edge agent)"
+            },
+            "agent_dir": {
+              "type": "string",
+              "description": "Path to the agent directory (absolute path in container)"
+            },
+            "identity": {
+              "type": "string",
+              "description": "Agent identity/VIP identity"
+            },
+            "config_file": {
+              "type": ["string", "null"],
+              "description": "Path to config file. Can be: (1) relative path from host (e.g., 'configs/agent/config') - will be mounted; (2) absolute path in container (e.g., '/volttron/examples/AgentDir/config') - uses existing file; (3) null - uses 'config' in agent_dir"
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable description of the agent"
+            },
+            "environment": {
+              "type": "object",
+              "description": "Additional environment variables for this agent",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "volumes": {
+              "type": "array",
+              "description": "Additional volume mounts for this agent",
+              "items": {
+                "type": "string"
+              }
+            },
+            "network_mode": {
+              "type": "string",
+              "description": "Docker network mode override (default: bridge)"
+            },
+            "depends_on": {
+              "type": "array",
+              "description": "List of other agent names this agent depends on",
+              "items": {
+                "type": "string"
+              }
+            },
+            "ports": {
+              "type": "array",
+              "description": "Port mappings for the agent (e.g., ['8080:8080', '8443:443'])",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]+:[0-9]+$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "global": {
+      "type": "object",
+      "description": "Global configuration for all agents",
+      "required": ["server_address", "volttron_home"],
+      "properties": {
+        "server_address": {
+          "type": "string",
+          "description": "WebSocket address of the AEMS server"
+        },
+        "volttron_home": {
+          "type": "string",
+          "description": "Path to VOLTTRON_HOME in container"
+        },
+        "config_base_dir": {
+          "type": "string",
+          "description": "Base directory for agent config files"
+        },
+        "restart_policy": {
+          "type": "string",
+          "enum": ["no", "always", "unless-stopped", "on-failure"],
+          "description": "Docker restart policy for agents"
+        },
+        "default_environment": {
+          "type": "object",
+          "description": "Default environment variables for all agents",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "log_dir": {
+          "type": "string",
+          "description": "Directory for agent log files (default: /var/log/aems)"
+        },
+        "enable_agent_logs": {
+          "type": "boolean",
+          "description": "Enable individual agent log files (default: true)"
+        }
+      }
+    }
+  }
+}

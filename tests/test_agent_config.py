@@ -2,38 +2,36 @@
 Test agent configuration functionality using pytest
 """
 
-import pytest
 import gevent
-from aems.client.agent import Agent
+import pytest
 
 
 class TestAgentConfig:
     """Test agent configuration functionality with config merging."""
 
     @pytest.fixture(autouse=True)
-    def setup_agents(self, message_bus):
+    def setup_agents(self, message_bus_manager_fixture):
         """Set up test agents with the running message bus."""
-        # Store the message bus reference
-        self.message_bus = message_bus
+        # Store the message bus manager reference
+        self.manager = message_bus_manager_fixture
+        self.manager.start_bus()
 
         # Create agents with unique identities for each test run
         import uuid
 
         test_id = str(uuid.uuid4())[:8]  # Short unique ID for this test run
-        self.agent = Agent(f"config_test_agent_{test_id}", port=8888)
-        self.config_agent = Agent(f"config_manager_{test_id}", port=8888)
-
-        # Connect both agents
-        self.agent.connect()
-        self.config_agent.connect()
+        self.agent = self.manager.create_connected_agent(f"config_test_agent_{test_id}")
+        self.config_agent = self.manager.create_connected_agent(
+            f"config_manager_{test_id}"
+        )
 
         # Wait for connections
         gevent.sleep(1)
 
         # Clear any cached configs from previous tests
-        self.agent.vip.config._server_configs.clear()
+        self.agent.vip.config._config_cache.clear()
         self.agent.vip.config._default_configs.clear()
-        self.config_agent.vip.config._server_configs.clear()
+        self.config_agent.vip.config._config_cache.clear()
         self.config_agent.vip.config._default_configs.clear()
 
         # Clear server-side configs for this agent to ensure clean test state
@@ -44,37 +42,37 @@ class TestAgentConfig:
         # Cleanup
         if hasattr(self, "agent"):
             # Clear config caches before disconnecting
-            self.agent.vip.config._server_configs.clear()
+            self.agent.vip.config._config_cache.clear()
             self.agent.vip.config._default_configs.clear()
             self.agent.disconnect()
         if hasattr(self, "config_agent"):
             # Clear config caches before disconnecting
-            self.config_agent.vip.config._server_configs.clear()
+            self.config_agent.vip.config._config_cache.clear()
             self.config_agent.vip.config._default_configs.clear()
             self.config_agent.disconnect()
 
     def _clear_server_configs(self):
         """Clear server-side configs for test agents to ensure clean test state."""
-        import requests
         import gevent
+        import requests
 
         # List and delete all configs for both test agents
         for agent in [self.agent, self.config_agent]:
             try:
                 # List configs for this agent
                 list_url = f"http://localhost:8888/config-store/{agent.identity}"
-                response = requests.get(list_url)
+                response = requests.get(list_url, timeout=5)
                 if response.status_code == 200:
                     configs = response.json()
                     # Delete each config
                     for config in configs:
                         config_name = config.get("name")
                         if config_name:
-                            delete_url = (
-                                f"http://localhost:8888/config-store/{agent.identity}/{config_name}"
+                            delete_url = f"http://localhost:8888/config-store/{agent.identity}/{config_name}"
+                            requests.delete(delete_url, timeout=5)
+                            print(
+                                f"Deleted server config: {agent.identity}/{config_name}"
                             )
-                            requests.delete(delete_url)
-                            print(f"Deleted server config: {agent.identity}/{config_name}")
                 gevent.sleep(0.1)  # Small delay between operations
             except Exception as e:
                 print(f"Failed to clear server configs for {agent.identity}: {e}")
@@ -96,14 +94,20 @@ class TestAgentConfig:
         # Get config - should return defaults
         result = self.agent.vip.config.get(config_name)
 
-        assert result == default_config, "Should return default config when no server config exists"
+        assert (
+            result == default_config
+        ), "Should return default config when no server config exists"
 
     def test_config_server_only(self):
         """Test config.get() returns server config when no defaults exist."""
         config_name = "test_config_server_only"  # Unique name for this test
 
         # Store configuration on server using the SAME agent
-        server_config = {"timeout": 120, "retry_count": 5, "endpoints": ["server1", "server2"]}
+        server_config = {
+            "timeout": 120,
+            "retry_count": 5,
+            "endpoints": ["server1", "server2"],
+        }
 
         # Store via agent (same agent that will retrieve it)
         store_result = self.agent.vip.config.set(config_name, server_config)
@@ -115,7 +119,9 @@ class TestAgentConfig:
         # Get config from same agent - should return server config
         result = self.agent.vip.config.get(config_name)
 
-        assert result == server_config, "Should return server config when no defaults exist"
+        assert (
+            result == server_config
+        ), "Should return server config when no defaults exist"
 
     def test_config_merging_server_overrides_defaults(self):
         """Test that server config merges with and overrides default config."""
@@ -158,7 +164,9 @@ class TestAgentConfig:
             "new_setting": "server_value",  # From server (new)
         }
 
-        assert result == expected, f"Config should be merged. Expected: {expected}, Got: {result}"
+        assert (
+            result == expected
+        ), f"Config should be merged. Expected: {expected}, Got: {result}"
 
     def test_config_merging_preserves_defaults(self):
         """Test that defaults are preserved when server config doesn't override them."""
@@ -173,7 +181,11 @@ class TestAgentConfig:
 
         # Store server config that only overrides database settings
         server_config = {
-            "database": {"host": "production.server.com", "port": 3306, "name": "prod_db"}
+            "database": {
+                "host": "production.server.com",
+                "port": 3306,
+                "name": "prod_db",
+            }
         }
 
         store_result = self.agent.vip.config.set("preserve_config", server_config)
@@ -186,12 +198,18 @@ class TestAgentConfig:
 
         # Expected: server database config + default logging + default features
         expected = {
-            "database": {"host": "production.server.com", "port": 3306, "name": "prod_db"},
+            "database": {
+                "host": "production.server.com",
+                "port": 3306,
+                "name": "prod_db",
+            },
             "logging": {"level": "INFO", "file": "default.log"},
             "features": ["feature1", "feature2"],
         }
 
-        assert result == expected, f"Should preserve defaults. Expected: {expected}, Got: {result}"
+        assert (
+            result == expected
+        ), f"Should preserve defaults. Expected: {expected}, Got: {result}"
 
     def test_config_non_dict_values(self):
         """Test that non-dict values are handled correctly in merging."""
@@ -206,7 +224,9 @@ class TestAgentConfig:
 
         # Get config - server should override completely for non-dict values
         result = self.agent.vip.config.get("simple_config")
-        assert result == "server_value", "Server value should override default for non-dict values"
+        assert (
+            result == "server_value"
+        ), "Server value should override default for non-dict values"
 
     def test_config_mixed_dict_and_non_dict(self):
         """Test merging when default is dict but server is non-dict."""
@@ -253,14 +273,11 @@ class TestAgentConfig:
         list_result = self.config_agent.vip.config.list()
         config_list = list_result.get(timeout=5)
 
-        # Extract config names from the list
-        config_names = [config["name"] for config in config_list]
-
-        # Verify all configs are listed
+        # Verify all configs are listed (config_list is now just a list of config names)
         for config_name in configs.keys():
             assert (
-                config_name in config_names
-            ), f"Config '{config_name}' should be in list: {config_names}"
+                config_name in config_list
+            ), f"Config '{config_name}' should be in list: {config_list}"
 
     def test_config_validation(self):
         """Test configuration validation."""
@@ -309,7 +326,9 @@ class TestAgentConfig:
         assert (
             agent2_retrieved == agent2_config
         ), f"Agent2 should get its own config: {agent2_retrieved}"
-        assert agent1_retrieved != agent2_retrieved, "Configs should be different between agents"
+        assert (
+            agent1_retrieved != agent2_retrieved
+        ), "Configs should be different between agents"
 
     def test_config_watch_functionality(self):
         """Test configuration watch/notification functionality."""

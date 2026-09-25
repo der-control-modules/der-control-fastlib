@@ -2,8 +2,10 @@
 """
 Test configuration subscription and UPDATE notification behavior
 """
-import pytest
+
 import gevent
+import pytest
+
 from aems.client.agent import Agent
 
 
@@ -27,11 +29,14 @@ class ConfigSubscriptionTestAgent(Agent):
         self.received_configs[config_name] = config_value
 
 
-def test_config_subscription_and_update(message_bus):
+def test_config_subscription_and_update(message_bus_manager_fixture):
     """Test that subscribing to a config and storing it triggers an UPDATE notification."""
     print("Testing configuration subscription and UPDATE notification...")
 
-    agent = ConfigSubscriptionTestAgent("config_test_agent", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    agent = manager.create_agent("config_test_agent", ConfigSubscriptionTestAgent)
 
     try:
         print("1. Connecting agent...")
@@ -41,14 +46,20 @@ def test_config_subscription_and_update(message_bus):
         print("2. Subscribing to config 'test_config'...")
         # Subscribe to a specific configuration
         subscription_id = agent.config.subscribe(
-            callback=agent.config_callback, pattern="test_config", actions=["UPDATE", "NEW"]
+            callback=agent.config_callback,
+            pattern="test_config",
+            actions=["UPDATE", "NEW"],
         )
         print(f"Subscription ID: {subscription_id}")
         gevent.sleep(0.5)  # Allow subscription to register
 
         print("3. Storing configuration on server...")
         # Store configuration using the agent's config.set method
-        config_data = {"setting1": "value1", "setting2": 42, "setting3": ["item1", "item2"]}
+        config_data = {
+            "setting1": "value1",
+            "setting2": 42,
+            "setting3": ["item1", "item2"],
+        }
 
         print(f"Storing config data: {config_data}")
         agent.config.set("test_config", config_data)
@@ -70,7 +81,9 @@ def test_config_subscription_and_update(message_bus):
 
         # Verify the config content matches what was stored
         if isinstance(received_config, dict):
-            assert "setting1" in received_config, "setting1 not found in received config"
+            assert (
+                "setting1" in received_config
+            ), "setting1 not found in received config"
             assert (
                 received_config["setting1"] == "value1"
             ), f"Expected 'value1', got {received_config['setting1']}"
@@ -82,11 +95,14 @@ def test_config_subscription_and_update(message_bus):
             agent.disconnect()
 
 
-def test_config_subscription_multiple_updates(message_bus):
+def test_config_subscription_multiple_updates(message_bus_manager_fixture):
     """Test that multiple config updates trigger multiple UPDATE notifications."""
     print("\nTesting multiple configuration updates...")
 
-    agent = ConfigSubscriptionTestAgent("multi_config_test_agent", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    agent = manager.create_agent("multi_config_test_agent", ConfigSubscriptionTestAgent)
 
     try:
         print("1. Connecting agent...")
@@ -95,7 +111,9 @@ def test_config_subscription_multiple_updates(message_bus):
 
         print("2. Subscribing to config 'multi_config'...")
         agent.config.subscribe(
-            callback=agent.config_callback, pattern="multi_config", actions=["UPDATE", "NEW"]
+            callback=agent.config_callback,
+            pattern="multi_config",
+            actions=["UPDATE", "NEW"],
         )
         gevent.sleep(0.5)
 
@@ -142,11 +160,16 @@ def test_config_subscription_multiple_updates(message_bus):
             agent.disconnect()
 
 
-def test_config_subscription_actions_filter(message_bus):
+def test_config_subscription_actions_filter(message_bus_manager_fixture):
     """Test that subscription action filters work correctly."""
     print("\nTesting configuration subscription action filters...")
 
-    agent = ConfigSubscriptionTestAgent("action_filter_test_agent", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    agent = manager.create_agent(
+        "action_filter_test_agent", ConfigSubscriptionTestAgent
+    )
 
     try:
         print("1. Connecting agent...")

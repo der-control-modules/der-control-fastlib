@@ -1,0 +1,222 @@
+# Generated docker-compose.yml
+# DO NOT EDIT MANUALLY - Generated from agents-config.json
+# Run: python generate-docker-compose.py to regenerate
+
+services:
+  aems-fastlib-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DOCKER_GID: "125"
+    image: aems-fastapi:latest
+    container_name: aems-fastlib-server
+    ports:
+      - "5410:8000"
+    volumes:
+      - volttron-home:/var/volttron
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - VOLTTRON_HOME=/var/volttron
+      - AEMS_PORT=8000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - aems-network
+
+  listener:
+    image: aems-fastapi:latest
+    container_name: aems-listener
+    volumes:
+      - volttron-home:/var/volttron
+      - agent-logs:/var/log/aems
+    environment:
+      - VOLTTRON_HOME=/var/volttron
+      - AGENT_LOG_FILE=/var/log/aems/listener.log
+    command: [
+      "python", "/app/start-legacy.py",
+      "--agent-dir", "/volttron/examples/ListenerAgent",
+      "--config", "config",
+      "--identity", "listener",
+      "--address", "ws://aems-fastlib-server:8000"
+    ]
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q start-legacy /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      aems-fastlib-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aems-network
+
+  sql_historian:
+    image: aems-fastapi:latest
+    container_name: aems-sql-historian
+    volumes:
+      - volttron-home:/var/volttron
+      - ./configs/historian:/app/configs/historian:ro
+      - agent-logs:/var/log/aems
+      - ./data:/var/volttron/data
+    environment:
+      - VOLTTRON_HOME=/var/volttron
+      - AGENT_LOG_FILE=/var/log/aems/platform.historian.log
+    command: [
+      "python", "/app/start-legacy.py",
+      "--agent-dir", "/volttron/services/core/SQLHistorian",
+      "--config", "/app/configs/historian/config",
+      "--identity", "platform.historian",
+      "--address", "ws://aems-fastlib-server:8000"
+    ]
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q start-legacy /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      aems-fastlib-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aems-network
+
+  aems_manager:
+    image: aems-fastapi:latest
+    container_name: aems-aems-manager
+    volumes:
+      - volttron-home:/var/volttron
+      - ./configs/aems-manager:/app/configs/aems-manager:ro
+      - agent-logs:/var/log/aems
+    environment:
+      - VOLTTRON_HOME=/var/volttron
+      - AGENT_LOG_FILE=/var/log/aems/manager.rtu02.log
+    command: [
+      "python", "/app/start-legacy.py",
+      "--agent-dir", "/volttron-pnnl-aems/aems-edge/Manager",
+      "--config", "/app/configs/aems-manager/config",
+      "--identity", "manager.rtu02",
+      "--address", "ws://aems-fastlib-server:8000"
+    ]
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q start-legacy /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      aems-fastlib-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aems-network
+
+  weather_dot_gov:
+    image: aems-fastapi:latest
+    container_name: aems-weather-dot-gov
+    volumes:
+      - volttron-home:/var/volttron
+      - ./configs/weather:/app/configs/weather:ro
+      - agent-logs:/var/log/aems
+    environment:
+      - VOLTTRON_HOME=/var/volttron
+      - AGENT_LOG_FILE=/var/log/aems/platform.weather.log
+    command: [
+      "python", "/app/start-legacy.py",
+      "--agent-dir", "/volttron/services/core/WeatherDotGov",
+      "--config", "/app/configs/weather/config",
+      "--identity", "platform.weather",
+      "--address", "ws://aems-fastlib-server:8000"
+    ]
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q start-legacy /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      aems-fastlib-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aems-network
+
+  nf_driver:
+    image: aems-fastapi:latest
+    container_name: aems-nf-driver
+    volumes:
+      - volttron-home:/var/volttron
+      - ./configs/nf-driver:/app/configs/nf-driver:ro
+      - agent-logs:/var/log/aems
+    environment:
+      - VOLTTRON_HOME=/var/volttron
+      - AGENT_LOG_FILE=/var/log/aems/platform.driver.log
+    command: [
+      "python", "/app/start-legacy.py",
+      "--agent-dir", "/volttron-pnnl-aems/aems-edge/Normal",
+      "--config", "/app/configs/nf-driver/config",
+      "--identity", "platform.driver",
+      "--address", "ws://aems-fastlib-server:8000"
+    ]
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q start-legacy /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      aems-fastlib-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aems-network
+
+  ilc:
+    image: aems-fastapi:latest
+    container_name: aems-ilc
+    volumes:
+      - volttron-home:/var/volttron
+      - ./configs/ilc:/app/configs/ilc:ro
+      - agent-logs:/var/log/aems
+    environment:
+      - VOLTTRON_HOME=/var/volttron
+      - AGENT_LOG_FILE=/var/log/aems/ilc.platform.log
+    command: [
+      "python", "/app/start-legacy.py",
+      "--agent-dir", "/volttron-pnnl-applications/GridServices/Control/ILCAgent",
+      "--config", "/app/configs/ilc/config",
+      "--identity", "ilc.platform",
+      "--address", "ws://aems-fastlib-server:8000"
+    ]
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q start-legacy /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      aems-fastlib-server:
+        condition: service_healthy
+      nf_driver:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - aems-network
+
+volumes:
+  volttron-home:
+    driver: local
+  agent-logs:
+    driver: local
+
+networks:
+  aems-network:
+    driver: bridge

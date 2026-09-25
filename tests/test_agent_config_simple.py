@@ -2,27 +2,23 @@
 Test agent configuration functionality using pytest - simplified for debugging
 """
 
-import pytest
 import gevent
-from aems.client.agent import Agent
+import pytest
 
 
 class TestAgentConfigSimple:
     """Test agent configuration functionality with config merging."""
 
     @pytest.fixture(autouse=True)
-    def setup_agents(self, message_bus):
+    def setup_agents(self, message_bus_manager_fixture):
         """Set up test agents with the running message bus."""
-        # Store the message bus reference
-        self.message_bus = message_bus
+        # Store the message bus manager reference
+        self.manager = message_bus_manager_fixture
+        self.manager.start_bus()
 
-        # Create agents with the correct port
-        self.agent = Agent("config_test_agent", port=8888)
-        self.config_agent = Agent("config_manager", port=8888)
-
-        # Connect both agents
-        self.agent.connect()
-        self.config_agent.connect()
+        # Create agents using the new paradigm
+        self.agent = self.manager.create_connected_agent("config_test_agent")
+        self.config_agent = self.manager.create_connected_agent("config_manager")
 
         # Wait for connections
         gevent.sleep(1)
@@ -50,17 +46,25 @@ class TestAgentConfigSimple:
         # Get config - should return defaults
         result = self.agent.vip.config.get("test_config")
 
-        assert result == default_config, "Should return default config when no server config exists"
+        assert (
+            result == default_config
+        ), "Should return default config when no server config exists"
 
     def test_debug_server_config_set(self):
         """Debug test to see what happens when we try to set server config."""
         # Store configuration on server using set method
-        server_config = {"timeout": 120, "retry_count": 5, "endpoints": ["server1", "server2"]}
+        server_config = {
+            "timeout": 120,
+            "retry_count": 5,
+            "endpoints": ["server1", "server2"],
+        }
 
         print(f"Attempting to set server config: {server_config}")
 
         # Store via config_agent using the set method
-        store_result = self.config_agent.vip.config.set("test_server_config", server_config)
+        store_result = self.config_agent.vip.config.set(
+            "test_server_config", server_config
+        )
         print(f"Store result type: {type(store_result)}")
 
         try:
@@ -121,4 +125,6 @@ class TestAgentConfigSimple:
         print(f"Expected: {expected}")
         print(f"Actual: {result2}")
 
-        assert result2 == expected, f"Config should be merged. Expected: {expected}, Got: {result2}"
+        assert (
+            result2 == expected
+        ), f"Config should be merged. Expected: {expected}, Got: {result2}"

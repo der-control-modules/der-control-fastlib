@@ -1,0 +1,9 @@
+{
+    "smtp_address": "smtp.example.com",
+    "smtp_port": 587,
+    "smtp_username": "alerts@example.com",
+    "smtp_password": "changeme",
+    "from_address": "alerts@example.com",
+    "to_addresses": ["admin@example.com"],
+    "allow_html": false
+}

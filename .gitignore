@@ -1,41 +1,63 @@
-poetry.lock
-.*.sw?
-*.py[co]
-*.egg-info
-*~
-.svn
-.metadata
-parser.out
-node_modules
-applications
-.cache
-.idea
-/env/
+# Add patterns for files to ignore
+
+# Site-specific config (copy from config.ini.example)
+config.ini
+*.log
+log.*
+credentials_store/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
 .venv/
-/Agents/*/{build,dist}/
-/Agents/*.egg
-/.project
-/.pydevproject
-/twistd.pid
-/.settings
-/build
-/configs/
-/config/
-/docs/build/*
-/docs/source/volttron-api
-volttron.log
-__pycache__
-.vscode/
-.python-version
-.pytest_cache
-start-rabbitmq
-stop-rabbitmq
-rabbitmq.log
-*.result.txt
+*.pptx
+summary.md
+test_who_is*.py
+.claude/
+CLAUDE.md
+
+# Coverage reports
 .coverage
 htmlcov/
-MnesiaCore.*
-rabbitmq-server.download.tar.xz
-/MagicMock/mock/
-/docs/source/volttron_api/
-/dist/
+coverage.xml
+
+# VOLTTRON runtime data
+.volttron_home/
+
+# Certificates (may contain sensitive data)
+certs/
+
+# Examples and temporary directories
+example-from-volttron/
+
+# Daily notes and temporary documentation
+END_OF_DAY_*.md
+
+# Agent configuration files (keep examples, ignore actual configs)
+configs/*/config
+configs/**/config
+!configs/**/*.example
+!configs/**/README.md
+!configs/.gitkeep
+
+# Docker generated files
+docker-compose.yml.backup
+
+# Logs directory
+logs/
+
+# Historian SQLite data (bind mounted from container)
+data/
+
+# Auto-generated documentation (AI session artifacts)
+DOCKER*.md
+AGENTS_CONFIG*.md
+CONFIG_FILE_OPTIONS.md
+PORT_MAPPING_GUIDE.md
+docker-architecture.txt
+DOCKER_FILES.txt
+
+# BACnet investigation notes (tests/)
+tests/BACNET_*.md

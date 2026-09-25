@@ -2,29 +2,24 @@
 Test agent publish/subscribe functionality using pytest
 """
 
-import pytest
 import gevent
-from aems.client.agent import Agent
+import pytest
 
 
 class TestAgentPubSub:
     """Test agent publish/subscribe functionality."""
 
     @pytest.fixture(autouse=True)
-    def setup_agents(self, message_bus):
+    def setup_agents(self, message_bus_manager_fixture):
         """Set up test agents with the running message bus."""
-        # Store the message bus reference
-        self.message_bus = message_bus
+        # Store the message bus manager reference
+        self.manager = message_bus_manager_fixture
+        self.manager.start_bus()
 
-        # Create agents with the correct port
-        self.publisher = Agent("test_publisher", port=8888)
-        self.subscriber1 = Agent("test_subscriber1", port=8888)
-        self.subscriber2 = Agent("test_subscriber2", port=8888)
-
-        # Connect all agents
-        self.publisher.connect()
-        self.subscriber1.connect()
-        self.subscriber2.connect()
+        # Create agents using the new paradigm
+        self.publisher = self.manager.create_connected_agent("test_publisher")
+        self.subscriber1 = self.manager.create_connected_agent("test_subscriber1")
+        self.subscriber2 = self.manager.create_connected_agent("test_subscriber2")
 
         # Wait for connections
         gevent.sleep(1)
@@ -38,7 +33,6 @@ class TestAgentPubSub:
             self.subscriber1.disconnect()
         if hasattr(self, "subscriber2"):
             self.subscriber2.disconnect()
-        if hasattr(self, "subscriber2"):
             self.subscriber2.core.stop().get()
 
     def test_basic_publish_subscribe(self):
@@ -58,7 +52,9 @@ class TestAgentPubSub:
         gevent.sleep(1)
 
         # Publish messages
-        pub_result1 = self.publisher.vip.pubsub.publish("", "test/topic1", "Hello from topic1")
+        pub_result1 = self.publisher.vip.pubsub.publish(
+            "", "test/topic1", "Hello from topic1"
+        )
         assert pub_result1.get() is True, "Publish 1 should succeed"
 
         pub_result2 = self.publisher.vip.pubsub.publish(
@@ -102,7 +98,9 @@ class TestAgentPubSub:
 
         # Publish matching and non-matching messages
         self.publisher.vip.pubsub.publish("", "pattern/123/test", "Should match").get()
-        self.publisher.vip.pubsub.publish("", "pattern/abc/test", "Should not match").get()
+        self.publisher.vip.pubsub.publish(
+            "", "pattern/abc/test", "Should not match"
+        ).get()
         self.publisher.vip.pubsub.publish("", "pattern/456/test", "Should match").get()
 
         # Wait for message processing
@@ -135,7 +133,9 @@ class TestAgentPubSub:
         # Publish to both topics
         self.publisher.vip.pubsub.publish("", "news/weather", "Sunny today").get()
         self.publisher.vip.pubsub.publish("", "alerts/emergency", "Test alert").get()
-        self.publisher.vip.pubsub.publish("", "other/random", "Should not receive").get()
+        self.publisher.vip.pubsub.publish(
+            "", "other/random", "Should not receive"
+        ).get()
 
         # Wait for message processing
         gevent.sleep(2)
@@ -151,8 +151,12 @@ class TestAgentPubSub:
 
         # Verify topics
         topics = [msg.get("topic", "") for msg in pubsub_messages]
-        assert any(topic.startswith("news/") for topic in topics), "Should receive news message"
-        assert any(topic.startswith("alerts/") for topic in topics), "Should receive alerts message"
+        assert any(
+            topic.startswith("news/") for topic in topics
+        ), "Should receive news message"
+        assert any(
+            topic.startswith("alerts/") for topic in topics
+        ), "Should receive alerts message"
 
     def test_message_content_integrity(self):
         """Test that message content is preserved correctly."""
@@ -173,7 +177,7 @@ class TestAgentPubSub:
             "dict": {"nested": "value"},
         }
 
-        self.publisher.vip.pubsub.publish("", "data/test", test_data).get()
+        self.publisher.vip.pubsub.publish("", "data/test", message=test_data).get()
         gevent.sleep(2)
 
         # Verify message content

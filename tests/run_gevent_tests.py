@@ -1,12 +1,12 @@
 # run_gevent_tests.py
 
 import sys
-import gevent
+
 from gevent_message_bus_test_clients import (
-    run_publisher_subscriber_test,
-    run_vip_message_test,
-    run_rpc_test,
     run_multi_hop_rpc_test,
+    run_publisher_subscriber_test,
+    run_rpc_test,
+    run_vip_message_test,
 )
 
 

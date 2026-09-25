@@ -2,9 +2,11 @@
 """
 Summary test demonstrating config store isolation per agent
 """
-import pytest
+
 import gevent
+import pytest
 import requests
+
 from aems.client.agent import Agent
 
 
@@ -16,12 +18,16 @@ class ConfigIsolationTestAgent(Agent):
     def on_config_update(self, config_name, action, config_value):
         """Handle configuration updates."""
         self.notifications.append(
-            {"config_name": config_name, "action": action, "agent_identity": self.identity}
+            {
+                "config_name": config_name,
+                "action": action,
+                "agent_identity": self.identity,
+            }
         )
         print(f"[{self.identity}] Received {action} for '{config_name}'")
 
 
-def test_config_store_isolation_summary(message_bus):
+def test_config_store_isolation_summary(message_bus_manager_fixture):
     """
     Comprehensive test demonstrating that:
     1. Each agent has its own isolated config store
@@ -31,9 +37,12 @@ def test_config_store_isolation_summary(message_bus):
     """
     print("Testing comprehensive config store isolation...")
 
-    # Create two agents
-    agent_a = ConfigIsolationTestAgent("agent_a", port=8888)
-    agent_b = ConfigIsolationTestAgent("agent_b", port=8888)
+    manager = message_bus_manager_fixture
+    manager.start_bus()
+
+    # Create two agents using the test manager
+    agent_a = manager.create_agent("agent_a", ConfigIsolationTestAgent)
+    agent_b = manager.create_agent("agent_b", ConfigIsolationTestAgent)
 
     try:
         print("\n1. Connecting both agents...")
@@ -56,13 +65,18 @@ def test_config_store_isolation_summary(message_bus):
         gevent.sleep(0.5)
 
         print("\n3. Agent A stores a config via agent.config.set()...")
-        agent_a.config.set("shared_config_name", {"owner": "agent_a", "method": "config.set"})
+        # Agent A should get a notification for its own config update
+        agent_a.config.set(
+            "shared_config_name",
+            {"owner": "agent_a", "method": "config.set"},
+            send_update=True,
+        )
         gevent.sleep(2)
 
         print("\n4. Agent B stores a config via REST API...")
         config_data = {"owner": "agent_b", "method": "rest_api"}
         response = requests.put(
-            "http://127.0.0.1:8888/config-store/agent_b/shared_config_name",
+            f"{manager.get_base_url()}/config-store/agent_b/shared_config_name",
             json=config_data,
             headers={"Content-Type": "application/json"},
         )

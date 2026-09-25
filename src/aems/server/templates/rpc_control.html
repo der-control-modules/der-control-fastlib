@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AEMS RPC Control Panel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #0a4d4e 0%, #1a5f5f 25%, #2d9687 50%, #a8d84e 75%, #c8e68f 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+            font-weight: 700;
+        }
+
+        .nav {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .nav a {
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 8px;
+            margin: 0 10px;
+            display: inline-block;
+            transition: all 0.3s;
+            border: 1px solid rgba(255,255,255,0.2);
+            font-weight: 500;
+        }
+
+        .nav a:hover {
+            background: rgba(255,255,255,0.25);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+
+        .panel h2 {
+            color: #333;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #1a5f5f 0%, #2d9687 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 700;
+        }
+
+        .agents-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .agent-card {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .agent-card:hover {
+            border-color: #2d9687;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(45, 150, 135, 0.3);
+        }
+
+        .agent-card.selected {
+            border-color: #2d9687;
+            background: linear-gradient(135deg, rgba(45, 150, 135, 0.1) 0%, rgba(168, 216, 78, 0.1) 100%);
+            box-shadow: 0 4px 12px rgba(45, 150, 135, 0.2);
+        }
+
+        .agent-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .agent-status {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            background: #4caf50;
+            color: white;
+        }
+
+        .methods-count {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .rpc-form {
+            display: none;
+        }
+
+        .rpc-form.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        select, input, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            font-family: inherit;
+            transition: all 0.3s;
+            background: white;
+        }
+
+        select:focus, input:focus, textarea:focus {
+            outline: none;
+            border-color: #2d9687;
+            box-shadow: 0 0 0 3px rgba(45, 150, 135, 0.1);
+        }
+
+        textarea {
+            font-family: 'Courier New', monospace;
+            min-height: 100px;
+        }
+
+        button {
+            background: linear-gradient(135deg, #1a5f5f 0%, #2d9687 100%);
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 8px rgba(45, 150, 135, 0.3);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(45, 150, 135, 0.5);
+        }
+
+        button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(45, 150, 135, 0.3);
+        }
+
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            display: none;
+        }
+
+        .result.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+
+        .result.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .result pre {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(0,0,0,0.05);
+            border-radius: 3px;
+            overflow-x: auto;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .refresh-btn {
+            display: inline-block;
+            margin-left: 15px;
+            padding: 4px 8px;
+            font-size: 1em;
+            background: rgba(255, 255, 255, 0.9) !important;
+            color: #0a4d4e !important;
+            font-weight: 400;
+            border: 2px solid #2d9687;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+            transition: all 0.2s;
+            -webkit-text-fill-color: #0a4d4e !important;
+            background-clip: border-box !important;
+            -webkit-background-clip: border-box !important;
+            line-height: 1;
+            vertical-align: middle;
+        }
+
+        .refresh-btn:hover {
+            background: #2d9687 !important;
+            color: white !important;
+            -webkit-text-fill-color: white !important;
+            transform: scale(1.1);
+            box-shadow: 0 3px 8px rgba(45, 150, 135, 0.4);
+        }
+
+        .refresh-btn:active {
+            transform: scale(1.05);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+
+        #parameters-container h3 {
+            background: linear-gradient(135deg, #1a5f5f 0%, #2d9687 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            font-weight: 700;
+        }
+
+        input[type="checkbox"] {
+            width: auto;
+            cursor: pointer;
+        }
+
+        label input[type="checkbox"] {
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎛️ AEMS RPC Control Panel</h1>
+
+        <div class="nav">
+            <a href="/">← Config Manager</a>
+            <a href="/message-monitor">📡 Message Bus Monitor</a>
+            <a href="/docs">API Docs</a>
+        </div>
+
+        <div class="panel">
+            <h2>Connected Agents <button class="refresh-btn" onclick="loadAgents()" title="Refresh agent list">🔄</button></h2>
+            <div id="agents-container" class="loading">Loading agents...</div>
+        </div>
+
+        <div class="panel rpc-form" id="rpc-form">
+            <h2>Call RPC Method</h2>
+
+            <div class="form-group">
+                <label for="agent-select">Agent:</label>
+                <input type="text" id="agent-select" readonly>
+            </div>
+
+            <div class="form-group">
+                <label for="method-select">Method:</label>
+                <select id="method-select" onchange="updateParameterInputs()">
+                    <option value="">-- Select a method --</option>
+                </select>
+            </div>
+
+            <div id="parameters-container"></div>
+
+            <div class="form-group" style="margin-top: 20px;">
+                <label>
+                    <input type="checkbox" id="advanced-mode" onchange="toggleAdvancedMode()">
+                    Advanced Mode (JSON)
+                </label>
+            </div>
+
+            <div id="advanced-inputs" style="display: none;">
+                <div class="form-group">
+                    <label for="args-input">Arguments (JSON array, optional):</label>
+                    <textarea id="args-input" placeholder='Example: ["arg1", 123, true] or leave as []'>[]</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="kwargs-input">Keyword Arguments (JSON object, optional):</label>
+                    <textarea id="kwargs-input" placeholder='Example: {"point": "HeatingDemand", "value": 75} or leave as {}'>{}</textarea>
+                </div>
+            </div>
+
+            <button onclick="callRPC()">📞 Call Method</button>
+
+            <div id="result" class="result"></div>
+        </div>
+    </div>
+
+    <script>
+        let agents = [];
+        let selectedAgent = null;
+        let selectedMethod = null;
+
+        function toggleAdvancedMode() {
+            const advancedMode = document.getElementById('advanced-mode').checked;
+            const advancedInputs = document.getElementById('advanced-inputs');
+            const parametersContainer = document.getElementById('parameters-container');
+
+            if (advancedMode) {
+                advancedInputs.style.display = 'block';
+                parametersContainer.style.display = 'none';
+            } else {
+                advancedInputs.style.display = 'none';
+                parametersContainer.style.display = 'block';
+            }
+        }
+
+        function getInputType(paramType) {
+            if (!paramType) return 'text';
+
+            const typeStr = paramType.toLowerCase();
+
+            if (typeStr.includes('bool')) return 'checkbox';
+            if (typeStr.includes('int') || typeStr.includes('float') || typeStr.includes('number')) return 'number';
+            if (typeStr.includes('str') || typeStr.includes('string')) return 'text';
+            if (typeStr.includes('list') || typeStr.includes('dict') || typeStr.includes('object')) return 'textarea';
+
+            return 'text';
+        }
+
+        function updateParameterInputs() {
+            const methodName = document.getElementById('method-select').value;
+            const parametersContainer = document.getElementById('parameters-container');
+
+            if (!methodName || !selectedAgent) {
+                parametersContainer.innerHTML = '';
+                selectedMethod = null;
+                return;
+            }
+
+            // Find the selected method object
+            const method = selectedAgent.rpc_methods.find(m => {
+                const name = typeof m === 'string' ? m : m.name;
+                return name === methodName;
+            });
+
+            selectedMethod = method;
+
+            if (!method || typeof method === 'string' || !method.params || method.params.length === 0) {
+                parametersContainer.innerHTML = '<p style="color: #666; font-style: italic;">This method has no parameters</p>';
+                return;
+            }
+
+            // Build parameter inputs
+            let html = '<h3 style="margin-bottom: 15px; color: #333;">Parameters</h3>';
+            html += '<div style="background: #e8f4fd; border-left: 4px solid #2196F3; padding: 10px; margin-bottom: 15px; font-size: 0.9em;">';
+            html += '<strong>💡 Tip:</strong> For optional parameters, you can:<br>';
+            html += '• Leave empty to send <code>null</code><br>';
+            html += '• Type "null" or "none" to explicitly send <code>null</code><br>';
+            html += '• Enter a value normally for any data type';
+            html += '</div>';
+
+            method.params.forEach((param, index) => {
+                const inputType = getInputType(param.type);
+                const hasDefault = param.default !== undefined;
+                // kwargs is always optional, even without a default value
+                const isRequired = !hasDefault && param.name !== 'kwargs';
+
+                html += `<div class="form-group">`;
+                html += `<label for="param-${index}">`;
+                html += `${param.name}`;
+                if (param.type) {
+                    const displayType = param.type.replace('<class \'', '').replace('\'>', '');
+                    html += ` <span style="color: #666; font-weight: normal;">(${displayType})</span>`;
+                }
+                if (isRequired) {
+                    html += ` <span style="color: red;">*</span>`;
+                }
+                if (hasDefault) {
+                    html += ` <span style="color: #999; font-weight: normal; font-size: 0.9em;">default: ${param.default}</span>`;
+                }
+                html += `</label>`;
+
+                if (inputType === 'checkbox') {
+                    const defaultChecked = param.default === 'True' ? 'checked' : '';
+                    html += `<input type="checkbox" id="param-${index}" name="${param.name}" ${defaultChecked} style="width: auto; margin-top: 5px;">`;
+                } else if (inputType === 'textarea') {
+                    const placeholder = param.type && param.type.includes('list') ? '[]' : '{}';
+                    html += `<textarea id="param-${index}" name="${param.name}" placeholder="${placeholder}"></textarea>`;
+                } else {
+                    // Enhanced placeholders with null guidance for optional parameters
+                    let placeholder;
+                    if (hasDefault) {
+                        placeholder = param.default;
+                    } else if (!isRequired) {
+                        // Optional parameter without default - guide user on null usage
+                        if (inputType === 'number') {
+                            placeholder = 'Leave empty for null';
+                        } else {
+                            placeholder = `Optional - leave empty or type "null"`;
+                        }
+                    } else {
+                        placeholder = `Enter ${param.name}`;
+                    }
+                    html += `<input type="${inputType}" id="param-${index}" name="${param.name}" placeholder="${placeholder}">`;
+                }
+
+                html += `</div>`;
+            });
+
+            parametersContainer.innerHTML = html;
+        }
+
+        async function loadAgents() {
+            try {
+                const response = await fetch('/api/agents');
+                const data = await response.json();
+                agents = data.agents;
+                renderAgents();
+            } catch (error) {
+                document.getElementById('agents-container').innerHTML =
+                    '<p style="color: red;">Error loading agents: ' + error.message + '</p>';
+            }
+        }
+
+        function renderAgents() {
+            const container = document.getElementById('agents-container');
+
+            if (agents.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666;">No agents connected</p>';
+                return;
+            }
+
+            container.innerHTML = '';
+            container.className = 'agents-list';
+
+            agents.forEach(agent => {
+                const card = document.createElement('div');
+                card.className = 'agent-card';
+                if (selectedAgent && selectedAgent.agent_id === agent.agent_id) {
+                    card.classList.add('selected');
+                }
+
+                const methodsCount = agent.rpc_methods ? agent.rpc_methods.length : 0;
+
+                card.innerHTML = `
+                    <div class="agent-name">${agent.agent_id}</div>
+                    <span class="agent-status">Connected</span>
+                    <div class="methods-count">${methodsCount} RPC methods</div>
+                `;
+
+                card.onclick = () => selectAgent(agent);
+                container.appendChild(card);
+            });
+        }
+
+        function selectAgent(agent) {
+            selectedAgent = agent;
+            renderAgents();
+
+            // Show RPC form
+            document.getElementById('rpc-form').classList.add('active');
+            document.getElementById('agent-select').value = agent.agent_id;
+
+            // Populate methods dropdown
+            const methodSelect = document.getElementById('method-select');
+            methodSelect.innerHTML = '<option value="">-- Select a method --</option>';
+
+            if (agent.rpc_methods && agent.rpc_methods.length > 0) {
+                agent.rpc_methods.forEach(method => {
+                    const option = document.createElement('option');
+                    // Handle both old format (string) and new format (object with name/params)
+                    const methodName = typeof method === 'string' ? method : method.name;
+                    option.value = methodName;
+
+                    // Build method signature display
+                    let displayText = methodName;
+                    if (typeof method === 'object' && method.params && method.params.length > 0) {
+                        const paramNames = method.params.map(p => {
+                            let paramStr = p.name;
+                            if (p.type) {
+                                paramStr += ': ' + p.type.replace('<class \'', '').replace('\'>', '');
+                            }
+                            if (p.default) {
+                                paramStr += ' = ' + p.default;
+                            }
+                            return paramStr;
+                        });
+                        displayText += '(' + paramNames.join(', ') + ')';
+                    } else {
+                        displayText += '()';
+                    }
+
+                    option.textContent = displayText;
+                    methodSelect.appendChild(option);
+                });
+            } else {
+                methodSelect.innerHTML += '<option value="" disabled>No RPC methods available</option>';
+            }
+
+            // Clear previous results
+            document.getElementById('result').style.display = 'none';
+        }
+
+        async function callRPC() {
+            const method = document.getElementById('method-select').value;
+
+            if (!selectedAgent) {
+                alert('Please select an agent first');
+                return;
+            }
+
+            if (!method) {
+                alert('Please select a method');
+                return;
+            }
+
+            let args, kwargs;
+
+            // Check if advanced mode is enabled
+            const advancedMode = document.getElementById('advanced-mode').checked;
+
+            if (advancedMode) {
+                // Use JSON inputs
+                const argsText = document.getElementById('args-input').value;
+                const kwargsText = document.getElementById('kwargs-input').value;
+
+                try {
+                    args = JSON.parse(argsText);
+                    kwargs = JSON.parse(kwargsText);
+                } catch (error) {
+                    alert('Invalid JSON in arguments or keyword arguments');
+                    return;
+                }
+            } else {
+                // Collect values from dynamic form inputs
+                args = [];
+
+                if (selectedMethod && typeof selectedMethod === 'object' && selectedMethod.params) {
+                    selectedMethod.params.forEach((param, index) => {
+                        const inputElement = document.getElementById(`param-${index}`);
+
+                        if (inputElement) {
+                            let value;
+
+                            if (inputElement.type === 'checkbox') {
+                                value = inputElement.checked;
+                            } else if (inputElement.tagName === 'TEXTAREA') {
+                                // Try to parse JSON for list/dict types
+                                const textValue = inputElement.value.trim();
+                                if (textValue) {
+                                    try {
+                                        value = JSON.parse(textValue);
+                                    } catch {
+                                        value = textValue; // Use as string if not valid JSON
+                                    }
+                                } else {
+                                    value = param.type && param.type.includes('list') ? [] : {};
+                                }
+                            } else if (inputElement.type === 'number') {
+                                // For number inputs, use null if empty instead of undefined
+                                value = inputElement.value ? parseFloat(inputElement.value) : null;
+                            } else {
+                                // For text inputs, try to parse as JSON if it looks like JSON
+                                const textValue = inputElement.value.trim();
+
+                                // Special handling for "null" or "none" text
+                                if (textValue === '' || textValue.toLowerCase() === 'null' || textValue.toLowerCase() === 'none') {
+                                    value = null;
+                                } else if (textValue.startsWith('[') || textValue.startsWith('{')) {
+                                    try {
+                                        value = JSON.parse(textValue);
+                                    } catch {
+                                        value = textValue; // Use as string if not valid JSON
+                                    }
+                                } else {
+                                    value = textValue;
+                                }
+                            }
+
+                            // For positional arguments, we need to maintain position
+                            // Required parameters must have a value
+                            if (!param.default && param.name !== 'kwargs' && (value === null || value === '')) {
+                                alert(`Please provide a value for required parameter: ${param.name}`);
+                                throw new Error(`Missing required parameter: ${param.name}`);
+                            }
+
+                            // Always push to args to maintain positional order
+                            // Empty optional params become null
+                            if (value === '') {
+                                args.push(null);
+                            } else {
+                                args.push(value);
+                            }
+                        }
+                    });
+                }
+
+                kwargs = {};
+            }
+
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = '<p>Calling RPC method...</p>';
+
+            try {
+                const response = await fetch('/api/rpc/call', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        agent_id: selectedAgent.agent_id,
+                        method: method,
+                        args: args,
+                        kwargs: kwargs
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    resultDiv.className = 'result success';
+
+                    let html = '<p><strong>✓ RPC Call Successful</strong></p>';
+                    html += '<div style="margin-top: 10px;">';
+                    html += `<p><strong>Agent:</strong> ${data.agent_id}</p>`;
+                    html += `<p><strong>Method:</strong> ${data.method}</p>`;
+                    html += `<p><strong>Message ID:</strong> ${data.msg_id}</p>`;
+
+                    if (data.result !== undefined && data.result !== null) {
+                        html += '<p><strong>Response:</strong></p>';
+                        html += '<pre>' + JSON.stringify(data.result, null, 2) + '</pre>';
+                    } else {
+                        html += '<p><em>Method returned no value (void)</em></p>';
+                    }
+                    html += '</div>';
+
+                    resultDiv.innerHTML = html;
+                } else {
+                    resultDiv.className = 'result error';
+
+                    let html = '<p><strong>✗ RPC Call Failed</strong></p>';
+
+                    if (data.timeout) {
+                        html += '<p>The RPC call timed out after 30 seconds.</p>';
+                    }
+
+                    if (data.error) {
+                        html += '<p><strong>Error:</strong></p>';
+                        html += '<pre>' + data.error + '</pre>';
+                    }
+
+                    if (data.msg_id) {
+                        html += `<p style="font-size: 0.9em; color: #666;">Message ID: ${data.msg_id}</p>`;
+                    }
+
+                    resultDiv.innerHTML = html;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <p><strong>✗ Error</strong></p>
+                    <pre>${error.message}</pre>
+                `;
+            }
+        }
+
+        // Load agents on page load
+        loadAgents();
+
+        // Auto-refresh every 5 seconds
+        setInterval(loadAgents, 5000);
+    </script>
+</body>
+</html>

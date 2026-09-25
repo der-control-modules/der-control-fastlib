@@ -1,0 +1,14 @@
+{
+    "campus": "PNNL",
+    "building": "BUILDING1",
+    "power_meter": {
+        "device_topic": "devices/PNNL/BUILDING1/power_meter",
+        "point": "WholeBuildingPower"
+    },
+    "agent_id": "ilc.platform",
+    "demand_limit": 30.0,
+    "control_time": 20,
+    "curtailment_confirm": 5,
+    "curtailment_break": 20,
+    "average_building_power_window": 15
+}

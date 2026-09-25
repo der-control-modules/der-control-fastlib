@@ -1,0 +1,46 @@
+{
+    // Python interpreter
+    "python.defaultInterpreterPath": "./.venv/bin/python",
+
+    // Disable old linters - we use Ruff now
+    "python.linting.enabled": false,
+    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": false,
+    "python.linting.pycodestyleEnabled": false,
+    "python.linting.mypyEnabled": false,
+
+    // Disable old formatters - we use Ruff now
+    "python.formatting.provider": "none",
+
+    // Use Ruff extension for linting and formatting
+    // Install the extension: charliermarsh.ruff
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit",
+            "source.fixAll": "explicit"
+        }
+    },
+
+    // Ruff configuration (using new native server settings)
+    "ruff.enable": true,
+    "ruff.lineLength": 120,
+    "ruff.organizeImports": true,
+    "ruff.fixAll": true,
+
+    // Editor settings
+    "editor.rulers": [120],
+    "editor.formatOnSave": true,
+    "editor.formatOnType": false,
+    "editor.formatOnPaste": true,
+
+    // File settings
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "files.trimFinalNewlines": true,
+
+    // Python analysis
+    "python.analysis.autoImportCompletions": true,
+    "python.analysis.typeCheckingMode": "basic"
+}

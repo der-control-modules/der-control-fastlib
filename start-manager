@@ -1,0 +1,6 @@
+#!/bin/bash
+export VOLTTRON_HOME=/home/volttron/aems-nf/aems-edge/Manager/volttron_home
+export GEVENT_SUPPORT=True
+source .venv/bin/activate
+
+main_manager  --config /home/volttron/aems-nf/aems-edge/configurations/thermostats/schneider.config --host localhost --port 8000 --identity  --manager-rtu

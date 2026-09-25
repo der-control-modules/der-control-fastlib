@@ -1,11 +1,34 @@
 # connection_manager.py
 
 import asyncio
+import logging
 import re
-from typing import Dict, List, Callable, Pattern, Any, Tuple
+from collections.abc import Callable
+from re import Pattern
+from typing import Any
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState
+
+_log = logging.getLogger(__name__)
+
+
+def truncate_debug_message(message: Any, max_length: int = 200) -> str:
+    """Truncate a message for debug logging to limit output size.
+
+    Args:
+        message: The message to truncate
+        max_length: Maximum length of the returned string (default: 200)
+
+    Returns
+    -------
+        Truncated string representation of the message
+    """
+    message_str = str(message)
+    if len(message_str) <= max_length:
+        return message_str
+    return message_str[:max_length] + "..."
+
 
 # Subscription callback type
 SubscriptionCallback = Callable[[str, str, str, str, dict, Any], None]
@@ -15,17 +38,34 @@ class ConnectionManager:
     """Manages WebSocket connections for the MessageBus."""
 
     def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
+        self.active_connections: dict[str, WebSocket] = {}
+        self.agent_rpc_methods: dict[str, list[str]] = {}  # Store RPC methods for each agent
         self.message_queue: asyncio.Queue = asyncio.Queue()
-        self.prefix_subscriptions: Dict[str, Dict[str, List[Tuple[str, SubscriptionCallback]]]] = {}
-        self.regex_subscriptions: Dict[str, List[Tuple[Pattern, str, SubscriptionCallback]]] = {}
-        self.rpc_responses: Dict[str, asyncio.Future] = {}
+        self.prefix_subscriptions: dict[str, dict[str, list[tuple[str, SubscriptionCallback]]]] = {}
+        self.regex_subscriptions: dict[str, list[tuple[Pattern, str, SubscriptionCallback]]] = {}
+        self.rpc_responses: dict[str, asyncio.Future] = {}
         self._status_task: asyncio.Task = None
         self._status_reporter_started = False
         self._no_connections_count = 0  # Track consecutive periods with no connections
+        # Message bus monitoring
+        self.known_topics: set[str] = set()  # Track all topics that have been published
+        self.monitor_connections: dict[str, WebSocket] = {}  # WebSocket connections for monitors
 
     async def connect(self, websocket: WebSocket, identity: str):
         """Connect a client to the message bus."""
+        # VOLTTRON compatibility: Only one agent per identity allowed
+        if identity in self.active_connections:
+            existing_ws = self.active_connections[identity]
+            if existing_ws.client_state == WebSocketState.CONNECTED:
+                _log.warning(f"Agent {identity} already connected - rejecting new connection")
+                # Reject BEFORE accepting to prevent client from thinking it's connected
+                await websocket.close(code=4000, reason=f"Agent {identity} already connected")
+                return
+            else:
+                # Clean up stale connection
+                _log.info(f"Replacing stale connection for agent {identity}")
+                self.disconnect(identity)
+
         await websocket.accept()
         self.active_connections[identity] = websocket
         self.prefix_subscriptions[identity] = {}
@@ -34,7 +74,7 @@ class ConnectionManager:
         if not self._status_reporter_started:
             self._start_status_reporter()
 
-        print(f"DEBUG: Client {identity} connected")
+        _log.debug(f"Client {identity} connected")
 
     def disconnect(self, identity: str):
         """Disconnect a client from the message bus."""
@@ -42,29 +82,31 @@ class ConnectionManager:
             del self.active_connections[identity]
         if identity in self.prefix_subscriptions:
             del self.prefix_subscriptions[identity]
+        if identity in self.agent_rpc_methods:
+            del self.agent_rpc_methods[identity]
         # Remove any regex subscriptions for this identity
         self.regex_subscriptions = {
             identity_key: subscriptions
             for identity_key, subscriptions in self.regex_subscriptions.items()
             if identity_key != identity
         }
-        print(f"DEBUG: Client {identity} disconnected")
+        _log.debug(f"Client {identity} disconnected")
 
     async def send_message(self, identity: str, message: dict):
         """Send a message to a specific client."""
         if identity in self.active_connections:
             websocket = self.active_connections[identity]
             if websocket.client_state != WebSocketState.DISCONNECTED:
-                print(f"DEBUG: Sending message to {identity}: {message}")
+                _log.debug(f"Sending message to {identity}: {truncate_debug_message(message)}")
                 await websocket.send_json(message)
             else:
-                print(f"DEBUG: Cannot send message to {identity}, websocket is disconnected")
+                _log.debug(f"Cannot send message to {identity}, websocket is disconnected")
         else:
-            print(f"DEBUG: Cannot send message to {identity}, client not found")
+            _log.debug(f"Cannot send message to {identity}, client not found")
 
     async def broadcast(self, message: dict):
         """Broadcast a message to all connected clients."""
-        for identity, websocket in self.active_connections.items():
+        for _identity, websocket in self.active_connections.items():
             if websocket.client_state != WebSocketState.DISCONNECTED:
                 await websocket.send_json(message)
 
@@ -88,30 +130,46 @@ class ConnectionManager:
 
     async def publish(self, bus: str, topic: str, headers: dict, message: Any, sender: str):
         """Publish a message to subscribers."""
+        # Track this topic
+        self.known_topics.add(topic)
+
+        # Broadcast to message bus monitors
+        import datetime
+
+        monitor_data = {
+            "type": "pubsub_message",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "topic": topic,
+            "sender": sender,
+            "headers": headers,
+            "message": message,
+        }
+        await self._broadcast_to_monitors(monitor_data)
+
         # Process prefix subscriptions
-        for identity, prefixes in self.prefix_subscriptions.items():
+        for _identity, prefixes in self.prefix_subscriptions.items():
             for prefix, callbacks in prefixes.items():
                 if topic.startswith(prefix):
                     for peer, callback in callbacks:
                         try:
                             callback(peer, sender, bus, topic, headers, message)
                         except Exception as e:
-                            print(f"Error in prefix subscription callback: {e}")
+                            _log.error(f"Error in prefix subscription callback: {e}")
 
         # Process regex subscriptions
-        for identity, patterns in self.regex_subscriptions.items():
+        for _identity, patterns in self.regex_subscriptions.items():
             for pattern, peer, callback in patterns:
                 if pattern.match(topic):
                     try:
                         callback(peer, sender, bus, topic, headers, message)
                     except Exception as e:
-                        print(f"Error in regex subscription callback: {e}")
+                        _log.error(f"Error in regex subscription callback: {e}")
 
     def register_rpc_response_future(self, msg_id: str) -> asyncio.Future:
         """Register a future for an RPC response."""
         future = asyncio.get_event_loop().create_future()
         self.rpc_responses[msg_id] = future
-        print(f"DEBUG: Registered RPC response future for msg_id {msg_id}")
+        _log.debug(f"Registered RPC response future for msg_id {msg_id}")
         return future
 
     def set_rpc_response(self, msg_id: str, response: Any):
@@ -119,24 +177,24 @@ class ConnectionManager:
         if msg_id in self.rpc_responses:
             future = self.rpc_responses.pop(msg_id)
             if not future.done():
-                print(f"DEBUG: Setting RPC response for msg_id {msg_id}: {response}")
+                _log.debug(f"Setting RPC response for msg_id {msg_id}: {truncate_debug_message(response)}")
                 future.set_result(response)
             else:
-                print(f"DEBUG: Future for msg_id {msg_id} was already done")
+                _log.debug(f"Future for msg_id {msg_id} was already done")
         else:
-            print(f"DEBUG: No future found for msg_id {msg_id}")
+            _log.debug(f"No future found for msg_id {msg_id}")
 
     def set_rpc_error(self, msg_id: str, error: str):
         """Set an exception for an RPC response future."""
         if msg_id in self.rpc_responses:
             future = self.rpc_responses.pop(msg_id)
             if not future.done():
-                print(f"DEBUG: Setting RPC error for msg_id {msg_id}: {error}")
+                _log.debug(f"Setting RPC error for msg_id {msg_id}: {truncate_debug_message(error)}")
                 future.set_exception(Exception(error))
             else:
-                print(f"DEBUG: Future for msg_id {msg_id} was already done")
+                _log.debug(f"Future for msg_id {msg_id} was already done")
         else:
-            print(f"DEBUG: No future found for msg_id {msg_id}")
+            _log.debug(f"No future found for msg_id {msg_id}")
 
     def clear_rpc_response(self, msg_id: str):
         """Clear an RPC response future."""
@@ -144,21 +202,26 @@ class ConnectionManager:
             future = self.rpc_responses.pop(msg_id)
             if not future.done():
                 future.cancel()
-            print(f"DEBUG: Cleared RPC response future for msg_id {msg_id}")
+            _log.debug(f"Cleared RPC response future for msg_id {msg_id}")
 
-    async def handle_rpc(
-        self, sender: str, peer: str, method: str, args: list, kwargs: dict, msg_id: str
-    ):
+    async def handle_rpc(self, sender: str, peer: str, method: str, args: list, kwargs: dict, msg_id: str):
         """Handle RPC request between clients."""
-        print(
-            f"DEBUG: RPC request from {sender} to {peer}: "
-            f"{method}({args}, {kwargs}) [msg_id: {msg_id}]"
+        # Log at INFO level with full parameters for visibility
+        _log.info(f"RPC request from {sender} to {peer}: {method}(args={args}, kwargs={kwargs}) [msg_id: {msg_id}]")
+        _log.debug(
+            f"RPC request from {sender} to {peer}: {method}({truncate_debug_message(args)}, "
+            f"{truncate_debug_message(kwargs)}) [msg_id: {msg_id}]"
         )
 
         if peer not in self.active_connections:
-            print(f"DEBUG: RPC target {peer} not found")
+            _log.debug(f"RPC target {peer} not found")
             await self.send_message(
-                sender, {"type": "rpc_error", "msg_id": msg_id, "error": f"Peer {peer} not found"}
+                sender,
+                {
+                    "type": "rpc_error",
+                    "msg_id": msg_id,
+                    "error": f"Peer {peer} not found",
+                },
             )
             return
 
@@ -176,29 +239,38 @@ class ConnectionManager:
         future = self.register_rpc_response_future(msg_id)
 
         # Send to the target peer
-        print(f"DEBUG: Sending RPC request to {peer}")
+        _log.debug(f"Sending RPC request to {peer}")
         await self.send_message(peer, rpc_message)
 
         # Wait for response with timeout
         try:
-            print(f"DEBUG: Waiting for RPC response for msg_id {msg_id}")
-            response = await asyncio.wait_for(future, 10.0)  # 10 second timeout
-            print(f"DEBUG: Received RPC response for msg_id {msg_id}: {response}")
-            await self.send_message(
-                sender, {"type": "rpc_response", "msg_id": msg_id, "result": response}
-            )
+            _log.debug(f"Waiting for RPC response for msg_id {msg_id}")
+            response = await asyncio.wait_for(future, 30.0)  # 30 second timeout for BACnet operations
+            _log.info(f"RPC response from {peer} to {sender}: {method} returned {response}")
+            _log.debug(f"Received RPC response for msg_id {msg_id}: {truncate_debug_message(response)}")
+            await self.send_message(sender, {"type": "rpc_response", "msg_id": msg_id, "result": response})
         except asyncio.TimeoutError:
-            print(f"DEBUG: RPC request timed out for msg_id {msg_id}")
+            _log.warning(
+                f"RPC request from {sender} to {peer}.{method}(args={args}, kwargs={kwargs}) "
+                f"timed out after 30s [msg_id: {msg_id}]"
+            )
+            _log.debug(f"RPC request timed out for msg_id {msg_id}")
             await self.send_message(
-                sender, {"type": "rpc_error", "msg_id": msg_id, "error": "RPC request timed out"}
+                sender,
+                {
+                    "type": "rpc_error",
+                    "msg_id": msg_id,
+                    "error": "RPC request timed out",
+                },
             )
             self.clear_rpc_response(msg_id)
         except Exception as e:
             # Handle exceptions from RPC method execution
-            print(f"DEBUG: RPC request failed for msg_id {msg_id}: {e}")
-            await self.send_message(
-                sender, {"type": "rpc_error", "msg_id": msg_id, "error": str(e)}
+            _log.error(
+                f"RPC request from {sender} to {peer}.{method}(args={args}, kwargs={kwargs}) "
+                f"failed: {e} [msg_id: {msg_id}]"
             )
+            await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": str(e)})
             self.clear_rpc_response(msg_id)
 
     def _start_status_reporter(self):
@@ -207,11 +279,11 @@ class ConnectionManager:
             try:
                 self._status_task = asyncio.create_task(self._status_reporter_loop())
                 self._status_reporter_started = True
-                print("Connection status reporter started")
+                _log.info("Connection status reporter started")
             except RuntimeError as e:
                 # Handle case where no event loop is running
-                print(f"Cannot start status reporter: {e}")
-                print("Status reporter will be started when the first connection is made")
+                _log.error(f"Cannot start status reporter: {e}")
+                _log.info("Status reporter will be started when the first connection is made")
 
     async def _status_reporter_loop(self):
         """Background loop to print active connections every 60 seconds."""
@@ -224,26 +296,26 @@ class ConnectionManager:
                     self._no_connections_count = 0
                     count = len(active_identities)
                     identities_str = ", ".join(active_identities)
-                    print(f"Active connections ({count}): {identities_str}")
+                    _log.info(f"Active connections ({count}): {identities_str}")
                 else:
                     # Increment counter for consecutive periods with no connections
                     self._no_connections_count += 1
                     # Print "no active connections" only after 10 minutes (10 periods of 60 seconds)
                     if self._no_connections_count >= 10:
-                        print("No active connections")
+                        _log.info("No active connections")
                         # Reset counter after printing to avoid repeated messages
                         self._no_connections_count = 0
             except asyncio.CancelledError:
-                print("Connection status reporter stopped")
+                _log.info("Connection status reporter stopped")
                 break
             except Exception as e:
-                print(f"Error in status reporter: {e}")
+                _log.error(f"Error in status reporter: {e}")
 
     def stop_status_reporter(self):
         """Stop the status reporter task."""
         if self._status_task and not self._status_task.done():
             self._status_task.cancel()
-            print("Connection status reporter task cancelled")
+            _log.info("Connection status reporter task cancelled")
 
     async def startup(self):
         """Initialize the connection manager when the application starts."""
@@ -257,3 +329,37 @@ class ConnectionManager:
             if not future.done():
                 future.cancel()
         self.rpc_responses.clear()
+
+    # Message bus monitoring methods
+    async def connect_monitor(self, websocket: WebSocket, monitor_id: str):
+        """Connect a message bus monitor client."""
+        await websocket.accept()
+        self.monitor_connections[monitor_id] = websocket
+        _log.info(f"Message bus monitor {monitor_id} connected")
+
+    def disconnect_monitor(self, monitor_id: str):
+        """Disconnect a message bus monitor client."""
+        if monitor_id in self.monitor_connections:
+            del self.monitor_connections[monitor_id]
+            _log.info(f"Message bus monitor {monitor_id} disconnected")
+
+    async def _broadcast_to_monitors(self, data: dict):
+        """Broadcast pub/sub message to all connected monitors."""
+        disconnected = []
+        for monitor_id, websocket in self.monitor_connections.items():
+            try:
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.send_json(data)
+                else:
+                    disconnected.append(monitor_id)
+            except Exception as e:
+                _log.error(f"Error broadcasting to monitor {monitor_id}: {e}")
+                disconnected.append(monitor_id)
+
+        # Clean up disconnected monitors
+        for monitor_id in disconnected:
+            self.disconnect_monitor(monitor_id)
+
+    def get_known_topics(self) -> list[str]:
+        """Get list of all known topics (sorted)."""
+        return sorted(self.known_topics)

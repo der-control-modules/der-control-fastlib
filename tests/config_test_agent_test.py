@@ -1,11 +1,11 @@
 # config_test_agent_test.py - Updated with cron testing
 
-import gevent
-from aems.client.agent import Agent
-from config_test_agent import ConfigTestAgent
-import datetime
-import random
 import sys
+
+import gevent
+from config_test_agent import ConfigTestAgent
+
+from aems.client.agent import Agent
 
 
 def run_config_test():
@@ -39,9 +39,9 @@ def run_config_test():
 
         # Modify a configuration value
         print("\n=== Modifying Configuration ===")
-        result = controller.vip.rpc.call("config_test", "set_config_value", "interval", 10).get(
-            timeout=5
-        )
+        result = controller.vip.rpc.call(
+            "config_test", "set_config_value", "interval", 10
+        ).get(timeout=5)
         print(f"Set interval=10 result: {result}")
 
         # Wait to see the effect of the configuration change
@@ -73,9 +73,9 @@ def run_config_test():
         # Test switching to cron scheduling
         print("\n=== Switching to Cron Scheduling ===")
         # Use "*/1 * * * *" for testing to ensure it runs every minute
-        result = controller.vip.rpc.call("config_test", "switch_to_cron", "*/1 * * * *").get(
-            timeout=5
-        )
+        result = controller.vip.rpc.call(
+            "config_test", "switch_to_cron", "*/1 * * * *"
+        ).get(timeout=5)
         print(f"Switch to cron result: {result}")
 
         # Wait to see the effect of cron scheduling
@@ -89,7 +89,9 @@ def run_config_test():
 
         # Switch back to interval scheduling
         print("\n=== Switching Back to Interval Scheduling ===")
-        result = controller.vip.rpc.call("config_test", "switch_to_interval", 15).get(timeout=5)
+        result = controller.vip.rpc.call("config_test", "switch_to_interval", 15).get(
+            timeout=5
+        )
         print(f"Switch to interval result: {result}")
 
         # Wait to see the effect of interval scheduling

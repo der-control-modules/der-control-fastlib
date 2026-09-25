@@ -1,9 +1,12 @@
 # modern_agent.py
 
-from agent import Agent
-import gevent
-from gevent.event import AsyncResult
 import datetime
+import logging
+
+import gevent
+from agent import Agent
+
+_log = logging.getLogger(__name__)
 
 
 class ModernAgent(Agent):
@@ -17,11 +20,11 @@ class ModernAgent(Agent):
 
     def _onstart(self):
         """Handle startup tasks for the agent."""
-        print(f"{self.identity} agent starting...")
+        _log.info(f"{self.identity} agent starting...")
 
         # Subscribe with the modern-style callback
         self.vip.pubsub.subscribe("test/", self._on_message)
-        print(f"{self.identity} agent started!")
+        _log.info(f"{self.identity} agent started!")
 
     # This method uses the modern callback style with a single message parameter
     def _on_message(self, message):
@@ -33,8 +36,8 @@ class ModernAgent(Agent):
 
         # Log the message
         timestamp = datetime.datetime.now().isoformat()
-        print(f"[MODERN] [{timestamp}] {self.identity} received: {topic} from {sender}")
-        print(f"  Data: {data}")
+        _log.info(f"[MODERN] [{timestamp}] {self.identity} received: {topic} from {sender}")
+        _log.info(f"  Data: {data}")
 
 
 if __name__ == "__main__":
@@ -44,12 +47,12 @@ if __name__ == "__main__":
     try:
         # Connect to the server
         agent.connect()
-        print(f"{agent.identity} agent running. Press Ctrl+C to exit.")
+        _log.info(f"{agent.identity} agent running. Press Ctrl+C to exit.")
 
         # Keep the agent running
         while True:
             gevent.sleep(1)
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        _log.info("\nShutting down...")
     finally:
         agent.core.stop().get()

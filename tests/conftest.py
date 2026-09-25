@@ -2,12 +2,17 @@
 Test configuration for pytest
 """
 
-import pytest
 import asyncio
-import time
-import tempfile
-import shutil
-from aems.server.fastapi_message_bus import FastAPIMessageBus
+
+import pytest
+
+from .utils import (
+    MessageBusManager,
+    create_connected_test_agent,
+    create_test_agent,
+    get_random_open_port,
+    get_test_port,
+)
 
 
 @pytest.fixture(scope="session")
@@ -22,43 +27,45 @@ def event_loop():
 @pytest.fixture(scope="function")
 def message_bus():
     """Create and start a message bus for testing with isolated config store."""
-    # Create a temporary directory for this test's config store
-    temp_config_dir = tempfile.mkdtemp(prefix="aems_test_config_")
-
-    try:
-        bus = FastAPIMessageBus(host="127.0.0.1", port=8888, config_store_dir=temp_config_dir)
-
-        # Start the server
-        bus.start()
-
-        # Give the server time to start
-        time.sleep(2)
-
-        # Verify server is running
-        if not bus.is_running():
-            raise RuntimeError("Failed to start message bus server for testing")
-
-        print(f"Message bus server started for testing with config store: {temp_config_dir}")
-
+    with MessageBusManager() as manager:
+        bus, port = manager.start_bus()
         yield bus
 
-    finally:
-        # Cleanup
-        if bus.is_running():
-            bus.stop()
-            time.sleep(1)
 
-        # Clean up the temporary config directory
-        try:
-            shutil.rmtree(temp_config_dir)
-            print(f"Cleaned up test config store: {temp_config_dir}")
-        except Exception as e:
-            print(f"Failed to clean up test config store {temp_config_dir}: {e}")
-
-        print("Message bus server stopped after testing")
+@pytest.fixture(scope="function")
+def message_bus_manager_fixture():
+    """Provide a MessageBusManager for advanced test scenarios."""
+    with MessageBusManager() as manager:
+        yield manager
 
 
 @pytest.fixture
 def test_port():
-    """Return a test port number."""
-    return 8888
+    """Return the test port number from environment variable or default."""
+    return get_test_port()
+
+
+@pytest.fixture
+def random_port():
+    """Get a random open port for testing without environment variable side effects."""
+    return get_random_open_port()
+
+
+@pytest.fixture
+def agent_factory():
+    """Factory function for creating test agents."""
+
+    def _create_agent(identity: str, agent_class=None, **kwargs):
+        return create_test_agent(identity, agent_class, **kwargs)
+
+    return _create_agent
+
+
+@pytest.fixture
+def connected_agent_factory():
+    """Factory function for creating connected test agents."""
+
+    def _create_connected_agent(identity: str, agent_class=None, **kwargs):
+        return create_connected_test_agent(identity, agent_class, **kwargs)
+
+    return _create_connected_agent

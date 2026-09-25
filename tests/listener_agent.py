@@ -1,10 +1,7 @@
 import datetime
 import sys
 
-import gevent
-from gevent.event import AsyncResult
-
-from aems.client.agent import Agent, Core, RPC
+from aems.client.agent import RPC, Agent, Core
 
 
 class ListenerAgent(Agent):
@@ -34,7 +31,9 @@ class ListenerAgent(Agent):
 
         # Set up subscriptions
         for pattern in self._config["subscribe_patterns"]:
-            print(f"Subscribing to pattern: '{pattern}' (empty string means all topics)")
+            print(
+                f"Subscribing to pattern: '{pattern}' (empty string means all topics)"
+            )
             self.vip.pubsub.subscribe(pattern, self._on_message)
 
         # Start listening

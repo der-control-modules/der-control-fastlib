@@ -2,12 +2,8 @@
 
 import asyncio
 import sys
-import os
-from message_bus_test_clients import (
-    run_publisher_subscriber_test,
-    run_vip_message_test,
-    run_complex_test,
-)
+
+from message_bus_test_clients import run_complex_test, run_publisher_subscriber_test, run_vip_message_test
 
 
 async def main():

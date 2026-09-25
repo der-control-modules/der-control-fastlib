@@ -1,0 +1,7 @@
+{
+    "campus": "CAMPUS",
+    "building": "BUILDING",
+    "device_type": "rtu",
+    "log-level": "INFO",
+    "interval": 60
+}

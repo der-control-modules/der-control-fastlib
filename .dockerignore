@@ -1,0 +1,98 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.cover
+.hypothesis/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+# Note: .git/ is NOT ignored because setuptools-scm needs it for version detection
+.gitignore
+.gitattributes
+
+# Documentation
+docs/
+*.md
+*.txt
+!requirements.txt
+*.pptx
+
+# Logs
+*.log
+log_*.log
+*.log.*
+
+# VOLTTRON specific
+.volttron_home/
+credentials_store/
+
+# Development files
+.github/
+.pre-commit-config.yaml
+Makefile
+ruff.toml
+.bandit
+
+# Test and development scripts
+tests/
+test-*.sh
+run-*.sh
+dev.py
+
+# Example files
+example-from-volttron/
+
+# Cache and temporary files
+.ruff_cache/
+.mypy_cache/
+*.tmp
+
+# Certificates (should be mounted or managed separately)
+certs/
+
+# Application logs and data (will be in volumes)
+*.db
+*.sqlite
+*.sqlite3
+
+# Start scripts (may want to keep some, adjust as needed)
+start-legacy-*.sh
+start-manager
+
+# Project-specific files
+END_OF_DAY_*.md
+summary.md
+bacnet-proxy.log
+driver.log
+proxy.log
+platform-driver.log

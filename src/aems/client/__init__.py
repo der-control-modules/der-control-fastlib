@@ -48,7 +48,8 @@ class dualmethod:
     def __get__(self, instance, owner):
         """Descriptor getter method.
 
-        See Python descriptor documentation."""
+        See Python descriptor documentation.
+        """
         if instance is None:
             if self.fclass is None:
                 if self.finstance is None:

@@ -1,0 +1,112 @@
+{
+  "$schema": "./agents-config.schema.json",
+  "description": "Configuration for legacy VOLTTRON and AEMS Edge agents",
+  "agents": {
+    "listener": {
+      "enabled": true,
+      "type": "volttron",
+      "agent_dir": "/volttron/examples/ListenerAgent",
+      "identity": "listener",
+      "config_file": null,
+      "description": "Simple pub/sub example agent"
+    },
+    "platform_driver": {
+      "enabled": false,
+      "type": "volttron",
+      "agent_dir": "/volttron/services/core/PlatformDriverAgent",
+      "identity": "platform.driver",
+      "config_file": "configs/platform-driver/config",
+      "description": "Device driver framework for BACnet, Modbus, etc."
+    },
+    "sql_historian": {
+      "enabled": true,
+      "type": "volttron",
+      "agent_dir": "/volttron/services/core/SQLHistorian",
+      "identity": "platform.historian",
+      "config_file": "configs/historian/config",
+      "description": "SQL database historian",
+      "volumes": [
+        "./data:/var/volttron/data"
+      ]
+    },
+    "mqtt_historian": {
+      "enabled": false,
+      "type": "volttron",
+      "agent_dir": "/volttron/services/core/MQTTHistorian",
+      "identity": "platform.mqtt_historian",
+      "config_file": "configs/mqtt-historian/config",
+      "description": "MQTT historian"
+    },
+    "aems_manager": {
+      "enabled": true,
+      "type": "aems-edge",
+      "agent_dir": "/volttron-pnnl-aems/aems-edge/Manager",
+      "identity": "manager.rtu02",
+      "config_file": "configs/aems-manager/config",
+      "description": "AEMS Edge Manager agent"
+    },
+    "scheduler_example": {
+      "enabled": false,
+      "type": "volttron",
+      "agent_dir": "/volttron/examples/SchedulerExampleAgent",
+      "identity": "scheduler_example",
+      "config_file": "/volttron/examples/SchedulerExampleAgent/schedulerexample.config",
+      "description": "Scheduler example using config from VOLTTRON repo (absolute path)"
+    },
+    "web_agent_example": {
+      "enabled": false,
+      "type": "volttron",
+      "agent_dir": "/volttron/examples/SomeWebAgent",
+      "identity": "web.agent",
+      "config_file": null,
+      "ports": [
+        "8081:8080",
+        "8444:8443"
+      ],
+      "description": "Example agent with web interface (exposes ports 8081 and 8444)"
+    },
+    "weather_dot_gov": {
+      "enabled": true,
+      "type": "volttron",
+      "agent_dir": "/volttron/services/core/WeatherDotGov",
+      "identity": "platform.weather",
+      "config_file": "configs/weather/config",
+      "description": "Weather data collection from weather.gov API"
+    },
+    "nf_driver": {
+      "enabled": true,
+      "type": "aems-edge",
+      "agent_dir": "/volttron-pnnl-aems/aems-edge/Normal",
+      "identity": "platform.driver",
+      "config_file": "configs/nf-driver/config",
+      "description": "Normal Framework BACnet driver (AEMS-native)"
+    },
+    "ilc": {
+      "enabled": true,
+      "type": "volttron",
+      "agent_dir": "/volttron-pnnl-applications/GridServices/Control/ILCAgent",
+      "identity": "ilc.platform",
+      "config_file": "configs/ilc/config",
+      "description": "Intelligent Load Control agent with topic watching",
+      "depends_on": [
+        "nf_driver"
+      ]
+    },
+    "emailer": {
+      "enabled": false,
+      "type": "volttron",
+      "agent_dir": "/volttron/services/ops/EmailerAgent",
+      "identity": "platform.emailer",
+      "config_file": "configs/emailer/config",
+      "description": "Email notification agent"
+    }
+  },
+  "global": {
+    "server_address": "ws://aems-fastlib-server:8000",
+    "volttron_home": "/var/volttron",
+    "config_base_dir": "/app",
+    "restart_policy": "unless-stopped",
+    "log_dir": "/var/log/aems",
+    "enable_agent_logs": true
+  }
+}
