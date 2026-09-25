@@ -23,14 +23,14 @@ class ProductionDebugAgent(Agent):
         """The actual control action that should fire."""
         action_time = datetime.now()
         self.control_actions.append({"gid": gid, "state": state, "time": action_time})
-        print(f"🎯 CONTROL ACTION FIRED: gid={gid}, state={state} at {action_time}")
+        print(f"CONTROL ACTION FIRED: gid={gid}, state={state} at {action_time}")
         _log.info(f"_do_control_action executed: gid={gid}, state={state}")
 
 
 def test_scheduler_8am_6pm_simulation(message_bus_manager_fixture):
     """Simulate the exact production scenario with 8am-6pm occupancy override."""
     print("\n" + "=" * 80)
-    print("🔍 PRODUCTION DEBUG: 8AM-6PM OCCUPANCY OVERRIDE")
+    print("PRODUCTION DEBUG: 8AM-6PM OCCUPANCY OVERRIDE")
     print("=" * 80)
 
     manager = message_bus_manager_fixture
@@ -40,8 +40,8 @@ def test_scheduler_8am_6pm_simulation(message_bus_manager_fixture):
     agent.connect()
 
     # Let the scheduler run for a bit to simulate production
-    print("\n⏳ Agent started, scheduler running...")
-    print("📊 Scheduler info:")
+    print("\nAgent started, scheduler running...")
+    print("Scheduler info:")
     print(f"   - Scheduler greenlet: {agent.core._scheduler._scheduler_greenlet}")
     greenlet = agent.core._scheduler._scheduler_greenlet
     print(f"   - Greenlet dead? {greenlet.dead if greenlet else 'N/A'}")
@@ -50,61 +50,62 @@ def test_scheduler_8am_6pm_simulation(message_bus_manager_fixture):
     gevent.sleep(2)  # Simulate agent running for a while
 
     # Now simulate adding occupancy override like in production
-    print("\n📅 Simulating occupancy override schedule (like production)...")
+    print("\nSimulating occupancy override schedule (like production)...")
     print("   This simulates: {'2025-09-12': [{'start': '08:00', 'end': '18:00'}]}")
 
-    # Create the exact datetime objects like in production
-    today_8am = datetime.now().replace(hour=8, minute=0, second=0, microsecond=0)
-    today_6pm = datetime.now().replace(hour=18, minute=0, second=0, microsecond=0)
-
+    # Past and future relative to "now", not a fixed wall-clock hour (#18): a
+    # fixed 08:00/18:00 is only in the past/future depending on when the test
+    # runs, which made the assertion below flaky by time of day.
     current_time = datetime.now()
-    print(f"\n⏰ Current time: {current_time}")
-    print(f"📍 8AM time: {today_8am} (is past? {today_8am < current_time})")
-    print(f"📍 6PM time: {today_6pm} (is past? {today_6pm < current_time})")
+    past_event_time = current_time - timedelta(hours=1)
+    future_event_time = current_time + timedelta(hours=1)
+    print(f"\nCurrent time: {current_time}")
+    print(f"Past event time: {past_event_time} (is past? {past_event_time < current_time})")
+    print(f"Future event time: {future_event_time} (is past? {future_event_time < current_time})")
 
     # Schedule the override exactly like production code
-    print("\n🔧 Calling agent.core.schedule() for 8AM (should fire immediately)...")
-    agent.core.schedule(today_8am, agent._do_control_action, "2025-09-12_0", "occupied")
+    print("\nCalling agent.core.schedule() for the past event (should fire immediately)...")
+    agent.core.schedule(past_event_time, agent._do_control_action, "2025-09-12_0", "occupied")
 
-    print("🔧 Calling agent.core.schedule() for 6PM...")
+    print("Calling agent.core.schedule() for the future event...")
     agent.core.schedule(
-        today_6pm, agent._do_control_action, "2025-09-12_0", "unoccupied"
+        future_event_time, agent._do_control_action, "2025-09-12_0", "unoccupied"
     )
 
-    print("\n📊 After scheduling:")
+    print("\nAfter scheduling:")
     print(f"   - Queue size: {len(agent.core._scheduler._event_queue)}")
     print(f"   - Control actions fired so far: {len(agent.control_actions)}")
 
     # Wait to see if past event fires
-    print("\n⏳ Waiting 3 seconds for past event to fire...")
+    print("\nWaiting 3 seconds for past event to fire...")
     gevent.sleep(3)
 
-    print("\n📊 Final status:")
+    print("\nFinal status:")
     print(f"   - Queue size: {len(agent.core._scheduler._event_queue)}")
     print(f"   - Control actions fired: {len(agent.control_actions)}")
 
     if agent.control_actions:
-        print("\n✅ Control actions that fired:")
+        print("\nControl actions that fired:")
         for action in agent.control_actions:
             print(f"   - {action['gid']}: {action['state']} at {action['time']}")
     else:
-        print("\n❌ NO CONTROL ACTIONS FIRED!")
+        print("\nNO CONTROL ACTIONS FIRED!")
 
-    # Check if 8AM event fired (it's in the past so should fire immediately)
+    # Check if the past event fired (it's in the past so should fire immediately)
     past_event_fired = any(
         action["state"] == "occupied" for action in agent.control_actions
     )
 
     if not past_event_fired:
-        print("\n🚨 PRODUCTION BUG REPRODUCED: Past event (8AM) did not fire!")
+        print("\nPRODUCTION BUG REPRODUCED: Past event did not fire!")
         print("   The event was added to queue but scheduler didn't process it.")
     else:
-        print("\n✅ Past event fired correctly")
+        print("\nPast event fired correctly")
 
     agent.disconnect()
 
     # Assert to make test fail if bug is present
-    assert past_event_fired, "Past event (8AM occupancy) should have fired immediately!"
+    assert past_event_fired, "Past event (occupancy override) should have fired immediately!"
 
 
 if __name__ == "__main__":
@@ -126,7 +127,7 @@ class TestSchedulerAgent(Agent):
     def test_callback(self, event_name: str):
         """Test callback that logs when it fires."""
         now = datetime.now()
-        _log.info(f"🎯 CALLBACK FIRED: {event_name} at {now}")
+        _log.info(f"CALLBACK FIRED: {event_name} at {now}")
         self.events_fired.append((event_name, now))
 
 
