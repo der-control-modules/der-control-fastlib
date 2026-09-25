@@ -595,17 +595,17 @@ class FastAPIMessageBus(MessageBus):
         @self.app.get("/")
         async def root(request: Request):
             """Serve the config manager web interface."""
-            return self.templates.TemplateResponse("config_manager.html", {"request": request})
+            return self.templates.TemplateResponse(request, "config_manager.html")
 
         @self.app.get("/control")
         async def rpc_control_panel(request: Request):
             """Serve the RPC control panel web interface."""
-            return self.templates.TemplateResponse("rpc_control.html", {"request": request})
+            return self.templates.TemplateResponse(request, "rpc_control.html")
 
         @self.app.get("/message-monitor")
         async def message_monitor_panel(request: Request):
             """Serve the message bus monitor web interface."""
-            return self.templates.TemplateResponse("message_monitor.html", {"request": request})
+            return self.templates.TemplateResponse(request, "message_monitor.html")
 
         @self.app.get("/api/agents")
         async def list_agents():
