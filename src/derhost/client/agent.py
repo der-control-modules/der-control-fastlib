@@ -9,6 +9,7 @@ import json
 import logging
 import numbers
 import os
+import re
 import ssl
 import time
 import traceback
@@ -163,6 +164,10 @@ def get_smaller_print(data, in_str_full_value: str | None = None):
 
 _REDACTED = "[REDACTED]"
 _SECRET_LOG_FIELDS = {"authentication", "authorization", "token", "key", "password"}
+_SECRET_LOG_FIELD_RE = re.compile(
+    r'"(' + "|".join(re.escape(field) for field in _SECRET_LOG_FIELDS) + r')"\s*:\s*"(?:[^"\\]|\\.)*"',
+    re.IGNORECASE,
+)
 
 
 def _redact_secrets(value: Any) -> Any:
@@ -176,6 +181,16 @@ def _redact_secrets(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact_secrets(v) for v in value]
     return value
+
+
+def _redact_secrets_in_text(text: str) -> str:
+    """Redact secret-bearing JSON string values without parsing the text.
+
+    Used on the WebSocket receive hot path so a log call does not add a
+    second parse-and-reserialize of every inbound message; nothing stored
+    or forwarded uses this value.
+    """
+    return _SECRET_LOG_FIELD_RE.sub(lambda m: f'"{m.group(1)}": "{_REDACTED}"', text)
 
 
 class RPC:
@@ -3475,19 +3490,20 @@ class Agent:
     def __on_ws_message__(self, ws, message):
         """Internal callback when a WebSocket message is received."""
         try:
+            # Redact before logging: the raw message may carry a credential
+            # value (top-level fields, or kwargs.authentication before the
+            # delete below runs). String-level redaction, not a parse and
+            # reserialize, so this stays cheap on the WS receive hot path.
+            redacted_msg = _redact_secrets_in_text(message)
+            small_msg = get_smaller_print(redacted_msg, '"type":"rpc","method":"set_temperature_setpoints"')
+            if '"type":"rpc","method":"set_temperature_setpoints"' in redacted_msg:
+                _log.debug(f"Agent {self.identity} received set_temperature_setpoints RPC call")
+
             data = json.loads(message)
             if "kwargs" in data and "authentication" in data["kwargs"]:
                 del data["kwargs"]["authentication"]
 
             self.received_messages.append(data)
-
-            # Redact before logging: the raw message may still carry a
-            # credential value that the kwargs.authentication delete above
-            # does not reach (top-level fields, other secret keys).
-            redacted_msg = json.dumps(_redact_secrets(data), default=str)
-            small_msg = get_smaller_print(redacted_msg, '"type":"rpc","method":"set_temperature_setpoints"')
-            if '"type":"rpc","method":"set_temperature_setpoints"' in redacted_msg:
-                _log.debug(f"Agent {self.identity} received set_temperature_setpoints RPC call")
 
             _log.debug(f"Agent {self.identity} received data {small_msg}. ")
 
