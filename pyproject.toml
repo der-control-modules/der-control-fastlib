@@ -31,7 +31,7 @@ dependencies = [
     "gevent~=25.9.1",
     "httpx~=0.28.1",
     "pydantic>=2.12.3,<2.14.0",
-    "pydantic_core~=2.41.4",
+    "pydantic_core>=2.41.4,<2.50.0",
     "PyJWT>=2.13.0,<3",
     "python-multipart~=0.0.12",
     "PyYAML==6.0.3",
