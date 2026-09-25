@@ -6,6 +6,8 @@ PIP := .venv/bin/pip
 PYTEST := .venv/bin/pytest
 PRECOMMIT := .venv/bin/pre-commit
 RUFF := .venv/bin/ruff
+PIP_AUDIT := .venv/bin/pip-audit
+BANDIT := .venv/bin/bandit
 
 # Formatting and linting
 .PHONY: format
@@ -39,6 +41,37 @@ test: ## Run tests
 test-cov: ## Run tests with coverage
 	$(PYTEST) --cov=src --cov-report=html --cov-report=term tests/
 
+# Security
+.PHONY: security
+security: ## Run security scans (pip-audit informational; bandit MEDIUM+ required)
+	@echo "Running security scans (standard mode)..."
+	@pip_audit_ok=0; $(PIP_AUDIT) || pip_audit_ok=1; \
+	bandit_ok=0; $(BANDIT) -r src/ -f json -o bandit-report.json -ll || bandit_ok=1; \
+	if [ "$$bandit_ok" -eq 0 ]; then \
+		echo "PASS: No MEDIUM/HIGH/CRITICAL issues"; \
+	else \
+		echo "FAIL: MEDIUM/HIGH code security issues detected"; \
+		exit 1; \
+	fi
+
+.PHONY: security-strict
+security-strict: ## Run security scans, zero tolerance (pip-audit and bandit both required)
+	@echo "Running security scans (strict mode)..."
+	@pip_audit_ok=0; $(PIP_AUDIT) || pip_audit_ok=1; \
+	bandit_ok=0; $(BANDIT) -r src/ -f json -o bandit-report.json -ll || bandit_ok=1; \
+	if [ "$$pip_audit_ok" -eq 0 ] && [ "$$bandit_ok" -eq 0 ]; then \
+		echo "PASS: No security issues found"; \
+	else \
+		echo "FAIL: Security issues detected (strict mode)"; \
+		exit 1; \
+	fi
+
+# Build
+.PHONY: build
+build: ## Build wheel package
+	rm -rf build/ dist/ *.egg-info/
+	$(PYTHON) -m build
+
 # Pre-commit
 .PHONY: pre-commit-install
 pre-commit-install: ## Install pre-commit hooks
@@ -53,6 +86,18 @@ pre-commit-run: ## Run pre-commit on all files
 dev-install: ## Install development dependencies
 	$(PIP) install -e ".[dev]"
 	$(PRECOMMIT) install
+
+.PHONY: update
+update: ## Update development dependencies to latest compatible versions
+	@for dep in $$($(PYTHON) -c "import importlib, sys; \
+t = importlib.import_module('tomllib' if sys.version_info >= (3, 11) else 'tomli'); \
+data = t.load(open('pyproject.toml', 'rb')); \
+deps = data.get('project', {}).get('optional-dependencies', {}).get('dev', []); \
+[print(d.split('>=')[0].split('==')[0].split('~=')[0].split('>')[0].split('<')[0].strip()) for d in deps]"); do \
+		echo "Updating $$dep..."; \
+		$(PIP) install --upgrade "$$dep"; \
+	done
+	@echo "All dependencies updated!"
 
 # Clean
 .PHONY: clean
