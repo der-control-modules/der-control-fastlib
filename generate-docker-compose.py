@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -48,9 +49,16 @@ services:
 """
 
 
-def generate_server_service() -> str:
-    """Generate AEMS server service definition."""
-    return """  aems-fastlib-server:
+def generate_server_service(publish_host: str) -> str:
+    """Generate AEMS server service definition.
+
+    publish_host is the host-side address of the published port. It
+    defaults to loopback (der-control-modules/der-control-fastlib#36); set
+    DERHOST_PUBLISH_HOST to publish on another interface. The container's
+    own bind stays 0.0.0.0 (Dockerfile), since sibling agent containers
+    reach it over the compose network regardless of the host publication.
+    """
+    return f"""  aems-fastlib-server:
     build:
       context: .
       dockerfile: Dockerfile
@@ -59,7 +67,7 @@ def generate_server_service() -> str:
     image: aems-fastapi:latest
     container_name: aems-fastlib-server
     ports:
-      - "5410:8000"
+      - "{publish_host}:5410:8000"
     volumes:
       - volttron-home:/var/volttron
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -215,8 +223,9 @@ networks:
 
 def generate_docker_compose(config: dict[str, Any]) -> str:
     """Generate complete docker-compose.yml content."""
+    publish_host = os.environ.get("DERHOST_PUBLISH_HOST", "127.0.0.1")
     compose = generate_compose_header()
-    compose += generate_server_service()
+    compose += generate_server_service(publish_host)
 
     # Generate agent services
     agents = config["agents"]

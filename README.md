@@ -322,6 +322,25 @@ export JWT_SECRET_KEY=your-secret-key-change-in-production
 aems-server --host 0.0.0.0 --port 8000
 ```
 
+### Port Binding (`start-server`, Docker Compose)
+
+`start-server` and the generated `docker-compose.yml` bind the server to
+loopback by default, so it is not reachable off the host unless configured
+otherwise:
+
+```bash
+# start-server: server process bind address, default 127.0.0.1
+export DERHOST_HOST=0.0.0.0
+
+# generate-docker-compose.py: host side of the published compose port,
+# default 127.0.0.1; re-run the generator after changing this
+export DERHOST_PUBLISH_HOST=0.0.0.0
+python generate-docker-compose.py
+```
+
+The container's own bind stays `0.0.0.0` inside the compose network, so
+agent containers always reach the server regardless of this setting.
+
 ### Server Options
 ```bash
 aems-server --help
