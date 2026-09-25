@@ -200,7 +200,7 @@ def get_package_version():
     """Get the current package version."""
     try:
         # Try to get version from installed package
-        return version("aems")
+        return version("der-control-fastlib")
     except PackageNotFoundError:
         # Fallback to git if package not installed (development mode)
         try:
