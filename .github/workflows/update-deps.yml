@@ -43,7 +43,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore: update development dependencies"
-          title: "🔧 Update development dependencies"
+          title: "Update development dependencies"
           body: |
             ## Automated Dependency Update
 
