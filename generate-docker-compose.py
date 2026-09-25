@@ -297,7 +297,7 @@ def main():
         with open(args.output, "w") as f:
             f.write(compose_content)
 
-        print(f"✓ Generated {args.output}")
+        print(f"[x] Generated {args.output}")
         print()
         print_summary(config)
         print()
