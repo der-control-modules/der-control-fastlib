@@ -12,7 +12,6 @@ import pytest
 
 from derhost.client.agent import CronTimer
 
-
 # Friday 2026-09-25 09:30, fixed so every case below has a known answer.
 FRIDAY = datetime(2026, 9, 25, 9, 30)
 
