@@ -9,7 +9,7 @@ We have successfully created a wrapper system that allows existing VOLTTRON agen
 ### Two Approaches Implemented
 
 #### 1. **Import Hook (Monkey Patching)** ✅ Recommended
-**Implementation:** `src/aems/compat/import_hook.py`
+**Implementation:** `src/derhost/compat/import_hook.py`
 
 **How it works:**
 - Installs a custom import finder in `sys.meta_path`
@@ -52,7 +52,7 @@ We have successfully created a wrapper system that allows existing VOLTTRON agen
 ### Core Compatibility Layer
 
 ```
-src/aems/compat/
+src/derhost/compat/
 ├── __init__.py                      # Package initialization
 ├── import_hook.py                   # Import redirection system
 └── shims/                           # VOLTTRON compatibility shims
@@ -83,11 +83,11 @@ src/aems/compat/
 
 | VOLTTRON Import | AEMS Shim | Status |
 |-----------------|-----------|---------|
-| `volttron.platform.vip.agent` | `aems.compat.shims.vip_agent` | ✅ Complete |
-| `volttron.platform.agent` | `aems.compat.shims.platform_agent` | ✅ Complete |
-| `volttron.platform.messaging.health` | `aems.compat.shims.health` | ✅ Complete |
-| `volttron.platform.vip.agent.subsystems.query` | `aems.compat.shims.query` | ✅ Complete |
-| `volttron.platform.vip.agent.subsystems.heartbeat` | `aems.compat.shims.heartbeat` | ✅ Complete |
+| `volttron.platform.vip.agent` | `derhost.compat.shims.vip_agent` | ✅ Complete |
+| `volttron.platform.agent` | `derhost.compat.shims.platform_agent` | ✅ Complete |
+| `volttron.platform.messaging.health` | `derhost.compat.shims.health` | ✅ Complete |
+| `volttron.platform.vip.agent.subsystems.query` | `derhost.compat.shims.query` | ✅ Complete |
+| `volttron.platform.vip.agent.subsystems.heartbeat` | `derhost.compat.shims.heartbeat` | ✅ Complete |
 
 ## VOLTTRON Features Implemented
 
@@ -100,7 +100,7 @@ class MyAgent(Agent):
         super().__init__(**kwargs)  # Works!
 ```
 
-- **Implementation:** `vip_agent.py:Agent` extends `aems.client.agent.Agent`
+- **Implementation:** `vip_agent.py:Agent` extends `derhost.client.agent.Agent`
 - **Added subsystems:** `vip.heartbeat`, `vip.health`
 
 ### ✅ RPC Export/Call
@@ -112,7 +112,7 @@ def get_status(self):
 result = self.vip.rpc.call("other_agent", "get_status").get()
 ```
 
-- **Implementation:** Direct pass-through to `aems.client.agent.RPC`
+- **Implementation:** Direct pass-through to `derhost.client.agent.RPC`
 - **100% compatible** with VOLTTRON RPC
 
 ### ✅ PubSub Subscribe
@@ -133,7 +133,7 @@ def onstart(self, sender, **kwargs):
     pass
 ```
 
-- **Implementation:** Direct pass-through to `aems.client.agent.Core`
+- **Implementation:** Direct pass-through to `derhost.client.agent.Core`
 - **Signals supported:** onstart, onstop, onconnected, ondisconnected, onconfigure
 
 ### ✅ Configuration Loading
@@ -284,7 +284,7 @@ You should see:
 
 ### Import Hook System
 
-**File:** `src/aems/compat/import_hook.py`
+**File:** `src/derhost/compat/import_hook.py`
 
 **Key class:** `VolttronImportRedirector`
 
@@ -297,7 +297,7 @@ You should see:
 
 **Installation:**
 ```python
-from aems.compat import install_volttron_compatibility
+from derhost.compat import install_volttron_compatibility
 install_volttron_compatibility()
 
 # Now VOLTTRON imports work!
@@ -306,7 +306,7 @@ from volttron.platform.vip.agent import Agent
 
 ### Agent Enhancements
 
-**File:** `src/aems/compat/shims/vip_agent.py`
+**File:** `src/derhost/compat/shims/vip_agent.py`
 
 **Enhancements:**
 ```python
@@ -323,7 +323,7 @@ These subsystems are added to every agent automatically.
 
 ### @PubSub.subscribe Processing
 
-**File:** `src/aems/compat/shims/platform_agent.py`
+**File:** `src/derhost/compat/shims/platform_agent.py`
 
 **Function:** `utils._setup_pubsub_subscriptions(agent)`
 

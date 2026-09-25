@@ -13,14 +13,14 @@ This library follows the VOLTTRON Interface Protocol (VIP) patterns with a moder
 
 ### Core Components
 
-#### Server Component (`src/aems/server/`)
+#### Server Component (`src/derhost/server/`)
 - `fastapi_message_bus.py`: Main FastAPI server with WebSocket endpoints
 - `connection_manager.py`: Manages WebSocket connections and message routing
 - `config_store.py`: Configuration storage with file watching capabilities
 - `config_store_handler.py`: Watchdog-based file system monitoring for config changes
 - `models.py`: Core data models and message types
 
-#### Client Component (`src/aems/client/`)
+#### Client Component (`src/derhost/client/`)
 - `agent.py`: Base Agent class with VIP subsystems
 - `jsonrpc.py`: JSON-RPC protocol implementation for inter-agent communication
 
@@ -244,7 +244,7 @@ This process ensures the agent's internal cache is synchronized with the persist
 ### Complete PubSub Example
 
 ```python
-from aems.client.agent import Agent, Core
+from derhost.client.agent import Agent, Core
 
 class PubSubExampleAgent(Agent):
     def __init__(self, *args, **kwargs):
@@ -271,7 +271,7 @@ class PubSubExampleAgent(Agent):
 ### Complete RPC Example
 
 ```python
-from aems.client.agent import Agent, Core, RPC
+from derhost.client.agent import Agent, Core, RPC
 
 class RPCExampleAgent(Agent):
     def __init__(self, *args, **kwargs):
@@ -309,6 +309,6 @@ class RPCExampleAgent(Agent):
 
 ## Reference Documentation
 
-- Complete [agent.py API documentation](src/aems/client/agent.py) for all agent classes and methods
+- Complete [agent.py API documentation](src/derhost/client/agent.py) for all agent classes and methods
 - [test_example_usage.py](tests/test_example_usage.py) for comprehensive examples of using test utilities
 - REST API OpenAPI documentation available at `/docs` when server is running

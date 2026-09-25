@@ -3912,7 +3912,7 @@ class Agent:
         self._stop_event.set()
 
 
-# src/aems/client/agent.py - Updated run_agent function
+# src/derhost/client/agent.py - Updated run_agent function
 
 
 def run_agent(agent_class, config_path=None, identity=None, **kwargs):
