@@ -139,9 +139,9 @@ manager = [
 aems-server = "derhost.server.fastapi_message_bus:_main"
 
 # [project.urls]
-# Documentation = "https://github.com/yourusername/aems"
-# Source = "https://github.com/yourusername/aems"
-# Issues = "https://github.com/yourusername/aems/issues"
+# Documentation = "https://github.com/der-control-modules/der-control-fastlib"
+# Source = "https://github.com/der-control-modules/der-control-fastlib"
+# Issues = "https://github.com/der-control-modules/der-control-fastlib/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

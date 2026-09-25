@@ -7,7 +7,7 @@ Maps to: derhost.client.agent equivalents
 
 import logging
 
-from derhost.client.agent import RPC as AEMSRPC, Agent as AEMSAgent, Core as AEMSCore
+from derhost.client.agent import RPC as BaseRPC, Agent as BaseAgent, Core as BaseCore
 from derhost.compat.shims.health_subsystem import Health
 from derhost.compat.shims.heartbeat import Heartbeat
 
@@ -15,7 +15,7 @@ _log = logging.getLogger(__name__)
 
 
 # Extend Core to add version() method BEFORE defining Agent
-class Core(AEMSCore):
+class Core(BaseCore):
     """
     VOLTTRON-compatible Core subsystem.
 
@@ -53,7 +53,7 @@ class Core(AEMSCore):
 
 
 # Export Agent directly from AEMS with VOLTTRON subsystems added
-class Agent(AEMSAgent):
+class Agent(BaseAgent):
     """
     VOLTTRON-compatible Agent class.
 
@@ -110,7 +110,7 @@ class Agent(AEMSAgent):
 
 
 # Export RPC directly - it's compatible
-RPC = AEMSRPC
+RPC = BaseRPC
 
 # Export BasicAgent as an alias for Agent (VOLTTRON compatibility)
 BasicAgent = Agent

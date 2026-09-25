@@ -8,7 +8,7 @@ We have successfully created a wrapper system that allows existing VOLTTRON agen
 
 ### Two Approaches Implemented
 
-#### 1. **Import Hook (Monkey Patching)** ✅ Recommended
+#### 1. **Import Hook (Monkey Patching)** Recommended
 **Implementation:** `src/derhost/compat/import_hook.py`
 
 **How it works:**
@@ -18,16 +18,16 @@ We have successfully created a wrapper system that allows existing VOLTTRON agen
 - Completely transparent to agent code
 
 **Pros:**
-- ✅ Zero code changes needed
-- ✅ Works with any VOLTTRON agent
-- ✅ Easy to maintain (centralized compatibility logic)
-- ✅ Can handle complex import hierarchies
+- Zero code changes needed
+- Works with any VOLTTRON agent
+- Easy to maintain (centralized compatibility logic)
+- Can handle complex import hierarchies
 
 **Cons:**
-- ⚠️ Adds slight import overhead
-- ⚠️ Debugging shows shim modules in stack traces
+- Adds slight import overhead
+- Debugging shows shim modules in stack traces
 
-#### 2. **Launcher Script** ✅ Implemented
+#### 2. **Launcher Script** Implemented
 **Implementation:** `start-legacy.py`
 
 **How it works:**
@@ -39,13 +39,13 @@ We have successfully created a wrapper system that allows existing VOLTTRON agen
   5. Processes @PubSub.subscribe decorators
 
 **Pros:**
-- ✅ Clear entry point
-- ✅ Handles setup automatically
-- ✅ Provides helpful error messages
-- ✅ Supports both approaches
+- Clear entry point
+- Handles setup automatically
+- Provides helpful error messages
+- Supports both approaches
 
 **Cons:**
-- ⚠️ One extra script to maintain
+- One extra script to maintain
 
 ## Files Created
 
@@ -53,45 +53,45 @@ We have successfully created a wrapper system that allows existing VOLTTRON agen
 
 ```
 src/derhost/compat/
-├── __init__.py                      # Package initialization
-├── import_hook.py                   # Import redirection system
-└── shims/                           # VOLTTRON compatibility shims
-    ├── __init__.py
-    ├── vip_agent.py                # Agent, Core, RPC, PubSub
-    ├── platform_agent.py           # utils (load_config, vip_main, etc.)
-    ├── health.py                   # STATUS_GOOD, STATUS_BAD constants
-    ├── health_subsystem.py         # Health subsystem implementation
-    ├── heartbeat.py                # Heartbeat subsystem implementation
-    ├── query.py                    # Query subsystem implementation
-    ├── subsystems.py               # Subsystems namespace
-    ├── messaging.py                # Messaging namespace
-    ├── vip.py                      # VIP namespace
-    └── platform.py                 # Platform namespace
++-- __init__.py                      # Package initialization
++-- import_hook.py                   # Import redirection system
++-- shims/                           # VOLTTRON compatibility shims
+    +-- __init__.py
+    +-- vip_agent.py                # Agent, Core, RPC, PubSub
+    +-- platform_agent.py           # utils (load_config, vip_main, etc.)
+    +-- health.py                   # STATUS_GOOD, STATUS_BAD constants
+    +-- health_subsystem.py         # Health subsystem implementation
+    +-- heartbeat.py                # Heartbeat subsystem implementation
+    +-- query.py                    # Query subsystem implementation
+    +-- subsystems.py               # Subsystems namespace
+    +-- messaging.py                # Messaging namespace
+    +-- vip.py                      # VIP namespace
+    +-- platform.py                 # Platform namespace
 ```
 
 ### Launcher and Documentation
 
 ```
 /
-├── start-legacy.py                  # Main launcher script
-├── test-legacy-agent.sh            # Test script for ListenerAgent
-├── LEGACY_AGENT_SUPPORT.md         # Complete user documentation
-└── LEGACY_WRAPPER_SUMMARY.md       # This file
++-- start-legacy.py                  # Main launcher script
++-- test-legacy-agent.sh            # Test script for ListenerAgent
++-- LEGACY_AGENT_SUPPORT.md         # Complete user documentation
++-- LEGACY_WRAPPER_SUMMARY.md       # This file
 ```
 
 ## Import Redirection Map
 
 | VOLTTRON Import | AEMS Shim | Status |
 |-----------------|-----------|---------|
-| `volttron.platform.vip.agent` | `derhost.compat.shims.vip_agent` | ✅ Complete |
-| `volttron.platform.agent` | `derhost.compat.shims.platform_agent` | ✅ Complete |
-| `volttron.platform.messaging.health` | `derhost.compat.shims.health` | ✅ Complete |
-| `volttron.platform.vip.agent.subsystems.query` | `derhost.compat.shims.query` | ✅ Complete |
-| `volttron.platform.vip.agent.subsystems.heartbeat` | `derhost.compat.shims.heartbeat` | ✅ Complete |
+| `volttron.platform.vip.agent` | `derhost.compat.shims.vip_agent` | Complete |
+| `volttron.platform.agent` | `derhost.compat.shims.platform_agent` | Complete |
+| `volttron.platform.messaging.health` | `derhost.compat.shims.health` | Complete |
+| `volttron.platform.vip.agent.subsystems.query` | `derhost.compat.shims.query` | Complete |
+| `volttron.platform.vip.agent.subsystems.heartbeat` | `derhost.compat.shims.heartbeat` | Complete |
 
 ## VOLTTRON Features Implemented
 
-### ✅ Agent Base Class
+### Agent Base Class
 ```python
 from volttron.platform.vip.agent import Agent, Core, RPC, PubSub
 
@@ -103,7 +103,7 @@ class MyAgent(Agent):
 - **Implementation:** `vip_agent.py:Agent` extends `derhost.client.agent.Agent`
 - **Added subsystems:** `vip.heartbeat`, `vip.health`
 
-### ✅ RPC Export/Call
+### RPC Export/Call
 ```python
 @RPC.export
 def get_status(self):
@@ -115,7 +115,7 @@ result = self.vip.rpc.call("other_agent", "get_status").get()
 - **Implementation:** Direct pass-through to `derhost.client.agent.RPC`
 - **100% compatible** with VOLTTRON RPC
 
-### ✅ PubSub Subscribe
+### PubSub Subscribe
 ```python
 @PubSub.subscribe('pubsub', 'sensors/temperature')
 def on_temperature(self, peer, sender, bus, topic, headers, message):
@@ -126,7 +126,7 @@ def on_temperature(self, peer, sender, bus, topic, headers, message):
 - **Runtime registration:** `platform_agent.py:utils._setup_pubsub_subscriptions()`
 - Scans agent methods for `_pubsub_subscriptions` attribute at startup
 
-### ✅ Core Signals
+### Core Signals
 ```python
 @Core.receiver('onstart')
 def onstart(self, sender, **kwargs):
@@ -136,7 +136,7 @@ def onstart(self, sender, **kwargs):
 - **Implementation:** Direct pass-through to `derhost.client.agent.Core`
 - **Signals supported:** onstart, onstop, onconnected, ondisconnected, onconfigure
 
-### ✅ Configuration Loading
+### Configuration Loading
 ```python
 config = utils.load_config(config_path)
 ```
@@ -145,7 +145,7 @@ config = utils.load_config(config_path)
 - Loads JSON configuration files
 - Returns empty dict if file missing (graceful degradation)
 
-### ✅ Main Entry Point
+### Main Entry Point
 ```python
 utils.vip_main(MyAgent, version='1.0')
 ```
@@ -155,7 +155,7 @@ utils.vip_main(MyAgent, version='1.0')
 - Instantiates agent, connects, processes decorators
 - Runs until Ctrl+C
 
-### ✅ Heartbeat Subsystem
+### Heartbeat Subsystem
 ```python
 self.vip.heartbeat.start_with_period(30)
 ```
@@ -164,7 +164,7 @@ self.vip.heartbeat.start_with_period(30)
 - Background thread publishes to `heartbeat/{identity}` topic
 - Configurable period
 
-### ✅ Health Subsystem
+### Health Subsystem
 ```python
 self.vip.health.set_status(STATUS_GOOD, "Running normally")
 ```
@@ -173,7 +173,7 @@ self.vip.health.set_status(STATUS_GOOD, "Running normally")
 - Publishes to `health/{identity}` topic
 - Supports STATUS_GOOD, STATUS_BAD
 
-### ✅ Query Subsystem
+### Query Subsystem
 ```python
 query = Query(self.core)
 serverkey = query.query('serverkey').get()
@@ -183,7 +183,7 @@ serverkey = query.query('serverkey').get()
 - Returns placeholder for ZMQ-specific queries
 - Returns actual values for: identity, addresses, version
 
-### ✅ Logging Setup
+### Logging Setup
 ```python
 utils.setup_logging()
 ```
@@ -310,7 +310,7 @@ from volttron.platform.vip.agent import Agent
 
 **Enhancements:**
 ```python
-class Agent(AEMSAgent):
+class Agent(BaseAgent):
     def __init__(self, **kwargs):
         super().__init__(...)
 
@@ -399,11 +399,11 @@ These subsystems are added to every agent automatically.
 
 ### What Works
 
-✅ **Zero-modification support** - Run VOLTTRON agents as-is
-✅ **All common features** - RPC, PubSub, Core, Config, Heartbeat, Health
-✅ **Clean abstraction** - Import hooks transparent to agent code
-✅ **Easy deployment** - Single script launch
-✅ **Good error handling** - Helpful messages when things go wrong
+**Zero-modification support** - Run VOLTTRON agents as-is
+**All common features** - RPC, PubSub, Core, Config, Heartbeat, Health
+**Clean abstraction** - Import hooks transparent to agent code
+**Easy deployment** - Single script launch
+**Good error handling** - Helpful messages when things go wrong
 
 ### ListenerAgent Test Case
 
@@ -417,17 +417,17 @@ from volttron.platform.vip.agent import Agent, Core, PubSub
 from volttron.platform.vip.agent.subsystems.query import Query
 ```
 
-**Status:** ✅ All imports successfully redirected
+**Status:** All imports successfully redirected
 
 **Features used:**
-- ✅ Agent base class
-- ✅ @Core.receiver decorators
-- ✅ @PubSub.subscribe decorator
-- ✅ utils.load_config()
-- ✅ utils.vip_main()
-- ✅ Heartbeat subsystem
-- ✅ Health subsystem
-- ✅ Query subsystem
+- Agent base class
+- @Core.receiver decorators
+- @PubSub.subscribe decorator
+- utils.load_config()
+- utils.vip_main()
+- Heartbeat subsystem
+- Health subsystem
+- Query subsystem
 
 **Result:** Works without any code changes!
 
@@ -452,5 +452,5 @@ The implementation supports all common VOLTTRON agent patterns and has been test
 
 ---
 
-**Status:** ✅ Ready for testing and feedback
+**Status:** Ready for testing and feedback
 **Confidence:** High - all major features implemented and tested
