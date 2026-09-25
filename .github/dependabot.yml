@@ -6,10 +6,6 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
-    reviewers:
-      - "VOLTTRON/aems-lib-fastapi-maintainers"
-    assignees:
-      - "VOLTTRON/aems-lib-fastapi-maintainers"
 
   # Enable security updates for GitHub Actions
   - package-ecosystem: "github-actions"

@@ -126,14 +126,14 @@ jobs:
           else
             echo "## Initial Release" > release_notes.md
             echo "" >> release_notes.md
-            echo "First release of aems-lib-fastapi" >> release_notes.md
+            echo "First release of der-control-fastlib" >> release_notes.md
           fi
 
           echo "" >> release_notes.md
           echo "## Installation" >> release_notes.md
           echo "" >> release_notes.md
           echo "\`\`\`bash" >> release_notes.md
-          echo "pip install aems-lib-fastapi==$VERSION" >> release_notes.md
+          echo "pip install der-control-fastlib==$VERSION" >> release_notes.md
           echo "\`\`\`" >> release_notes.md
 
       - name: Create GitHub Release

@@ -225,7 +225,7 @@ The system can automatically notify test servers when pre-releases are created:
 {
   "action": "deploy",
   "version": "1.2.3-alpha.1",
-  "repository": "aems-lib-fastapi",
+  "repository": "der-control-fastlib",
   "timestamp": "2025-08-01T10:30:00+00:00"
 }
 ```
