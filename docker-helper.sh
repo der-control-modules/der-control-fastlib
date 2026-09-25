@@ -41,6 +41,9 @@ Options:
     -v, --volume PATH   Mount volume for config store
     --dev               Mount source code for development
 
+Environment:
+    DERHOST_PUBLISH_HOST  Host-side publish address (default: 127.0.0.1)
+
 Examples:
     $0 build
     $0 run --port 9000
@@ -70,6 +73,32 @@ build_image() {
     print_info "Building Docker image: $IMAGE_NAME"
     docker build -t "$IMAGE_NAME" "$SCRIPT_DIR"
     print_success "Image built successfully"
+}
+
+# Resolve DERHOST_PUBLISH_HOST to a validated host for the -p publish flag.
+# Unset or empty means loopback (#36). Any other value must parse as an IP
+# address, passed to python3 via the environment rather than interpolated
+# into the script text, so an untrusted value cannot inject code; IPv6 is
+# bracketed for docker run's host:port:container syntax.
+resolve_publish_host() {
+    local raw="${DERHOST_PUBLISH_HOST:-}"
+    if [ -z "$raw" ]; then
+        printf '%s\n' "127.0.0.1"
+        return
+    fi
+    DERHOST_RAW_HOST="$raw" python3 - <<'PYEOF'
+import ipaddress
+import os
+import sys
+
+raw = os.environ["DERHOST_RAW_HOST"]
+try:
+    parsed = ipaddress.ip_address(raw)
+except ValueError:
+    print(f"Error: DERHOST_PUBLISH_HOST is not a valid IP address: {raw!r}", file=sys.stderr)
+    sys.exit(1)
+print(f"[{parsed}]" if parsed.version == 6 else str(parsed))
+PYEOF
 }
 
 # Run container
@@ -105,9 +134,12 @@ run_container() {
         exit 1
     fi
 
-    print_info "Starting AEMS server on port $port"
+    local publish_host
+    publish_host="$(resolve_publish_host)" || exit 1
 
-    local docker_cmd=(docker run $detach --name "$CONTAINER_NAME" -p "${port}:8000")
+    print_info "Starting AEMS server on port $port, published on $publish_host"
+
+    local docker_cmd=(docker run $detach --name "$CONTAINER_NAME" -p "${publish_host}:${port}:8000")
 
     # Add volume for VOLTTRON_HOME
     docker_cmd+=(-v "aems-volttron-home:/var/volttron")
