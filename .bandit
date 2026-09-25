@@ -1,7 +1,7 @@
 [bandit]
 # Bandit configuration - exclude all test files and development scripts
 exclude_dirs = tests,__pycache__
-exclude = dev.py,test_rpc.py,dev_new.py,new_init_project.py,debug_rpc.py,scoop-files-for-model.py
+exclude = test_rpc.py,dev_new.py,new_init_project.py,debug_rpc.py,scoop-files-for-model.py
 # Skip the following security checks:
 # B101: assert statements (acceptable in validation)
 # B110: try/except pass (acceptable for optional operations)
