@@ -79,17 +79,19 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/pip install -e .[dev]
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/pip" install -e .[dev]
+          echo "VENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+        # Kept outside the checkout: see ci.yml's install step for why.
 
       - name: Run quality checks
         run: |
-          make check
+          make RUFF="$VENV/bin/ruff" PYTEST="$VENV/bin/pytest" check
 
       - name: Build package
         run: |
-          make build
+          make PYTHON="$VENV/bin/python" build
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

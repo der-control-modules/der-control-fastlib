@@ -21,13 +21,15 @@ jobs:
 
       - name: Install current dependencies
         run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/pip install -e .[dev]
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/pip" install -e .[dev]
+          echo "VENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+        # Kept outside the checkout: see ci.yml's install step for why.
 
       - name: Update dependencies
         run: |
-          make update
+          make PYTHON="$VENV/bin/python" PIP="$VENV/bin/pip" update
 
       - name: Check for changes
         id: changes

@@ -49,21 +49,26 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/pip install -e .[dev]
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/pip" install -e .[dev]
+          echo "VENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+        # The venv lives outside the checkout, not at ./.venv: a repo-root
+        # .venv is how the legacy BACnet integration tests in tests/ detect
+        # a real local VOLTTRON dev setup and attempt to launch it; creating
+        # one here would flip those tests from skipped to failing.
 
       - name: Run linting
         run: |
-          make lint
+          make RUFF="$VENV/bin/ruff" lint
 
       - name: Run tests
         run: |
-          make test
+          make PYTEST="$VENV/bin/pytest" test
 
       - name: Test build
         run: |
-          make build
+          make PYTHON="$VENV/bin/python" build
 
   security-scan:
     runs-on: ubuntu-latest
@@ -78,18 +83,19 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/pip install -e .[dev]
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/pip" install -e .[dev]
+          echo "VENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
 
       - name: Run security scans (standard mode)
         run: |
-          make security  # Only fails on MEDIUM/HIGH/CRITICAL severity
+          make PIP_AUDIT="$VENV/bin/pip-audit" BANDIT="$VENV/bin/bandit" security  # Only fails on MEDIUM/HIGH/CRITICAL severity
         if: github.ref != 'refs/heads/main'
 
       - name: Run security scans (strict mode for main branch)
         run: |
-          make security-strict  # Zero tolerance for releases
+          make PIP_AUDIT="$VENV/bin/pip-audit" BANDIT="$VENV/bin/bandit" security-strict  # Zero tolerance for releases
         if: github.ref == 'refs/heads/main'
 
       - name: Upload security results
