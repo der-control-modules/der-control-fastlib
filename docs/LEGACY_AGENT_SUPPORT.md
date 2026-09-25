@@ -2,7 +2,7 @@
 
 This document explains how to run existing VOLTTRON agents on AEMS without modifying their code.
 
-## ⚠️ Prerequisites
+## Prerequisites
 
 ### Required: VOLTTRON Clone
 
@@ -32,7 +32,7 @@ The AEMS compatibility layer allows you to run VOLTTRON agents by:
 
 ## Supported VOLTTRON Features
 
-### ✅ Fully Supported
+### Fully Supported
 
 | Feature | VOLTTRON Import | AEMS Equivalent |
 |---------|----------------|-----------------|
@@ -48,7 +48,7 @@ The AEMS compatibility layer allows you to run VOLTTRON agents by:
 | Heartbeat | `vip.heartbeat.start_with_period()` | Background thread publisher |
 | Query Subsystem | `Query(core).query()` | Basic platform info |
 
-### ⚠️ Partial Support
+### Partial Support
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -56,7 +56,7 @@ The AEMS compatibility layer allows you to run VOLTTRON agents by:
 | ZMQ Server Keys | Returns placeholder | AEMS uses WebSocket, not ZMQ |
 | Platform Security | Not applicable | Use standard web security (TLS/JWT) |
 
-### ❌ Not Supported
+### Not Supported
 
 - VOLTTRON platform installation/management commands
 - ZMQ-specific features
@@ -379,47 +379,47 @@ def update_control(self):
 ## Architecture Diagram
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                  VOLTTRON Agent Code                         │
-│  (No modifications needed!)                                  │
-│                                                              │
-│  from volttron.platform.vip.agent import Agent, Core, RPC   │
-│  from volttron.platform.agent import utils                  │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-                         ├─ Import Hook Intercepts
-                         │
-┌────────────────────────▼─────────────────────────────────────┐
-│              AEMS Compatibility Layer                        │
-│                                                              │
-│  • vip_agent.py    → Agent, Core, RPC, PubSub               │
-│  • platform_agent.py → utils (load_config, vip_main)        │
-│  • health.py       → STATUS_GOOD, STATUS_BAD                │
-│  • heartbeat.py    → Heartbeat subsystem                    │
-│  • query.py        → Query subsystem                        │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-                         ├─ Maps to AEMS APIs
-                         │
-┌────────────────────────▼─────────────────────────────────────┐
-│                   AEMS Core Libraries                        │
-│                                                              │
-│  • derhost.client.agent.Agent                                │
-│  • derhost.client.agent.RPC                                  │
-│  • derhost.client.agent.PubSub                               │
-│  • derhost.client.agent.Core                                 │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-                         ├─ WebSocket Connection
-                         │
-┌────────────────────────▼─────────────────────────────────────┐
-│              AEMS FastAPI Message Bus                        │
-│                                                              │
-│  • WebSocket message routing                                │
-│  • RPC request/response                                     │
-│  • PubSub topic distribution                                │
-│  • ConfigStore REST API                                     │
-└──────────────────────────────────────────────────────────────┘
++--------------------------------------------------------------+
+|                  VOLTTRON Agent Code                         |
+|  (No modifications needed!)                                  |
+|                                                              |
+|  from volttron.platform.vip.agent import Agent, Core, RPC   |
+|  from volttron.platform.agent import utils                  |
++------------------------+-------------------------------------+
+                         |
+                         +- Import Hook Intercepts
+                         |
++------------------------v-------------------------------------+
+|              AEMS Compatibility Layer                        |
+|                                                              |
+|  * vip_agent.py    -> Agent, Core, RPC, PubSub               |
+|  * platform_agent.py -> utils (load_config, vip_main)        |
+|  * health.py       -> STATUS_GOOD, STATUS_BAD                |
+|  * heartbeat.py    -> Heartbeat subsystem                    |
+|  * query.py        -> Query subsystem                        |
++------------------------+-------------------------------------+
+                         |
+                         +- Maps to AEMS APIs
+                         |
++------------------------v-------------------------------------+
+|                   AEMS Core Libraries                        |
+|                                                              |
+|  * derhost.client.agent.Agent                                |
+|  * derhost.client.agent.RPC                                  |
+|  * derhost.client.agent.PubSub                               |
+|  * derhost.client.agent.Core                                 |
++------------------------+-------------------------------------+
+                         |
+                         +- WebSocket Connection
+                         |
++------------------------v-------------------------------------+
+|              AEMS FastAPI Message Bus                        |
+|                                                              |
+|  * WebSocket message routing                                |
+|  * RPC request/response                                     |
+|  * PubSub topic distribution                                |
+|  * ConfigStore REST API                                     |
++--------------------------------------------------------------+
 ```
 
 ## Reference: Import Mapping
