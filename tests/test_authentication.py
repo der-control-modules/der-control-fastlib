@@ -2,11 +2,31 @@
 Test module for authentication endpoint functionality.
 """
 
+import secrets
 from datetime import datetime, timedelta
 
 import httpx
 import jwt
 import pytest
+
+from derhost.server.fastapi_message_bus import FastAPIMessageBus, InsecureJwtSecretKeyError
+
+from .utils import MessageBusManager
+
+# A fixture signing key: 32 random bytes, never the published literal the
+# server now refuses (#36).
+TEST_JWT_SECRET_KEY = secrets.token_urlsafe(32)
+
+
+@pytest.fixture(autouse=True)
+def _jwt_secret_key_env(monkeypatch):
+    """Give every test in this module a valid signing key by default.
+
+    Runs before the function-scoped `message_bus` fixture builds a server,
+    since pytest orders same-scope autouse fixtures ahead of requested ones.
+    Individual tests override with `monkeypatch.delenv`/`setenv` as needed.
+    """
+    monkeypatch.setenv("JWT_SECRET_KEY", TEST_JWT_SECRET_KEY)
 
 
 class TestAuthentication:
@@ -90,7 +110,7 @@ class TestAuthentication:
         data = response.json()
 
         # JWT configuration (should match server configuration)
-        secret_key = "your-secret-key-change-in-production"
+        secret_key = TEST_JWT_SECRET_KEY
         algorithm = "HS256"
 
         # Decode and validate access token
@@ -307,3 +327,43 @@ class TestAuthentication:
         assert data["status"] == "success"
         assert data["username"] == "admin"
         assert "refresh_token" in data
+
+
+class TestJwtSecretKeyStartup:
+    """Server startup refuses the published key and an undersized key (#36)."""
+
+    def test_startup_rejects_published_literal(self, tmp_path, monkeypatch):
+        """The literal README.md used to document must never sign a token."""
+        monkeypatch.setenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+
+        with pytest.raises(InsecureJwtSecretKeyError, match="published default"):
+            FastAPIMessageBus(config_store_dir=str(tmp_path))
+
+    def test_startup_rejects_31_byte_key(self, tmp_path, monkeypatch):
+        """One byte under the minimum is still refused."""
+        monkeypatch.setenv("JWT_SECRET_KEY", "a" * 31)
+
+        with pytest.raises(InsecureJwtSecretKeyError, match="32 bytes"):
+            FastAPIMessageBus(config_store_dir=str(tmp_path))
+
+    def test_startup_accepts_32_byte_key(self, tmp_path, monkeypatch):
+        """Control: a key at the minimum length starts cleanly."""
+        monkeypatch.setenv("JWT_SECRET_KEY", "a" * 32)
+
+        bus = FastAPIMessageBus(config_store_dir=str(tmp_path))
+
+        assert bus.app is not None
+
+    def test_authenticate_returns_503_without_key(self, monkeypatch):
+        """No key configured: the server starts, but /authenticate refuses."""
+        monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+
+        with MessageBusManager() as manager:
+            bus, port = manager.start_bus()
+            response = httpx.post(
+                f"http://{bus.host}:{port}/authenticate",
+                json={"username": "someone", "password": "something"},
+                timeout=10.0,
+            )
+
+        assert response.status_code == 503
