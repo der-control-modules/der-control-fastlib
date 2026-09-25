@@ -84,7 +84,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          # setuptools>=83 clears PYSEC-2026-3447; venv seeds an older
+          # setuptools via ensurepip and `pip install --upgrade pip` alone
+          # does not touch it, so pip-audit flags the seeded version.
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip "setuptools>=83"
           "$RUNNER_TEMP/venv/bin/pip" install -e .[dev]
           echo "VENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
 
