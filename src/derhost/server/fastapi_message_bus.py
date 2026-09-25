@@ -230,6 +230,36 @@ async def lifespan(app: FastAPI):
     await app.state.manager.shutdown()
 
 
+# Minimum acceptable length, in bytes, for JWT_SECRET_KEY (#36).
+JWT_SECRET_KEY_MIN_BYTES = 32
+
+# The literal this server used to fall back to, and README.md used to
+# document; refused outright since a published value cannot sign a real token.
+_PUBLISHED_JWT_SECRET_KEY = "your-secret-key-change-in-production"
+
+
+class InsecureJwtSecretKeyError(RuntimeError):
+    """Raised at startup when JWT_SECRET_KEY is unsafe to sign tokens with."""
+
+
+def _check_jwt_secret_key() -> None:
+    """Refuse to start with the published or an undersized signing key.
+
+    An unset key is allowed here: /authenticate returns 503 until an
+    operator configures one (der-control-modules/der-control-fastlib#36).
+    """
+    secret_key = os.environ.get("JWT_SECRET_KEY")
+    if secret_key is None:
+        return
+    if secret_key == _PUBLISHED_JWT_SECRET_KEY:
+        raise InsecureJwtSecretKeyError(
+            "JWT_SECRET_KEY is set to the published default value; generate "
+            'one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+        )
+    if len(secret_key.encode("utf-8")) < JWT_SECRET_KEY_MIN_BYTES:
+        raise InsecureJwtSecretKeyError(f"JWT_SECRET_KEY must be at least {JWT_SECRET_KEY_MIN_BYTES} bytes")
+
+
 class FastAPIMessageBus(MessageBus):
     """FastAPI implementation of the MessageBus."""
 
@@ -242,6 +272,7 @@ class FastAPIMessageBus(MessageBus):
         reload_dirs: list = None,
         reload_delay: float = 0.25,
     ):
+        _check_jwt_secret_key()
         self.app = FastAPI(title="AEMS MessageBus", lifespan=lifespan)
 
         # Setup templates directory
@@ -958,9 +989,13 @@ class FastAPIMessageBus(MessageBus):
             # TODO: Implement actual authentication logic here
             # For now, this is a placeholder that accepts any non-empty credentials
             if final_username and final_password:
+                secret_key = os.environ.get("JWT_SECRET_KEY")
+                if not secret_key:
+                    # Startup already refused the published or undersized key (#36);
+                    # unset means no operator has configured one yet.
+                    raise HTTPException(status_code=503, detail="Authentication is not configured")
                 try:
                     # JWT configuration
-                    secret_key = os.environ.get("JWT_SECRET_KEY", "your-secret-key-change-in-production")
                     algorithm = "HS256"
 
                     # Current time

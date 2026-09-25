@@ -315,8 +315,11 @@ Once the server is running, access interactive documentation at:
 # VOLTTRON_HOME - Base directory for agent configs
 export VOLTTRON_HOME=/home/user/.volttron
 
-# JWT_SECRET_KEY - Secret key for JWT token generation (production only)
-export JWT_SECRET_KEY=your-secret-key-change-in-production
+# JWT_SECRET_KEY - Secret key for JWT token generation. The server refuses
+# to start if this is set to a published example or shorter than 32 bytes.
+# Generate one with:
+#   python -c "import secrets; print(secrets.token_urlsafe(32))"
+export JWT_SECRET_KEY=<generated-value>
 
 # Start server
 aems-server --host 0.0.0.0 --port 8000
