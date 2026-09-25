@@ -40,7 +40,7 @@ AEMS FastAPI provides a **100% VOLTTRON-compatible agent communication library**
 
 ```bash
 # Basic installation
-pip install aems-lib-fastapi
+pip install der-control-fastlib
 
 # Or install with optional dependencies for specific agent types
 pip install -e ".[historians]"  # For SQLHistorian, MQTTHistorian, etc.
@@ -267,7 +267,7 @@ This library provides **100% API compatibility** with VOLTTRON's core agent comm
 ```bash
 # Clone and setup
 git clone <repository-url>
-cd aems-lib-fastapi
+cd der-control-fastlib
 
 # Create virtual environment and install dependencies
 python3 -m venv .venv

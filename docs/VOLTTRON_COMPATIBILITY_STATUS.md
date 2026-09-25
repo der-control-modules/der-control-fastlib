@@ -89,7 +89,7 @@ for callback in self._config_callbacks.get(name, []):
 To verify compatibility:
 ```bash
 # Run full compatibility test suite
-cd /home/volttron/aems-lib-fastapi
+cd /path/to/der-control-fastlib
 source .venv/bin/activate
 python -m pytest tests/test_volttron_compatibility.py -v
 

@@ -127,10 +127,10 @@ If you want to use THIS project's exact settings globally:
 
 ```bash
 # View current project settings
-cat /home/volttron/aems-lib-fastapi/.vscode/settings.json
+cat /path/to/der-control-fastlib/.vscode/settings.json
 
 # Copy to remote user settings
-cp /home/volttron/aems-lib-fastapi/.vscode/settings.json ~/.vscode-server/data/Machine/settings.json
+cp /path/to/der-control-fastlib/.vscode/settings.json ~/.vscode-server/data/Machine/settings.json
 
 # Reload VSCode
 # Ctrl+Shift+P -> "Developer: Reload Window"

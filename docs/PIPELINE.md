@@ -33,7 +33,7 @@ docker compose up -d
 
 ```
 parent-directory/
-  aems-lib-fastapi/          # This repo (Steps 2, 3, orchestrator)
+  der-control-fastlib/       # This repo (Steps 2, 3, orchestrator)
   volttron-pnnl-aems/        # Contains aems-edge (Step 1)
     aems-edge/
       configurations/
@@ -41,7 +41,7 @@ parent-directory/
           generate_configs.py
 ```
 
-The orchestrator expects `volttron-pnnl-aems/aems-edge` to be a sibling of `aems-lib-fastapi` by default:
+The orchestrator expects `volttron-pnnl-aems/aems-edge` to be a sibling of `der-control-fastlib` by default:
 
 ```
 ../volttron-pnnl-aems/aems-edge
@@ -184,7 +184,7 @@ configs/
 
 ### Step 2: generate-agents-config.py
 
-**Location:** `aems-lib-fastapi/generate-agents-config.py`
+**Location:** `der-control-fastlib/generate-agents-config.py`
 
 **What it does:** Reads `config.ini` and produces a structured `agents-config.json` that describes every agent -- its type, directory, identity, config file path, volumes, ports, dependencies, and enabled/disabled state.
 
@@ -211,7 +211,7 @@ python generate-agents-config.py --config config.ini --validate-only
 
 ### Step 3: generate-docker-compose.py
 
-**Location:** `aems-lib-fastapi/generate-docker-compose.py`
+**Location:** `der-control-fastlib/generate-docker-compose.py`
 
 **What it does:** Reads `agents-config.json` and generates a `docker-compose.yml` with:
 1. An `aems-fastlib-server` service (the FastAPI WebSocket server)
@@ -367,10 +367,10 @@ In the integrated stack, the compose file uses:
 
 ### Generated Files (Standalone)
 
-After running the full pipeline from `aems-lib-fastapi/`:
+After running the full pipeline from `der-control-fastlib/`:
 
 ```
-aems-lib-fastapi/
+der-control-fastlib/
   config.ini.example            # Template: copy to config.ini and edit
   config.ini                    # Input: your site configuration (git-ignored)
   agents-config.json            # Generated: agent definitions (Step 2)
@@ -407,18 +407,18 @@ The Dockerfile clones these repos into the image at build time:
 - `/volttron` -- VOLTTRON 9.0.4 (legacy agent source code)
 - `/volttron-pnnl-aems` -- AEMS Edge agents (Manager, Normal Framework driver)
 - `/volttron-pnnl-applications` -- ILC agent
-- `/app` -- The aems-lib-fastapi application code and virtualenv
+- `/app` -- The der-control-fastlib application code and virtualenv
 
 Agent containers reference these paths via `agent_dir` in their config.
 
 ## Standalone vs Integrated
 
-### Standalone (aems-lib-fastapi only)
+### Standalone (der-control-fastlib only)
 
 Use when developing or testing the FastAPI layer independently.
 
 ```bash
-cd aems-lib-fastapi
+cd der-control-fastlib
 
 # Copy the template and edit for your site:
 cp config.ini.example config.ini
@@ -441,7 +441,7 @@ Use for full AEMS deployment alongside the VOLTTRON platform, database, and web 
 ```bash
 cd volttron-pnnl-aems/aems-app/docker
 
-# The compose file references ../../aems-lib-fastapi as build context.
+# The compose file references ../../der-control-fastlib as build context.
 # Config files are pre-generated and mounted.
 
 # Start the FastAPI profile:

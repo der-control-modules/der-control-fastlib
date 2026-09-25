@@ -246,7 +246,7 @@ Expected output:
 ============================================================
 AEMS Legacy VOLTTRON Agent Launcher (vctl-style)
 ============================================================
-Agent Directory: /home/volttron/aems-lib-fastapi/example-from-volttron/ListenerAgent
+Agent Directory: /path/to/der-control-fastlib/example-from-volttron/ListenerAgent
 Auto-detected agent: listener.agent:ListenerAgent
 ------------------------------------------------------------
 Agent Module:  listener.agent

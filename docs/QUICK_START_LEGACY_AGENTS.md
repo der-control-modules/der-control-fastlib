@@ -25,12 +25,12 @@ git clone https://github.com/VOLTTRON/volttron-pnnl-applications.git
 
 ```bash
 # Terminal 1: Start AEMS server
-cd /path/to/aems-lib-fastapi
+cd /path/to/der-control-fastlib
 source .venv/bin/activate
 aems-server
 
 # Terminal 2: Run your VOLTTRON agent (NO CODE CHANGES NEEDED!)
-cd /path/to/aems-lib-fastapi
+cd /path/to/der-control-fastlib
 source .venv/bin/activate
 ./start-legacy.py --agent-dir /path/to/volttron/examples/ListenerAgent \
     --config config \
@@ -78,12 +78,12 @@ pip install -e ".[historians,drivers,ilc]"
 git clone https://github.com/VOLTTRON/volttron.git ~/volttron
 
 # Terminal 1: Start AEMS server
-cd ~/aems-lib-fastapi
+cd ~/der-control-fastlib
 source .venv/bin/activate
 aems-server
 
 # Terminal 2: Run ListenerAgent from VOLTTRON clone
-cd ~/aems-lib-fastapi
+cd ~/der-control-fastlib
 source .venv/bin/activate
 ./start-legacy.py --agent-dir ~/volttron/examples/ListenerAgent \
     --config config \
@@ -93,7 +93,7 @@ source .venv/bin/activate
 ### SQLHistorian
 ```bash
 # Install historian dependencies first
-cd ~/aems-lib-fastapi
+cd ~/der-control-fastlib
 pip install -e ".[historians]"
 
 # Run SQLHistorian from VOLTTRON clone
@@ -105,7 +105,7 @@ pip install -e ".[historians]"
 ### PlatformDriverAgent
 ```bash
 # Install driver dependencies first
-cd ~/aems-lib-fastapi
+cd ~/der-control-fastlib
 pip install -e ".[drivers]"
 
 # Run PlatformDriverAgent from VOLTTRON clone
@@ -120,7 +120,7 @@ pip install -e ".[drivers]"
 git clone https://github.com/VOLTTRON/volttron-pnnl-applications.git ~/volttron-pnnl-applications
 
 # Install ILC dependencies
-cd ~/aems-lib-fastapi
+cd ~/der-control-fastlib
 pip install -e ".[ilc]"
 
 # Run ILCAgent from PNNL applications clone

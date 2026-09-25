@@ -4,7 +4,7 @@
 
 The comprehensive system setup guide (platform + devices, sim + real, orchestration) lives in the parent project repo.
 
-For aems-lib-fastapi library docs, see:
+For der-control-fastlib library docs, see:
 - [GETTING_STARTED.md](GETTING_STARTED.md) - install, configure, run
 - [PIPELINE.md](PIPELINE.md) - orchestration pipeline details
 - [API.md](API.md) - message bus API reference
