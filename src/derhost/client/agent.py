@@ -2577,7 +2577,9 @@ class CronTimer:
                 and next_time.day in self.days_of_month
                 and next_time.hour in self.hours
                 and next_time.minute in self.minutes
-                and next_time.weekday() in self.days_of_week
+                # weekday() is 0=Monday; days_of_week is stored in cron's
+                # 0=Sunday numbering, so shift before comparing.
+                and (next_time.weekday() + 1) % 7 in self.days_of_week
             ):
                 return next_time
 
