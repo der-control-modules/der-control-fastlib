@@ -2625,29 +2625,52 @@ class CronTimer:
         single occurrence: replace(tzinfo=...) on such a wall time (the
         get_utc_seconds_from_epoch path this replaces) always resolves to
         the pre-transition instant, which can be earlier than `after`
-        (issue #30). This walks every wall time the pattern allows on the
-        matched day and resolves each to an instant with PEP 495 fold,
-        then returns the smallest one strictly after `after`.
+        (issue #30). On a day whose UTC offset changes this walks every
+        wall time the pattern allows and resolves each to an instant with
+        PEP 495 fold, returning the smallest one strictly after `after`.
+        On any other day the offset is constant, so the wall times are
+        already in epoch order and the first one after `after` is that
+        minimum; no fold ambiguity can arise, so a full scan would only
+        repeat the same answer at up to hours*minutes the cost.
         """
         search_from = datetime.fromtimestamp(after)
         fires_every_hour = self.hours == set(range(24))
+        sorted_hours = sorted(self.hours)
+        sorted_minutes = sorted(self.minutes)
 
         while True:
             candidate_day = self.get_next(search_from)
+            year, month, day = candidate_day.year, candidate_day.month, candidate_day.day
+
+            midnight = datetime(year, month, day, 0, 0).timestamp()
+            end_of_day = datetime(year, month, day, 23, 59).timestamp()
+            transition_day = time.localtime(midnight).tm_gmtoff != time.localtime(end_of_day).tm_gmtoff
+
             best = None
-            for hour in sorted(self.hours):
-                for minute in sorted(self.minutes):
-                    wall = datetime(candidate_day.year, candidate_day.month, candidate_day.day, hour, minute)
-                    for epoch in self._wall_epoch_candidates(wall, fires_every_hour):
-                        if epoch > after and (best is None or epoch < best):
+            if transition_day:
+                for hour in sorted_hours:
+                    for minute in sorted_minutes:
+                        wall = datetime(year, month, day, hour, minute)
+                        for epoch in self._wall_epoch_candidates(wall, fires_every_hour):
+                            if epoch > after and (best is None or epoch < best):
+                                best = epoch
+            else:
+                for hour in sorted_hours:
+                    for minute in sorted_minutes:
+                        epoch = datetime(year, month, day, hour, minute).timestamp()
+                        if epoch > after:
                             best = epoch
+                            break
+                    if best is not None:
+                        break
+
             if best is not None:
                 return best
             # Every wall time on the matched day resolved at or before
             # `after` (its only remaining slot was a fold-1 duplicate
-            # excluded below). Move past this date and let get_next find
+            # excluded above). Move past this date and let get_next find
             # the next matching one.
-            search_from = datetime(candidate_day.year, candidate_day.month, candidate_day.day, 23, 59)
+            search_from = datetime(year, month, day, 23, 59)
 
     @staticmethod
     def _wall_epoch_candidates(wall: datetime, include_fold1_duplicate: bool) -> list[float]:
