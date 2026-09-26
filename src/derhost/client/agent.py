@@ -2427,6 +2427,16 @@ class CronTimer:
     This is a simplified version of VOLTTRON's cron schedule parser.
     """
 
+    # Every pattern except Feb 29 combined with a day-of-week restriction has
+    # a same-weekday recurrence gap of at most 4382 days (a hair under 12
+    # years, short of 12*365.25 because a non-leap century falls in the
+    # gap): the exact maximum over every (month, day) singleton crossed with
+    # every single weekday, computed across two full 400-year Gregorian
+    # cycles (issue #65). 13 whole years covers that gap regardless of how
+    # the search's start date lands within a year (verified: 12 is not
+    # enough for the worst case, 13 is).
+    _SEARCH_WINDOW_YEARS = 13
+
     def __init__(self, cron_pattern):
         """Initialize a cron timer with a cron pattern."""
         self.cron_pattern = cron_pattern
@@ -2434,10 +2444,44 @@ class CronTimer:
         # Parse the cron pattern
         self.minutes, self.hours, self.days_of_month, self.months, self.days_of_week = self._parse_pattern(cron_pattern)
 
+        # Feb 29 is the only day-of-month value whose own recurrence (a
+        # leap year, at most every 4 years) is rare enough that adding a
+        # day-of-week restriction can push the wait past the window above,
+        # up to 40 years. This must be decided from the pattern itself, not
+        # by searching from one fixed start date: a fixed-start search can
+        # pass at construction and still exceed the window from a different
+        # start (issue #65).
+        self._reject_if_feb_29_with_weekday_restriction()
+
         # A pattern that can never match (e.g. day 31 of February) is
         # rejected at construction rather than surfacing later as an
         # unresolvable next time in the scheduler loop.
         self.get_next(datetime(2000, 1, 1))
+
+    def _reject_if_feb_29_with_weekday_restriction(self):
+        """Raise ValueError when the only calendar date this pattern's
+        day-of-month and month sets can ever produce is February 29th, and
+        the day-of-week set restricts to fewer than all 7 days.
+
+        Any other (month, day) combination in the parsed sets gives the
+        pattern an annual-or-better recurrence on its own, which bounds its
+        wait within _SEARCH_WINDOW_YEARS regardless of a day-of-week
+        restriction (a larger day-of-month/month/day-of-week set can only
+        add candidate match dates, never remove one).
+        """
+        realizable_dates = set()
+        for month in self.months:
+            _, days_in_month = calendar.monthrange(2000, month)  # 2000: a leap year, so Feb 29 counts
+            for day in self.days_of_month:
+                if day <= days_in_month:
+                    realizable_dates.add((month, day))
+
+        if realizable_dates == {(2, 29)} and len(self.days_of_week) < 7:
+            raise ValueError(
+                f"Cron pattern {self.cron_pattern!r} restricts to Feb 29 and a day-of-week: "
+                f"that combination can wait up to 40 years, past the {self._SEARCH_WINDOW_YEARS}-year "
+                "search window. Drop the day-of-week restriction or add another day-of-month/month."
+            )
 
     def _parse_pattern(self, pattern):
         """Parse a cron pattern into its components."""
@@ -2619,13 +2663,14 @@ class CronTimer:
         sorted_hours = sorted(self.hours)
         sorted_minutes = sorted(self.minutes)
 
-        # A 400-year span covers a full Gregorian cycle: every combination of
-        # date and weekday repeats within it, so no match in that span means
-        # the pattern can never match. This also bounds the search without
-        # stepping minute by minute, so it does not block the caller on a
-        # rare pattern (e.g. day 29 of February).
+        # _SEARCH_WINDOW_YEARS covers the worst-case gap of every pattern
+        # accepted at construction (the Feb-29-with-weekday case that can
+        # exceed it is refused before this method can be reached with it).
+        # This also bounds the search without stepping minute by minute, so
+        # it does not block the caller on a rare pattern (e.g. day 29 of
+        # February).
         try:
-            for year in range(start.year, start.year + 400):
+            for year in range(start.year, start.year + self._SEARCH_WINDOW_YEARS):
                 for month in sorted_months:
                     if year == start.year and month < start.month:
                         continue
@@ -2652,7 +2697,7 @@ class CronTimer:
         except (ValueError, OverflowError):
             # A candidate year past datetime's range (near year 9999) means
             # the search cannot go further; treat it the same as exhausting
-            # the 400-year bound with no match.
+            # the window with no match.
             pass
 
         raise ValueError("Could not find next scheduled time within reasonable limits")
