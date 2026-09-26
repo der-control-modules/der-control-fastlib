@@ -32,7 +32,8 @@ init(autoreset=True)
 
 from derhost._redact import (
     REDACTED as _REDACTED,
-    SECRET_LOG_FIELDS as _SECRET_LOG_FIELDS,
+    is_secret_field as _is_secret_field,
+    redact_known_secret_values as _redact_known_secret_values,
     redact_secrets as _redact_secrets,
     redact_secrets_in_text as _redact_secrets_in_text,
 )
@@ -257,9 +258,12 @@ class RPC:
                 json.dumps(val)
             except TypeError as e:
                 val_type = type(val).__name__
-                logged_val = _REDACTED if key.lower() in _SECRET_LOG_FIELDS else val
+                # Redact for the raised message too: a caller's own
+                # `except Exception as e: log(f"...{e}")` would otherwise
+                # re-surface the secret this redaction exists to hide.
+                logged_val = _REDACTED if _is_secret_field(key) else val
                 _log.error(f"RPC call failed: kwarg '{key}' is not JSON serializable: {logged_val} (type: {val_type})")
-                raise TypeError(f"RPC kwarg '{key}' is not JSON serializable: {val}") from e
+                raise TypeError(f"RPC kwarg '{key}' is not JSON serializable: {logged_val}") from e
 
         self._agent.websocket.send(
             json.dumps(
@@ -276,7 +280,7 @@ class RPC:
 
         _log.debug(
             f"Agent {self._agent.identity} sent RPC call to {peer}: "
-            f"method={method}, args={args}, kwargs={_redact_secrets(kwargs)}"
+            f"method={method}, args={_redact_secrets(args)}, kwargs={_redact_secrets(kwargs)}"
         )
 
         # Spawn a timeout watcher
@@ -336,7 +340,9 @@ class RPC:
                 gevent.spawn(relay_result)
                 return final_result
             except Exception as e:
-                error_msg = f"Remote call error: {str(e)}"
+                # This message becomes a new exception's own text, not just a
+                # log line, so it is redacted here rather than at the log call.
+                error_msg = f"Remote call error: {_redact_known_secret_values(str(e), args, kwargs)}"
                 _log.debug(error_msg)
                 async_result = AsyncResult()
                 async_result.set_exception(Exception(error_msg))
@@ -348,7 +354,10 @@ class RPC:
         if method_name in self._exported_methods:
             # Execute RPC methods in greenlets to prevent blocking nested RPC calls
             method = self._exported_methods[method_name]
-            _log.debug(f"RPC CALL: {self._agent.identity}.{method_name}(args={args}, kwargs={_redact_secrets(kwargs)})")
+            _log.debug(
+                f"RPC CALL: {self._agent.identity}.{method_name}"
+                f"(args={_redact_secrets(args)}, kwargs={_redact_secrets(kwargs)})"
+            )
 
             def execute_method():
                 try:
@@ -368,14 +377,18 @@ class RPC:
                             )
                             async_result.set(actual_result)
                         except Exception as async_e:
-                            _log.debug(f"RPC ERROR: {self._agent.identity}.{method_name} => {async_e}")
+                            # The exception object keeps its original text; only
+                            # the log line is redacted (see the module docstring).
+                            logged_async_e = _redact_known_secret_values(str(async_e), args, kwargs)
+                            _log.debug(f"RPC ERROR: {self._agent.identity}.{method_name} => {logged_async_e}")
                             async_result.set_exception(async_e)
                     else:
                         _log.debug(f"RPC RETURN: {self._agent.identity}.{method_name} => {_redact_secrets(result)}")
                         async_result.set(result)
                 except Exception as e:
                     error = str(e)
-                    _log.debug(f"RPC ERROR: {self._agent.identity}.{method_name} => {error}")
+                    logged_error = _redact_known_secret_values(error, args, kwargs)
+                    _log.debug(f"RPC ERROR: {self._agent.identity}.{method_name} => {logged_error}")
                     async_result.set_exception(e)
 
             # Spawn the method execution in a greenlet to prevent blocking
@@ -3579,8 +3592,12 @@ class Agent:
                         self.websocket.send(json.dumps(response_msg))
                         _log.debug(f"Agent {self.identity} successfully sent RPC response for msg_id {msg_id}")
                     except Exception as e:
-                        # Send error response
-                        error = str(e)
+                        # Send error response. Redacted here, not just for
+                        # the log: this error text is sent on to the server
+                        # (and from there, logged again) as this RPC's
+                        # result, so this is the last point in this process
+                        # able to keep a secret out of it.
+                        error = _redact_known_secret_values(str(e), args, kwargs)
                         _log.error(
                             f"Agent {self.identity} RPC {method_name}(args={_redact_secrets(args)}, "
                             f"kwargs={_redact_secrets(kwargs)}) failed: {error} [msg_id: {msg_id}]"

@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
-from derhost._redact import redact_secrets, truncate_for_log
+from derhost._redact import redact_known_secret_values, redact_secrets, truncate_for_log
 
 _log = logging.getLogger(__name__)
 
@@ -271,12 +271,15 @@ class ConnectionManager:
             )
             self.clear_rpc_response(msg_id)
         except Exception as e:
-            # Handle exceptions from RPC method execution
+            # Handle exceptions from RPC method execution. Redacted here, not
+            # just for the log: this error text is also sent on to the
+            # requesting client as this RPC's result.
+            error = redact_known_secret_values(str(e), args, kwargs)
             _log.error(
                 f"RPC request from {sender} to {peer}.{method}(args={redact_secrets(args)}, "
-                f"kwargs={redact_secrets(kwargs)}) failed: {e} [msg_id: {msg_id}]"
+                f"kwargs={redact_secrets(kwargs)}) failed: {error} [msg_id: {msg_id}]"
             )
-            await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": str(e)})
+            await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": error})
             self.clear_rpc_response(msg_id)
 
     def _start_status_reporter(self):
