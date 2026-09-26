@@ -5,6 +5,7 @@ Provides: platform namespace as a proper package
 """
 
 # Import submodules to make them available as attributes
+from derhost._redact import redact_secrets
 from derhost.client.jsonrpc import RemoteError
 from derhost.compat.shims import messaging as messaging_module, platform_agent, vip as vip_module
 
@@ -48,9 +49,11 @@ class AsyncCall:
 
         _log = logging.getLogger(__name__)
         try:
-            _log.debug(f"AsyncCall.send() calling {func} with args={args}, kwargs={kwargs}")
+            _log.debug(
+                f"AsyncCall.send() calling {func} with args={redact_secrets(args)}, kwargs={redact_secrets(kwargs)}"
+            )
             result = func(*args, **kwargs)
-            _log.debug(f"AsyncCall.send() completed, result={result}")
+            _log.debug(f"AsyncCall.send() completed, result={redact_secrets(result)}")
             return result
         except Exception as e:
             _log.error(f"AsyncCall.send() failed calling {func}: {e}", exc_info=True)

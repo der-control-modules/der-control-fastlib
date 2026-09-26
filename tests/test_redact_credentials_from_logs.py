@@ -1,11 +1,7 @@
 """
-Tests for der-control-modules/der-control-fastlib#36 PR 3: no log record, at
-any level, from the two files this PR covers, carries a credential value from
-the /gs RPC path or the agent's receive path.
-
-connection_manager.py also logs the raw RPC message (send_message,
-truncate_debug_message does not redact) and is a real, separate leak; it is
-outside this PR's Allowed files and is reported, not fixed, here.
+Tests for der-control-modules/der-control-fastlib#36: no log record, at any
+level, from any module under derhost, carries a credential value from the
+/gs RPC path or the agent's receive path.
 """
 
 import logging
@@ -16,9 +12,10 @@ import pytest
 
 MARKER = "s3cr3t-marker"
 
-# The two loggers this PR redacts. connection_manager.py deliberately excluded:
-# see module docstring.
-COVERED_LOGGERS = {"derhost.server.fastapi_message_bus", "derhost.client.agent"}
+
+def is_derhost_record(record: logging.LogRecord) -> bool:
+    """True for a record from the derhost package or any of its submodules."""
+    return record.name == "derhost" or record.name.startswith("derhost.")
 
 
 def assert_marker_absent(records, marker: str) -> None:
@@ -74,9 +71,9 @@ class TestRedactCredentialsFromLogs:
 
         assert response.status_code == 200
 
-        covered_records = [r for r in caplog.records if r.name in COVERED_LOGGERS]
-        assert covered_records, "expected at least one record from the covered loggers"
-        assert_marker_absent(covered_records, MARKER)
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert derhost_records, "expected at least one record from a derhost logger"
+        assert_marker_absent(derhost_records, MARKER)
 
-        method_named = any("echo_target_method" in r.getMessage() for r in covered_records)
+        method_named = any("echo_target_method" in r.getMessage() for r in derhost_records)
         assert method_named, "expected at least one RPC log record to still name the method"

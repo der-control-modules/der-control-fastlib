@@ -25,6 +25,7 @@ except ImportError:
     # Python < 3.8
     from importlib_metadata import PackageNotFoundError, version
 
+from derhost._redact import redact_secrets as _redact_secrets
 from derhost.server.config_store import ConfigStore
 from derhost.server.connection_manager import ConnectionManager
 from derhost.server.models import Message, MessageBus
@@ -194,22 +195,6 @@ logging.getLogger("watchdog.observers").setLevel(logging.INFO)
 logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)  # Silence all uvicorn.error messages
 logging.getLogger("uvicorn").setLevel(logging.INFO)
 logging.getLogger("uvicorn.access").setLevel(logging.INFO)
-
-_REDACTED = "[REDACTED]"
-_SECRET_LOG_FIELDS = {"authentication", "authorization", "token", "key", "password"}
-
-
-def _redact_secrets(value: Any) -> Any:
-    """Replace secret-bearing dict values with a fixed marker before logging.
-
-    Applied only at log call sites; stored and forwarded messages keep their
-    real values, since this must not change wire or bus behavior.
-    """
-    if isinstance(value, dict):
-        return {k: (_REDACTED if k.lower() in _SECRET_LOG_FIELDS else _redact_secrets(v)) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_redact_secrets(v) for v in value]
-    return value
 
 
 def get_package_version():
@@ -432,7 +417,7 @@ class FastAPIMessageBus(MessageBus):
                         if "msg_id" in data and "result" in data:
                             msg_id = data["msg_id"]
                             result = data["result"]
-                            _log.debug(f"Setting RPC response for msg_id {msg_id}: {result}")
+                            _log.debug(f"Setting RPC response for msg_id {msg_id}: {_redact_secrets(result)}")
                             self.manager.set_rpc_response(msg_id, result)
 
                     elif data["type"] == "rpc_error":
@@ -440,7 +425,7 @@ class FastAPIMessageBus(MessageBus):
                         if "msg_id" in data and "error" in data:
                             msg_id = data["msg_id"]
                             error = data["error"]
-                            _log.debug(f"Setting RPC error for msg_id {msg_id}: {error}")
+                            _log.debug(f"Setting RPC error for msg_id {msg_id}: {_redact_secrets(error)}")
                             self.manager.set_rpc_error(msg_id, error)
 
                     elif data["type"] == "register_rpc_methods":
@@ -675,7 +660,7 @@ class FastAPIMessageBus(MessageBus):
                 # Wait for response with 30 second timeout (longer for web UI)
                 try:
                     response = await asyncio.wait_for(future, 30.0)
-                    _log.info(f"RPC response received for msg_id {msg_id}: {response}")
+                    _log.info(f"RPC response received for msg_id {msg_id}: {_redact_secrets(response)}")
                     return {
                         "success": True,
                         "result": response,

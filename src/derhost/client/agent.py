@@ -9,7 +9,6 @@ import json
 import logging
 import numbers
 import os
-import re
 import ssl
 import time
 import traceback
@@ -31,6 +30,12 @@ from gevent.event import AsyncResult
 # Initialize colorama
 init(autoreset=True)
 
+from derhost._redact import (
+    REDACTED as _REDACTED,
+    SECRET_LOG_FIELDS as _SECRET_LOG_FIELDS,
+    redact_secrets as _redact_secrets,
+    redact_secrets_in_text as _redact_secrets_in_text,
+)
 from derhost.client import dualmethod
 
 # Use volttron-core JSON-RPC utilities for compatibility
@@ -160,37 +165,6 @@ def get_smaller_print(data, in_str_full_value: str | None = None):
         if isinstance(data, dict | list):
             return get_smaller_print(json.dumps(data, default=str))
     return data
-
-
-_REDACTED = "[REDACTED]"
-_SECRET_LOG_FIELDS = {"authentication", "authorization", "token", "key", "password"}
-_SECRET_LOG_FIELD_RE = re.compile(
-    r'"(' + "|".join(re.escape(field) for field in _SECRET_LOG_FIELDS) + r')"\s*:\s*"(?:[^"\\]|\\.)*"',
-    re.IGNORECASE,
-)
-
-
-def _redact_secrets(value: Any) -> Any:
-    """Replace secret-bearing dict values with a fixed marker before logging.
-
-    Applied only at log call sites; stored and forwarded messages keep their
-    real values, since this must not change wire or bus behavior.
-    """
-    if isinstance(value, dict):
-        return {k: (_REDACTED if k.lower() in _SECRET_LOG_FIELDS else _redact_secrets(v)) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_redact_secrets(v) for v in value]
-    return value
-
-
-def _redact_secrets_in_text(text: str) -> str:
-    """Redact secret-bearing JSON string values without parsing the text.
-
-    Used on the WebSocket receive hot path so a log call does not add a
-    second parse-and-reserialize of every inbound message; nothing stored
-    or forwarded uses this value.
-    """
-    return _SECRET_LOG_FIELD_RE.sub(lambda m: f'"{m.group(1)}": "{_REDACTED}"', text)
 
 
 class RPC:
@@ -389,13 +363,15 @@ class RPC:
                         try:
                             # Wait for the actual result (with timeout)
                             actual_result = result.get(timeout=30)
-                            _log.debug(f"RPC RETURN: {self._agent.identity}.{method_name} => {actual_result}")
+                            _log.debug(
+                                f"RPC RETURN: {self._agent.identity}.{method_name} => {_redact_secrets(actual_result)}"
+                            )
                             async_result.set(actual_result)
                         except Exception as async_e:
                             _log.debug(f"RPC ERROR: {self._agent.identity}.{method_name} => {async_e}")
                             async_result.set_exception(async_e)
                     else:
-                        _log.debug(f"RPC RETURN: {self._agent.identity}.{method_name} => {result}")
+                        _log.debug(f"RPC RETURN: {self._agent.identity}.{method_name} => {_redact_secrets(result)}")
                         async_result.set(result)
                 except Exception as e:
                     error = str(e)
@@ -476,7 +452,8 @@ class PubSub:
             if topic == "config/config":
                 _log.info(f"Agent {self._agent.identity} published to {topic}: default update sent")
             else:
-                _log.info(f"Agent {self._agent.identity} published to {topic}: {get_smaller_print(message)}")
+                redacted_message = get_smaller_print(_redact_secrets(message))
+                _log.info(f"Agent {self._agent.identity} published to {topic}: {redacted_message}")
             async_result.set(True)  # Success
         except Exception as e:
             _log.error(f"Error publishing message: {e}")
@@ -835,7 +812,10 @@ class VIP:
                 )
             )
 
-            _log.debug(f"Agent {self._agent.identity} sent VIP message to {peer}: subsystem={subsystem}, args={args}")
+            _log.debug(
+                f"Agent {self._agent.identity} sent VIP message to {peer}: "
+                f"subsystem={subsystem}, args={_redact_secrets(args)}"
+            )
             async_result.set(msg_id)  # Return the message ID
         except Exception as e:
             _log.error(f"Error sending VIP message: {e}")
@@ -3569,8 +3549,8 @@ class Agent:
 
                 # Log the RPC call at INFO level for visibility
                 _log.info(
-                    f"Agent {self.identity} executing RPC: {method_name}(args={args}, kwargs={kwargs}) "
-                    f"from {sender} [msg_id: {msg_id}]"
+                    f"Agent {self.identity} executing RPC: {method_name}(args={_redact_secrets(args)}, "
+                    f"kwargs={_redact_secrets(kwargs)}) from {sender} [msg_id: {msg_id}]"
                 )
 
                 # Process the RPC request - returns an AsyncResult
@@ -3584,10 +3564,13 @@ class Agent:
                         result = async_result.get(timeout=30)
                         # Log the result at INFO level
                         _log.info(
-                            f"Agent {self.identity} RPC {method_name} completed, returning: {result} [msg_id: {msg_id}]"
+                            f"Agent {self.identity} RPC {method_name} completed, returning: "
+                            f"{_redact_secrets(result)} [msg_id: {msg_id}]"
                         )
                         # Send successful response
-                        _log.debug(f"Agent {self.identity} sending RPC response for msg_id {msg_id}: {result}")
+                        _log.debug(
+                            f"Agent {self.identity} sending RPC response for msg_id {msg_id}: {_redact_secrets(result)}"
+                        )
                         response_msg = {
                             "type": "rpc_response",
                             "msg_id": msg_id,
@@ -3599,8 +3582,8 @@ class Agent:
                         # Send error response
                         error = str(e)
                         _log.error(
-                            f"Agent {self.identity} RPC {method_name}(args={args}, kwargs={kwargs}) "
-                            f"failed: {error} [msg_id: {msg_id}]"
+                            f"Agent {self.identity} RPC {method_name}(args={_redact_secrets(args)}, "
+                            f"kwargs={_redact_secrets(kwargs)}) failed: {error} [msg_id: {msg_id}]"
                         )
                         try:
                             error_msg = {
@@ -3637,7 +3620,9 @@ class Agent:
                 # Handle RPC response
                 msg_id = data.get("msg_id")
                 result = data.get("result")
-                _log.debug(f"Agent {self.identity} received RPC response for msg_id {msg_id}: {result}")
+                _log.debug(
+                    f"Agent {self.identity} received RPC response for msg_id {msg_id}: {_redact_secrets(result)}"
+                )
                 if msg_id in self.rpc_responses:
                     # Get the AsyncResult for this message ID and set its result
                     async_result = self.rpc_responses.pop(msg_id)
