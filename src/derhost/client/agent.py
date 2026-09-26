@@ -31,10 +31,9 @@ from gevent.event import AsyncResult
 init(autoreset=True)
 
 from derhost._redact import (
-    REDACTED as _REDACTED,
-    is_secret_field as _is_secret_field,
     redact_known_secret_values as _redact_known_secret_values,
     redact_secrets as _redact_secrets,
+    redact_text as _redact_text,
 )
 from derhost.client import dualmethod
 
@@ -252,8 +251,10 @@ class RPC:
                 # Redact for the raised message too, same as the kwarg case
                 # below: a caller's own `except Exception as e: log(f"...{e}")`
                 # would otherwise re-surface a secret this redaction exists
-                # to hide.
-                logged_arg = _redact_secrets(arg)
+                # to hide. Both walk nested containers under the value, then
+                # stringify and text-redact so a non-container secret (a
+                # dataclass field, raw bytes) is covered too.
+                logged_arg = _redact_text(str(_redact_secrets(arg)))
                 _log.error(
                     f"RPC call failed: arg[{i}] is not JSON serializable: {logged_arg} (type: {type(arg).__name__})"
                 )
@@ -267,7 +268,10 @@ class RPC:
                 # Redact for the raised message too: a caller's own
                 # `except Exception as e: log(f"...{e}")` would otherwise
                 # re-surface the secret this redaction exists to hide.
-                logged_val = _REDACTED if _is_secret_field(key) else val
+                # Walking {key: val} (rather than checking key alone) covers
+                # a secret nested under a non-secret argument name, e.g.
+                # payload={"credentials": {...}}.
+                logged_val = _redact_secrets({key: val})[key]
                 _log.error(f"RPC call failed: kwarg '{key}' is not JSON serializable: {logged_val} (type: {val_type})")
                 raise TypeError(f"RPC kwarg '{key}' is not JSON serializable: {logged_val}") from e
 
@@ -385,7 +389,11 @@ class RPC:
                         except Exception as async_e:
                             # The exception object keeps its original text; only
                             # the log line is redacted (see the module docstring).
-                            logged_async_e = _redact_known_secret_values(str(async_e), args, kwargs)
+                            # Value-blanking then text redaction, per design:
+                            # a known secret's own value is blanked first,
+                            # then the line is scanned for any "name: value"
+                            # pair the value blanking did not know about.
+                            logged_async_e = _redact_text(_redact_known_secret_values(str(async_e), args, kwargs))
                             _log.debug(f"RPC ERROR: {self._agent.identity}.{method_name} => {logged_async_e}")
                             async_result.set_exception(async_e)
                     else:
@@ -393,7 +401,7 @@ class RPC:
                         async_result.set(result)
                 except Exception as e:
                     error = str(e)
-                    logged_error = _redact_known_secret_values(error, args, kwargs)
+                    logged_error = _redact_text(_redact_known_secret_values(error, args, kwargs))
                     _log.debug(f"RPC ERROR: {self._agent.identity}.{method_name} => {logged_error}")
                     async_result.set_exception(e)
 
@@ -3605,11 +3613,15 @@ class Agent:
                         # the log: this error text is sent on to the server
                         # (and from there, logged again) as this RPC's
                         # result, so this is the last point in this process
-                        # able to keep a secret out of it.
+                        # able to keep a secret out of it. The log line goes
+                        # further and also applies text redaction, but that
+                        # must not reach the wire value: the requesting
+                        # sender receives `error` as-is, unchanged by this.
                         error = _redact_known_secret_values(str(e), args, kwargs)
+                        logged_error = _redact_text(error)
                         _log.error(
                             f"Agent {self.identity} RPC {method_name}(args={_redact_secrets(args)}, "
-                            f"kwargs={_redact_secrets(kwargs)}) failed: {error} [msg_id: {msg_id}]"
+                            f"kwargs={_redact_secrets(kwargs)}) failed: {logged_error} [msg_id: {msg_id}]"
                         )
                         try:
                             error_msg = {

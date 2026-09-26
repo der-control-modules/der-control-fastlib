@@ -25,7 +25,7 @@ except ImportError:
     # Python < 3.8
     from importlib_metadata import PackageNotFoundError, version
 
-from derhost._redact import redact_secrets as _redact_secrets
+from derhost._redact import redact_secrets as _redact_secrets, redact_text as _redact_text
 from derhost.server.config_store import ConfigStore
 from derhost.server.connection_manager import ConnectionManager
 from derhost.server.models import Message, MessageBus
@@ -1135,7 +1135,7 @@ class FastAPIMessageBus(MessageBus):
             except Exception as rpc_error:
                 # Clean up the future - this is our fallback for truly unexpected errors
                 self.manager.clear_rpc_response(msg_id)
-                _log.error(f"Unexpected error in RPC processing: {type(rpc_error).__name__}: {rpc_error}")
+                _log.error(_redact_text(f"Unexpected error in RPC processing: {type(rpc_error).__name__}: {rpc_error}"))
                 return JsonRpcResponse(
                     id=agent_id,
                     error=JsonRpcError(code=-32603, message="Internal error: Unexpected error occurred"),
