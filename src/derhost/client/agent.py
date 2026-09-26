@@ -3183,8 +3183,9 @@ class Scheduler:
                     event.running = False
 
                 events_processed += 1
-                # Update now after processing each event to avoid drift
-                now = time.time()
+                # `now` stays fixed for the whole pass (#30): a pass pops only
+                # events due at its start, so a short interval cannot keep the
+                # pop loop busy and starve the yield below.
 
             if events_processed > 0:
                 scheduler_trace(
@@ -3246,6 +3247,11 @@ class Scheduler:
                 #         iteration=iteration,
                 #         queue_size=len(self._event_queue)
                 #     )
+            else:
+                # A due event with sleep_time == 0 must still yield once per
+                # pass (#30), or a short enough interval never lets any other
+                # greenlet run.
+                gevent.sleep(0)
 
 
 class Signal:
