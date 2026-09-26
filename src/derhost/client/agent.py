@@ -2427,14 +2427,8 @@ class CronTimer:
     This is a simplified version of VOLTTRON's cron schedule parser.
     """
 
-    # Every pattern except Feb 29 combined with a day-of-week restriction has
-    # a same-weekday recurrence gap of at most 4382 days (a hair under 12
-    # years, short of 12*365.25 because a non-leap century falls in the
-    # gap): the exact maximum over every (month, day) singleton crossed with
-    # every single weekday, computed across two full 400-year Gregorian
-    # cycles (issue #65). 13 whole years covers that gap regardless of how
-    # the search's start date lands within a year (verified: 12 is not
-    # enough for the worst case, 13 is).
+    # Worst-case recurrence gap across every accepted pattern: 4382 days
+    # (issue #65). 12 years fails that case; 13 works.
     _SEARCH_WINDOW_YEARS = 13
 
     def __init__(self, cron_pattern):
@@ -2444,13 +2438,7 @@ class CronTimer:
         # Parse the cron pattern
         self.minutes, self.hours, self.days_of_month, self.months, self.days_of_week = self._parse_pattern(cron_pattern)
 
-        # Feb 29 is the only day-of-month value whose own recurrence (a
-        # leap year, at most every 4 years) is rare enough that adding a
-        # day-of-week restriction can push the wait past the window above,
-        # up to 40 years. This must be decided from the pattern itself, not
-        # by searching from one fixed start date: a fixed-start search can
-        # pass at construction and still exceed the window from a different
-        # start (issue #65).
+        # See _reject_if_feb_29_with_weekday_restriction for why.
         self._reject_if_feb_29_with_weekday_restriction()
 
         # A pattern that can never match (e.g. day 31 of February) is
