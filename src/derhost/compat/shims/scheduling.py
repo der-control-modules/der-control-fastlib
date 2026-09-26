@@ -7,7 +7,7 @@ support (Core.schedule already treats a five-field cron string as a cron
 schedule and a plain number as an interval in seconds).
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from numbers import Number
 
 from derhost.client.agent import CronTimer
@@ -30,7 +30,7 @@ def cron(schedule: str) -> str:
     return schedule
 
 
-def periodic(period: float | int | timedelta, start=None, count=None) -> float | int:
+def periodic(period: float | int | timedelta, start: datetime | None = None, count: int | None = None) -> float | int:
     """
     Return the interval, in seconds, for derhost's Core.schedule.
 
