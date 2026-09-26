@@ -9,7 +9,9 @@ yielding. `next_fire_epoch` resolves each candidate wall time with PEP
 495 fold instead.
 """
 
+import os
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -26,13 +28,35 @@ def _utc(year, month, day, hour, minute):
     return datetime(year, month, day, hour, minute, tzinfo=timezone.utc).timestamp()
 
 
+@contextmanager
+def _tz(name):
+    """Run under the named zone, restoring TZ and the C tzset() rules after.
+
+    monkeypatch's own teardown runs after a dependent fixture's teardown,
+    so a fixture that calls monkeypatch.setenv("TZ", ...) and then
+    time.tzset() in its own teardown still restores the OLD zone's rules,
+    not the original: monkeypatch has not reverted the env var yet. That
+    left every later test in the session running under the last zone set
+    here. Managing TZ and tzset() together, in one place, closes that gap.
+    """
+    original = os.environ.get("TZ")
+    os.environ["TZ"] = name
+    time.tzset()
+    try:
+        yield
+    finally:
+        if original is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original
+        time.tzset()
+
+
 @pytest.fixture
-def eastern_time(monkeypatch):
+def eastern_time():
     """Run the test under America/New_York, restored afterward."""
-    monkeypatch.setenv("TZ", "America/New_York")
-    time.tzset()
-    yield
-    time.tzset()
+    with _tz("America/New_York"):
+        yield
 
 
 def test_next_fire_epoch_every_minute_is_one_minute_later(eastern_time):
@@ -103,9 +127,7 @@ def test_compute_next_time_fall_back_no_longer_reschedules_into_the_past(eastern
 
 def test_cron_under_utc_is_unchanged(monkeypatch):
     """Cron under a zone without DST gives the same instants as before."""
-    monkeypatch.setenv("TZ", "UTC")
-    time.tzset()
-    try:
+    with _tz("UTC"):
         fixed_now = _utc(2026, 6, 15, 12, 0)
         monkeypatch.setattr(time, "time", lambda: fixed_now)
 
@@ -113,8 +135,6 @@ def test_cron_under_utc_is_unchanged(monkeypatch):
         event.compute_next_time()
 
         assert event.next_time - fixed_now == pytest.approx(60.0)
-    finally:
-        time.tzset()
 
 
 if __name__ == "__main__":
