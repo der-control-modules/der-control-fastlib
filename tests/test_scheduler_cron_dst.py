@@ -106,6 +106,27 @@ def test_next_fire_epoch_always_after_across_both_transitions(eastern_time, patt
         assert timer.next_fire_epoch(after) > after
 
 
+def test_next_fire_epoch_stops_at_first_match_on_an_ordinary_day(eastern_time):
+    """On a day without an offset change, `next_fire_epoch` must stop at the
+    first qualifying wall time instead of scanning the whole day: the full
+    scan measured about 5.5 ms/call for "* * * * *" (1440 candidates a
+    call); the fix measures about 0.33 ms/call. The bound below is 1.5 ms,
+    roughly 4x the measured fix cost and under a third of the old cost, to
+    absorb CI variance without letting the full scan back in.
+    """
+    timer = CronTimer("* * * * *")
+    after = _utc(2026, 6, 15, 12, 0)  # an ordinary day: no DST transition
+    calls = 200
+
+    start = time.perf_counter()
+    for _ in range(calls):
+        after = timer.next_fire_epoch(after)
+    elapsed = time.perf_counter() - start
+
+    per_call = elapsed / calls
+    assert per_call < 0.0015, f"{per_call * 1e6:.1f} us/call, expected under 1500 us/call"
+
+
 def test_compute_next_time_fall_back_no_longer_reschedules_into_the_past(eastern_time, monkeypatch):
     """Reproduces issue #30's probe: 06:10Z is 01:10 EST (fold 1). The old
     get_utc_seconds_from_epoch path rescheduled ~3540 s in the past; the
