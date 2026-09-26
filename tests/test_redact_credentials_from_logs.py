@@ -4,8 +4,10 @@ level, from any module under derhost, carries a credential value from the
 /gs RPC path or the agent's receive path.
 """
 
+import copy
 import json
 import logging
+import random
 import time
 
 import gevent
@@ -234,12 +236,11 @@ def test_redact_secrets_handles_non_string_keys_without_raising():
 
 
 def test_redact_secrets_matches_normalized_secret_key_variants():
-    """Item 5: key matching is case- and -/_-insensitive and catches
-    normalized names that contain a secret word, not only the exact field
-    names in SECRET_LOG_FIELDS. "author" is a known false positive from the
-    "auth" substring; over-redacting a log line is an acceptable trade for
-    never missing an authorization/authentication spelling variant, and
-    "primary_key" (a non-secret identifier) must NOT match."""
+    """Key matching is case- and separator-insensitive and catches
+    normalized names that contain a secret word. "author" and "primary_key"
+    are non-secret identifiers and must NOT match: bare "auth" and bare
+    "key" are not substrings (see the names table test for the full field
+    list this drives)."""
     from derhost._redact import redact_secrets
 
     payload = {
@@ -255,66 +256,107 @@ def test_redact_secrets_matches_normalized_secret_key_variants():
 
     result = redact_secrets(payload)
 
-    for key in ("API-Key", "access_key", "private_key", "Passwd", "Cookie", "credentials", "author"):
+    for key in ("API-Key", "access_key", "private_key", "Passwd", "Cookie", "credentials"):
         assert result[key] == "[REDACTED]", f"expected {key} to be redacted"
+    assert result["author"] == "not-a-secret"
     assert result["primary_key"] == "not-a-secret-id"
 
 
 # Bound justified by measurement: at 9e7bdb2 (the restartable-regex scanner)
 # the escaped-quote input took 17.9s and the nested-JSON-as-string input took
-# 3.3s on this host; the linear scanner finishes both in well under 0.05s.
-_SCAN_TIME_BOUND_SECONDS = 0.2
+# 3.3s on this host; a linear scanner finishes each 256 KB shape well under
+# this bound (design measurement: worst shape 0.35s/MB).
+_SCAN_TIME_BOUND_SECONDS = 0.5
+_SHAPE_SIZE = 256 * 1024
 
 
-def test_redact_secrets_in_text_stays_linear_on_dense_escaped_quotes():
-    """Item 1: a text-based scan must not restart itself at every escaped
-    quote. 64 KB of nothing but escaped quotes has no field name to find and
-    must still finish quickly, not scan forward from every one of them."""
-    from derhost._redact import redact_secrets_in_text
+def _dense_escaped_quotes(size: int) -> str:
+    return '\\"' * (size // 2)
 
-    text = '\\"' * (64 * 1024 // 2)
+
+def _json_nested_as_string(size: int) -> str:
+    inner = json.dumps({f"field{i}": f"value{i}" for i in range(size // 30)})
+    return json.dumps({"token": MARKER, "data": inner})
+
+
+def _deep_nesting_json(size: int) -> str:
+    depth = min(size // 2, 2900)  # stay under the 3000-level RecursionError case
+    return "[" * depth + "]" * depth
+
+
+def _distinct_key_names(size: int) -> str:
+    # G1's measured worst shape: many distinct "nX:" names, none secret.
+    parts = []
+    n = 0
+    while sum(len(p) for p in parts) < size:
+        parts.append(f'"n{n}": {n}, ')
+        n += 1
+    return "{" + "".join(parts) + '"token": "' + MARKER + '"}'
+
+
+def _unbalanced_odd_quotes(size: int) -> str:
+    return ('bad "input ' * (size // 12)) + '{"token": "' + MARKER + '"}'
+
+
+def _plain_text_no_separators(size: int) -> str:
+    return "no field names here, just prose. " * (size // 34)
+
+
+def _large_list_of_secret_dicts(size: int) -> str:
+    count = size // 40
+    return json.dumps([{"token": MARKER, "n": i} for i in range(count)])
+
+
+def _long_string_leaf_with_embedded_pairs(size: int) -> str:
+    # A single string VALUE (not a real key) that itself looks like many
+    # "name:" pairs, stressing the conservative rule applied to one leaf.
+    return json.dumps({"note": ("field: notasecret, " * (size // 20))})
+
+
+_TIME_BOUND_SHAPES = {
+    "dense_escaped_quotes": _dense_escaped_quotes,
+    "json_nested_as_string": _json_nested_as_string,
+    "deep_nesting": _deep_nesting_json,
+    "distinct_key_names": _distinct_key_names,
+    "unbalanced_odd_quotes": _unbalanced_odd_quotes,
+    "plain_text_no_separators": _plain_text_no_separators,
+    "large_list_of_secret_dicts": _large_list_of_secret_dicts,
+    "long_string_leaf_with_embedded_pairs": _long_string_leaf_with_embedded_pairs,
+}
+
+
+@pytest.mark.parametrize("shape_name", sorted(_TIME_BOUND_SHAPES))
+def test_redact_text_stays_within_time_bound_on_adversarial_shapes(shape_name):
+    """G1: every shape runs in linear time. A reviewer reverting to the
+    restartable regex scanner (9e7bdb2) on any of these should make this
+    test fail, not just the two it was originally measured against."""
+    from derhost._redact import redact_text
+
+    text = _TIME_BOUND_SHAPES[shape_name](_SHAPE_SIZE)
 
     start = time.monotonic()
-    result = redact_secrets_in_text(text)
+    redact_text(text)
     elapsed = time.monotonic() - start
 
-    assert result == text  # no field name in this input, so nothing changes
-    assert elapsed < _SCAN_TIME_BOUND_SECONDS, f"took {elapsed:.3f}s, expected under {_SCAN_TIME_BOUND_SECONDS}s"
+    assert elapsed < _SCAN_TIME_BOUND_SECONDS, (
+        f"{shape_name} took {elapsed:.3f}s, expected under {_SCAN_TIME_BOUND_SECONDS}s"
+    )
 
 
-def test_redact_secrets_in_text_stays_linear_on_json_nested_as_a_string():
-    """Item 1: a JSON document carried as a string value (heavy on escaped
-    quotes, from json.dumps re-encoding it) must also stay linear. A field
-    name inside that escaped string is a known, pre-existing gap (it is not
-    real unescaped JSON to this scanner), so this asserts only that a real
-    top-level secret field is still found and redacted around the blob, not
-    that the gap is closed."""
-    from derhost._redact import redact_secrets_in_text
-
-    inner = json.dumps({f"field{i}": f"value{i}" for i in range(2150)})
-    text = json.dumps({"token": MARKER, "data": inner})
-    assert 60_000 <= len(text) <= 68_000  # close to the 64 KB the item names
-
-    start = time.monotonic()
-    result = redact_secrets_in_text(text)
-    elapsed = time.monotonic() - start
-
-    assert MARKER not in result  # the real top-level "token" field is redacted
-    assert elapsed < _SCAN_TIME_BOUND_SECONDS, f"took {elapsed:.3f}s, expected under {_SCAN_TIME_BOUND_SECONDS}s"
-
-
-def test_redact_secrets_in_text_redacts_unterminated_value_to_the_end():
-    """Keeps the existing fail-closed guarantee through the rewrite: a
-    secret value with no closing quote is redacted to the end of the text,
-    not left with an unredacted prefix."""
-    from derhost._redact import redact_secrets_in_text
+def test_redact_text_redacts_unterminated_value_to_the_end():
+    """Keeps the fail-closed guarantee through the rewrite: a secret value
+    with no closing quote is redacted to the end of the text, not left with
+    an unredacted prefix. redact_text does not try to find the value's own
+    end (that quote-pairing was round 3's bug); it drops everything after
+    the separator."""
+    from derhost._redact import redact_text
 
     text = f'"token": "{MARKER}'
 
-    result = redact_secrets_in_text(text)
+    result = redact_text(text)
 
     assert MARKER_PREFIX not in result
-    assert result == '"token": "[REDACTED]"'
+    assert result == '"token": [REDACTED]'
 
 
 def test_redact_known_secret_values_ignores_short_or_non_string_secrets():
@@ -355,3 +397,375 @@ def test_auth_failure_diagnostic_fields_stay_visible():
     assert is_secret_field("Authorized") is False
     assert is_secret_field("authorization") is True
     assert is_secret_field("auth_token") is True
+
+
+# ---------------------------------------------------------------------------
+# Q5 test plan: field-name table, fuzz properties (G2/G3), never_raises (G6),
+# no_mutation (G6), and the value-blanking forms (Q3), each with the control
+# that shows it can fail.
+# ---------------------------------------------------------------------------
+
+_NAMES_TABLE = [
+    # (name, expected is_secret_field result)
+    ("auth", True),
+    ("Authorization", True),
+    ("AUTH-HEADER", True),
+    ("key", True),
+    ("pass", True),
+    ("pwd", True),
+    ("PIN", True),
+    ("pincode", True),
+    ("otp", True),
+    ("salt", True),
+    ("psk", True),
+    ("session", True),
+    ("session_id", True),
+    ("session-key", True),
+    ("dsn", True),
+    ("db_url", True),
+    ("database_url", True),
+    ("connection_string", True),
+    ("token", True),
+    ("secret", True),
+    ("password", True),
+    ("passphrase", True),
+    ("cookie", True),
+    ("credential", True),
+    ("api_key", True),
+    ("access_key", True),
+    ("private_key", True),
+    ("encryption_key", True),
+    ("signing_key", True),
+    ("hmac_key", True),
+    ("ssh_key", True),
+    ("master_key", True),
+    ("jwt", True),
+    ("bearer", True),
+    ("signature", True),
+    ("auth_token", True),
+    ("authorized_token", True),
+    ("authenticated_token", True),
+    # exemptions and fixed false positives
+    ("authenticated", False),
+    ("Authorized", False),
+    ("author", False),
+    ("authority", False),
+    ("auth_method", False),
+    ("token_count", False),
+    ("max_tokens", False),
+    ("min_token_length", False),
+    ("num_tokens", False),
+    ("credential_id", False),
+    ("credential_type", False),
+    ("password_expires_at", False),
+    ("password_expiry", False),
+    ("password_ttl", False),
+    ("password_policy", False),
+    ("password_required", False),
+    ("password_enabled", False),
+    # no bare "*key" suffix
+    ("primary_key", False),
+    ("foreign_key", False),
+    ("serverkey", False),
+    ("alert_key", False),
+]
+
+
+@pytest.mark.parametrize("name,expected", _NAMES_TABLE)
+def test_is_secret_field_names_table(name, expected):
+    """Q4's full field-name contract, both sides: every listed secret name
+    is caught, and every listed exemption or fixed false positive is not."""
+    from derhost._redact import is_secret_field
+
+    assert is_secret_field(name) is expected
+
+
+def test_redact_secrets_never_raises_on_pathological_nesting():
+    """G6: deep nesting, a non-string key, and a tuple of dicts must not
+    raise. The control (deep nesting alone) raises RecursionError at
+    b7cb58d, per redact_secrets_in_text's caller-side json.loads/walk having
+    no depth guard."""
+    from derhost._redact import redact_secrets
+
+    deep = current = {}
+    for _ in range(3000):
+        current["n"] = {}
+        current = current["n"]
+    result = redact_secrets(deep)
+    assert result == "[REDACTED]"
+
+    result = redact_secrets({1: "one", (2, 3): "two", "token": MARKER})
+    assert result[1] == "one"
+    assert result["token"] == "[REDACTED]"
+
+    result = redact_secrets((({"token": MARKER},), [{"password": MARKER}]))
+    assert MARKER not in str(result)
+
+
+def test_redact_secrets_does_not_mutate_its_input():
+    """G6: redact_secrets is copy-on-read. The wire payload (and anything
+    else the caller still holds after logging) must be unchanged."""
+    from derhost._redact import redact_secrets
+
+    payload = {"token": MARKER, "nested": {"password": MARKER, "method": "echo"}, "items": [1, 2, {"key": MARKER}]}
+    before = copy.deepcopy(payload)
+
+    redact_secrets(payload)
+
+    assert payload == before
+
+
+def _random_json_value(rng, depth=0):
+    secret_keys = ("token", "password", "api_key", "credentials")
+    plain_keys = ("method", "id", "count", "note", "name")
+    if depth >= 3:
+        kinds = ("str", "int", "bool", "none")
+    else:
+        kinds = ("str", "int", "bool", "none", "dict", "list")
+    kind = rng.choice(kinds)
+    if kind == "str":
+        alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+        return "".join(rng.choice(alphabet) for _ in range(rng.randint(6, 24)))
+    if kind == "int":
+        return rng.randint(-10000, 10000)
+    if kind == "bool":
+        return rng.choice([True, False])
+    if kind == "none":
+        return None
+    if kind == "dict":
+        result = {}
+        for _ in range(rng.randint(1, 3)):
+            key = rng.choice(secret_keys if rng.random() < 0.4 else plain_keys)
+            result[key] = _random_json_value(rng, depth + 1)
+        return result
+    return [_random_json_value(rng, depth + 1) for _ in range(rng.randint(0, 3))]
+
+
+def _secret_leaves(value, under_secret_key=False):
+    if isinstance(value, dict):
+        for k, v in value.items():
+            is_secret = under_secret_key or k in ("token", "password", "api_key", "credentials")
+            yield from _secret_leaves(v, is_secret)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _secret_leaves(v, under_secret_key)
+    elif under_secret_key and isinstance(value, str) and len(value) >= 6:
+        yield value
+
+
+def test_fuzz_json_no_secret_prefix_survives_redact_text_or_redact_secrets():
+    """G2: over 2000 seeded JSON values, no 6-character prefix of a value
+    under a secret-named key survives redact_text(json.dumps(v)) or
+    str(redact_secrets(v)). The identity-swap control (redaction skipped)
+    must report leaks, proving the check can fail."""
+    from derhost._redact import redact_secrets, redact_text
+
+    rng = random.Random(20260925)
+    leaks_with_redaction = 0
+    leaks_with_identity = 0
+
+    for _ in range(2000):
+        value = _random_json_value(rng)
+        leaves = list(_secret_leaves(value))
+
+        redacted_text = redact_text(json.dumps(value))
+        redacted_struct = str(redact_secrets(value))
+        identity_text = json.dumps(value)  # no-op "redactor"
+
+        for leaf in leaves:
+            prefix = leaf[:6]
+            if prefix in redacted_text or prefix in redacted_struct:
+                leaks_with_redaction += 1
+            if prefix in identity_text:
+                leaks_with_identity += 1
+
+    assert leaks_with_redaction == 0, f"{leaks_with_redaction} secret prefixes survived redaction"
+    assert leaks_with_identity > 0, "control did not fire: no secret leaves were generated to leak"
+
+
+_QUOTE_NOISE_CHARS = "\"'\\ abc{}[]:=,"
+_KEY_VALUE_FORMS = (
+    '"{name}": "{value}"',
+    "'{name}': '{value}'",
+    "{name}: {value}",
+    "{name}={value}",
+    '\\"{name}\\": \\"{value}\\"',
+)
+
+
+def test_fuzz_text_nothing_survives_a_secret_separator_regardless_of_quote_noise():
+    """G3: 2000 seeded quote-noise prefixes across 5 key forms; nothing
+    after a secret-named separator survives, whatever quotes came before.
+    The identity-swap control (redact_text replaced with a no-op) must
+    report leaks, same as the odd-quote regression at b7cb58d did."""
+    from derhost._redact import redact_text
+
+    rng = random.Random(20260925)
+    leaks_with_redaction = 0
+    leaks_with_identity = 0
+
+    for _ in range(2000):
+        noise = "".join(rng.choice(_QUOTE_NOISE_CHARS) for _ in range(rng.randint(0, 12)))
+        form = rng.choice(_KEY_VALUE_FORMS)
+        secret = "".join(rng.choice("abcdefghijklmnop0123456789") for _ in range(10))
+        text = noise + form.format(name="token", value=secret)
+
+        result = redact_text(text)
+        if secret in result:
+            leaks_with_redaction += 1
+        if secret in text:  # identity "redactor"
+            leaks_with_identity += 1
+
+    assert leaks_with_redaction == 0, f"{leaks_with_redaction} of 2000 quote-noise cases leaked"
+    assert leaks_with_identity == 2000  # every generated case contains its own secret verbatim
+
+
+_BLANKING_CASES = {}
+
+
+def _register_blanking_case(name):
+    def wrap(fn):
+        _BLANKING_CASES[name] = fn
+        return fn
+
+    return wrap
+
+
+@_register_blanking_case("literal")
+def _case_literal(secret):
+    return f"error: {secret}", {"token": secret}
+
+
+@_register_blanking_case("json_escaped")
+def _case_json_escaped(secret):
+    return f'error: "{json.dumps(secret)[1:-1]}"', {"token": secret}
+
+
+@_register_blanking_case("json_escaped_non_ascii")
+def _case_json_escaped_non_ascii(secret):
+    escaped = json.dumps(secret, ensure_ascii=False)[1:-1]
+    return f'error: "{escaped}"', {"token": secret}
+
+
+@_register_blanking_case("repr")
+def _case_repr(secret):
+    return f"error: {secret!r}", {"token": secret}
+
+
+@_register_blanking_case("bytes_repr")
+def _case_bytes_repr(secret):
+    b = secret.encode("utf-8")
+    return f"error: {b!r}", {"token": b}
+
+
+@_register_blanking_case("bytes_decoded")
+def _case_bytes_decoded(secret):
+    b = secret.encode("utf-8")
+    return f"error: {b.decode()}", {"token": b}
+
+
+@_register_blanking_case("pydantic_shortened")
+def _case_pydantic_shortened(secret):
+    shortened = secret[:24] + "..." + secret[-22:] if len(secret) > 50 else secret[:8] + "..." + secret[-8:]
+    return f"1 validation error\ninput_value='{shortened}'", {"token": secret}
+
+
+@_register_blanking_case("container")
+def _case_container(secret):
+    return str({"credentials": {"password": secret}}), {"credentials": {"password": secret}}
+
+
+@pytest.mark.parametrize("case_name", sorted(_BLANKING_CASES))
+def test_redact_known_secret_values_blanks_every_form(case_name):
+    """Q3: every form a secret can render as (literal, JSON-escaped with and
+    without ensure_ascii, repr, bytes repr and decode, a pydantic-style
+    shortened repr, and a value nested inside a container) is blanked."""
+    from derhost._redact import redact_known_secret_values
+
+    secret = 'ab"cd\\ef01gh"secretval-74chars-of-pydantic-style-token-material-abcdefgh'
+    text, payload = _BLANKING_CASES[case_name](secret)
+
+    result = redact_known_secret_values(text, payload)
+
+    assert secret[:8] not in result and secret[-8:] not in result, f"{case_name} leaked: {result!r}"
+
+
+def test_redact_known_secret_values_unchanged_with_no_payload_secrets():
+    """Q3 wire contract: no payload secrets means byte-identical text."""
+    from derhost._redact import redact_known_secret_values
+
+    text = "boom short and eightlet failed with retry True"
+    result = redact_known_secret_values(text, {"auth": None, "retry": True, "token": 1, "pin": "1234"})
+    assert result == text
+
+
+def test_redact_known_secret_values_blanks_eight_digit_int_secret():
+    """Q3: an int secret with 8+ decimal digits (e.g. a PIN-like value) is
+    blanked; a shorter int is left alone (existing short-value test)."""
+    from derhost._redact import redact_known_secret_values
+
+    text = "boom 87654321 failed"
+    assert redact_known_secret_values(text, {"pin": 87654321}) == "boom [REDACTED] failed"
+
+
+def test_tuple_through_truncate_for_log_is_redacted():
+    """Regression: a tuple value (not dict or list) reaching truncate_for_log
+    must go through structural redaction, not a str()-then-text-scan that
+    loses the field name inside the tuple's own repr quoting."""
+    from derhost._redact import truncate_for_log
+
+    result = truncate_for_log(({"token": MARKER},))
+    assert MARKER not in result
+
+
+def test_redact_secrets_redacts_a_bare_error_string():
+    """Regression: redact_secrets applied directly to a string (the
+    fastapi_message_bus.py:428 call shape, `_redact_secrets(error)` on a str)
+    must not return it unchanged."""
+    from derhost._redact import redact_secrets
+
+    result = redact_secrets(f"validation failed for token: {MARKER}")
+    assert MARKER not in result
+
+
+class TestExceptionMessagesWithContainerSecretsNeverLeak:
+    """Regression (round 3): a dict- or list-valued secret nested in an RPC
+    exception must not leak on the wire error or in the log, the same as a
+    scalar secret already does not."""
+
+    @pytest.fixture(autouse=True)
+    def setup_agent(self, message_bus_manager_fixture):
+        self.manager = message_bus_manager_fixture
+        self.manager.start_bus()
+        self.agent = self.manager.create_connected_agent("gs_redact_container_target")
+
+        def raising_method(**kwargs):
+            raise ValueError(f"boom {kwargs.get('token')}")
+
+        self.agent.vip.rpc.export_method("raising_container_target_method", raising_method)
+        gevent.sleep(1)
+
+        yield
+
+        self.agent.disconnect()
+
+    def test_container_secret_does_not_leak_on_wire_or_in_logs(self, caplog):
+        base_url = self.manager.get_base_url()
+        rpc_data = {
+            "jsonrpc": "2.0",
+            "id": "gs_redact_container_target",
+            "method": "raising_container_target_method",
+            "params": {"kwargs": {"token": {"password": MARKER}}},
+        }
+
+        with caplog.at_level(logging.DEBUG):
+            response = httpx.post(f"{base_url}/gs", json=rpc_data, timeout=10.0)
+            gevent.sleep(1)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert MARKER_PREFIX not in json.dumps(data)
+
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert derhost_records, "expected at least one record from a derhost logger"
+        assert_marker_absent(derhost_records, MARKER)
