@@ -33,15 +33,23 @@ def test_search_window_is_thirteen_years():
 
 @pytest.mark.parametrize(
     "dow",
-    ["0", "1", "5", "1,3", "1-5"],
+    ["0", "1", "5", "1,3", "1-5", "0-5"],
 )
 def test_feb29_with_weekday_restriction_refused(dow):
-    """Feb 29 with any day-of-week restriction, single, list, or range, is
-    refused at construction: its wait can exceed the window regardless of
-    which weekday(s) are named.
+    """Feb 29 with any day-of-week restriction, single, list, range, or the
+    six-day boundary one short of a full week, is refused at construction:
+    its wait can exceed the window regardless of which weekday(s) are named.
     """
     with pytest.raises(ValueError, match="Feb 29"):
         CronTimer(f"0 0 29 2 {dow}")
+
+
+@pytest.mark.parametrize("dow", ["0-6", "*"])
+def test_feb29_with_full_week_accepted(dow):
+    """Control at the boundary above: naming all 7 weekdays is the same as
+    no day-of-week restriction, so it is not refused.
+    """
+    CronTimer(f"0 0 29 2 {dow}")
 
 
 def test_feb29_without_weekday_restriction_still_accepted():
@@ -85,9 +93,12 @@ ACCEPTED_PATTERNS = [
 @pytest.mark.parametrize("pattern", ACCEPTED_PATTERNS)
 def test_accepted_pattern_never_fails_within_window(pattern):
     """Every pattern accepted at construction must resolve `get_next` for
-    a start anywhere in a full 400-year cycle, never raising. Start dates
-    are spread across the cycle (a non-divisor-of-7 step keeps them off a
-    fixed weekday alignment) so this is not just testing one lucky start.
+    a start anywhere in a full 400-year cycle, never raising, and the
+    returned date must actually satisfy the pattern's own month,
+    day-of-month, and day-of-week sets rather than merely being later than
+    the start. Start dates are spread across the cycle (a
+    non-divisor-of-7 step keeps them off a fixed weekday alignment) so
+    this is not just testing one lucky start.
     """
     timer = CronTimer(pattern)
     for year in range(2000, 2400, 11):
@@ -95,3 +106,8 @@ def test_accepted_pattern_never_fails_within_window(pattern):
             start = datetime(year, 1, 1) + timedelta(days=day_of_year_step)
             result = timer.get_next(start)
             assert result > start
+            assert result.month in timer.months
+            assert result.day in timer.days_of_month
+            # weekday() is 0=Monday; days_of_week is stored in cron's
+            # 0=Sunday numbering, so shift before comparing.
+            assert (result.weekday() + 1) % 7 in timer.days_of_week
