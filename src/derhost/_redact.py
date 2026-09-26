@@ -8,7 +8,6 @@ logic is defined, so client and server do not drift into separately
 maintained (and separately incomplete) copies.
 """
 
-import re
 from typing import Any
 
 REDACTED = "[REDACTED]"
@@ -33,12 +32,6 @@ _SECRET_LOG_FIELD_SUBSTRINGS = (
     "privatekey",
     "credential",
 )
-
-# Matches any quoted JSON field name, so the caller can classify it; not
-# limited to the known secret names, since redact_secrets_in_text has no
-# parsed document to look a name up in.
-_JSON_FIELD_NAME_RE = re.compile(r'"([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*')
-
 
 def _normalize_field_name(name: str) -> str:
     return name.lower().replace("-", "").replace("_", "")
@@ -136,18 +129,49 @@ def redact_secrets_in_text(text: str) -> str:
     number, boolean, or null): the object/array case is why this scans
     forward for a matching bracket instead of matching the value with a
     single regex.
+
+    A single forward pass over text: every character is either advanced
+    over by the outer loop or consumed once by the inner "find the closing
+    quote" scan below, so the whole call is O(len(text)). An earlier version
+    used a regex that restarted its own forward scan at every candidate
+    quote, which made text dense with escaped quotes (`\\"`) quadratic.
     """
     out = []
+    n = len(text)
     pos = 0
-    for m in _JSON_FIELD_NAME_RE.finditer(text):
-        if m.start() < pos:
-            continue  # inside a value already redacted by an earlier match
-        if not is_secret_field(m.group(1)):
+    i = 0
+    while i < n:
+        if text[i] != '"':
+            i += 1
             continue
-        value_end = _find_json_value_end(text, m.end())
-        out.append(text[pos : m.end()])
-        out.append(f'"{REDACTED}"')
-        pos = value_end
+        j = i + 1
+        while j < n:
+            if text[j] == "\\" and j + 1 < n:
+                j += 2
+                continue
+            if text[j] == '"':
+                break
+            j += 1
+        else:
+            j = n
+        if j >= n:
+            break  # unterminated quoted string: no further field name to find
+        name = text[i + 1 : j]
+        k = j + 1
+        while k < n and text[k] in " \t\r\n":
+            k += 1
+        if k < n and text[k] == ":":
+            k += 1
+            while k < n and text[k] in " \t\r\n":
+                k += 1
+            if is_secret_field(name):
+                value_end = _find_json_value_end(text, k)
+                out.append(text[pos:k])
+                out.append(f'"{REDACTED}"')
+                pos = value_end
+                i = value_end
+                continue
+        i = j + 1
     out.append(text[pos:])
     return "".join(out)
 
