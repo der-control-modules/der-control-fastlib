@@ -3105,42 +3105,55 @@ class Scheduler:
                         error_type=type(e).__name__,
                     )
 
-                # Compute the next execution time
+                # Compute the next execution time and reschedule. Both run inside
+                # one try/except per event (#32): compute_next_time is pure, so a
+                # retry would repeat the same failure, and the exception must not
+                # end the scheduler greenlet for every other event.
                 old_next_time = event.next_time
-                event.compute_next_time()
+                try:
+                    event.compute_next_time()
 
-                # Reschedule the event only if it's still running (not a one-time event)
-                if event.running:
-                    heapq.heappush(self._event_queue, event)
+                    # Reschedule the event only if it's still running (not a one-time event)
+                    if event.running:
+                        heapq.heappush(self._event_queue, event)
 
-                    # Trace event rescheduled
-                    scheduler_trace(
-                        "EVENT RESCHEDULED",
-                        event_name=event.name,
-                        old_next_time=datetime.fromtimestamp(old_next_time),
-                        new_next_time=datetime.fromtimestamp(event.next_time),
-                        queue_size=len(self._event_queue),
-                    )
-                else:
-                    # Check if this is an occupancy override for completion tracing
-                    is_occupancy_override = "_do_control_action" in event.name or "control_action" in event.name.lower()
-
-                    if is_occupancy_override and event.args:
-                        gid = event.args[0] if event.args else "unknown"
-                        occupied = event.args[1] if len(event.args) > 1 else None
-                        occupancy_override_trace(
-                            "OVERRIDE COMPLETED",
-                            gid=gid,
-                            occupied=occupied,
+                        # Trace event rescheduled
+                        scheduler_trace(
+                            "EVENT RESCHEDULED",
+                            event_name=event.name,
+                            old_next_time=datetime.fromtimestamp(old_next_time),
+                            new_next_time=datetime.fromtimestamp(event.next_time),
                             queue_size=len(self._event_queue),
                         )
                     else:
-                        # Trace one-time event completion
-                        scheduler_trace(
-                            "ONE-TIME EVENT COMPLETED",
-                            event_name=event.name,
-                            queue_size=len(self._event_queue),
+                        # Check if this is an occupancy override for completion tracing
+                        is_occupancy_override = (
+                            "_do_control_action" in event.name or "control_action" in event.name.lower()
                         )
+
+                        if is_occupancy_override and event.args:
+                            gid = event.args[0] if event.args else "unknown"
+                            occupied = event.args[1] if len(event.args) > 1 else None
+                            occupancy_override_trace(
+                                "OVERRIDE COMPLETED",
+                                gid=gid,
+                                occupied=occupied,
+                                queue_size=len(self._event_queue),
+                            )
+                        else:
+                            # Trace one-time event completion
+                            scheduler_trace(
+                                "ONE-TIME EVENT COMPLETED",
+                                event_name=event.name,
+                                queue_size=len(self._event_queue),
+                            )
+                except Exception:
+                    schedule_desc = event.cron_expression if event.is_cron else getattr(event, "interval", "one-time")
+                    _log.exception(
+                        f"Could not compute the next time for event {event.name} "
+                        f"(schedule={schedule_desc}); disabling it, not re-scheduling"
+                    )
+                    event.running = False
 
                 events_processed += 1
                 # Update now after processing each event to avoid drift
