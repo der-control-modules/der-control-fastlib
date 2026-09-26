@@ -4,7 +4,9 @@ level, from any module under derhost, carries a credential value from the
 /gs RPC path or the agent's receive path.
 """
 
+import json
 import logging
+import time
 
 import gevent
 import httpx
@@ -256,3 +258,100 @@ def test_redact_secrets_matches_normalized_secret_key_variants():
     for key in ("API-Key", "access_key", "private_key", "Passwd", "Cookie", "credentials", "author"):
         assert result[key] == "[REDACTED]", f"expected {key} to be redacted"
     assert result["primary_key"] == "not-a-secret-id"
+
+
+# Bound justified by measurement: at 9e7bdb2 (the restartable-regex scanner)
+# the escaped-quote input took 17.9s and the nested-JSON-as-string input took
+# 3.3s on this host; the linear scanner finishes both in well under 0.05s.
+_SCAN_TIME_BOUND_SECONDS = 0.2
+
+
+def test_redact_secrets_in_text_stays_linear_on_dense_escaped_quotes():
+    """Item 1: a text-based scan must not restart itself at every escaped
+    quote. 64 KB of nothing but escaped quotes has no field name to find and
+    must still finish quickly, not scan forward from every one of them."""
+    from derhost._redact import redact_secrets_in_text
+
+    text = '\\"' * (64 * 1024 // 2)
+
+    start = time.monotonic()
+    result = redact_secrets_in_text(text)
+    elapsed = time.monotonic() - start
+
+    assert result == text  # no field name in this input, so nothing changes
+    assert elapsed < _SCAN_TIME_BOUND_SECONDS, f"took {elapsed:.3f}s, expected under {_SCAN_TIME_BOUND_SECONDS}s"
+
+
+def test_redact_secrets_in_text_stays_linear_on_json_nested_as_a_string():
+    """Item 1: a JSON document carried as a string value (heavy on escaped
+    quotes, from json.dumps re-encoding it) must also stay linear. A field
+    name inside that escaped string is a known, pre-existing gap (it is not
+    real unescaped JSON to this scanner), so this asserts only that a real
+    top-level secret field is still found and redacted around the blob, not
+    that the gap is closed."""
+    from derhost._redact import redact_secrets_in_text
+
+    inner = json.dumps({f"field{i}": f"value{i}" for i in range(2150)})
+    text = json.dumps({"token": MARKER, "data": inner})
+    assert 60_000 <= len(text) <= 68_000  # close to the 64 KB the item names
+
+    start = time.monotonic()
+    result = redact_secrets_in_text(text)
+    elapsed = time.monotonic() - start
+
+    assert MARKER not in result  # the real top-level "token" field is redacted
+    assert elapsed < _SCAN_TIME_BOUND_SECONDS, f"took {elapsed:.3f}s, expected under {_SCAN_TIME_BOUND_SECONDS}s"
+
+
+def test_redact_secrets_in_text_redacts_unterminated_value_to_the_end():
+    """Keeps the existing fail-closed guarantee through the rewrite: a
+    secret value with no closing quote is redacted to the end of the text,
+    not left with an unredacted prefix."""
+    from derhost._redact import redact_secrets_in_text
+
+    text = f'"token": "{MARKER}'
+
+    result = redact_secrets_in_text(text)
+
+    assert MARKER_PREFIX not in result
+    assert result == '"token": "[REDACTED]"'
+
+
+def test_redact_known_secret_values_ignores_short_or_non_string_secrets():
+    """Item 2: a short or non-string secret value must not be blanked, since
+    the same text is the RPC error the caller receives, and blanking a
+    common short word or literal would corrupt that message."""
+    from derhost._redact import redact_known_secret_values
+
+    text = "boom a token failed"
+    assert redact_known_secret_values(text, {"token": "a"}) == text
+
+    text = "auth is None here, retry True after 1 second"
+    assert redact_known_secret_values(text, {"auth": None, "retry": True, "token": 1}) == text
+
+
+def test_redact_known_secret_values_still_blanks_secrets_of_length_8_or_more():
+    """Item 2 control: an 8-character-or-longer str or bytes secret is still
+    blanked, so the length gate does not silently disable redaction. A bytes
+    secret is matched in its str() form, same as the existing conversion this
+    function already applies before searching the text."""
+    from derhost._redact import redact_known_secret_values
+
+    text = "boom eightlet token failed"
+    assert redact_known_secret_values(text, {"token": "eightlet"}) == "boom [REDACTED] token failed"
+
+    secret = b"eightlet"
+    text = f"boom {secret!s} token failed"
+    assert redact_known_secret_values(text, {"token": secret}) == "boom [REDACTED] token failed"
+
+
+def test_auth_failure_diagnostic_fields_stay_visible():
+    """Item 3: "authenticated"/"authorized" (and case variants) must not be
+    treated as secret field names, so auth-failure diagnostics stay visible;
+    "authorization" and "auth_token" are still redacted as a control."""
+    from derhost._redact import is_secret_field
+
+    assert is_secret_field("authenticated") is False
+    assert is_secret_field("Authorized") is False
+    assert is_secret_field("authorization") is True
+    assert is_secret_field("auth_token") is True
