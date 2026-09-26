@@ -47,13 +47,40 @@ AGREEING_CASES = [
     ("0 0 1 1 *", datetime(2026, 6, 15)),
     ("0 0 15 6 1-5", datetime(2026, 1, 1)),
     ("*/15 8-17 * * 1-5", datetime(2026, 1, 1)),
+    # A near-term leap day: the next Feb 29 after 2027 is 2028 (2028 = 2027 + 1,
+    # a plain 4-year leap year, no century skip involved).
+    ("0 0 29 2 *", datetime(2027, 1, 1)),
+    # Day-of-month values that do not exist in every month: April has 30 days
+    # (no 31st), so day 31 lands in May; February has at most 29 (no 30th), so
+    # day 30 lands in March.
+    ("0 0 31 * *", datetime(2026, 4, 1)),
+    ("0 0 30 * *", datetime(2027, 2, 1)),
+    # Day-of-month AND day-of-week both restricted: the classic Friday-the-13th.
+    ("0 9 13 * 5", datetime(2026, 1, 1)),
+    # Start at 23:59 on the last day of a month: the +1-minute step must cross
+    # both midnight and the month boundary before the search begins.
+    ("* * * * *", datetime(2026, 1, 31, 23, 59)),
 ]
 
 # Patterns rare enough that the oracle's 1,000,000-minute window (under two
 # years) cannot reach the answer; the calendar search resolves them directly.
+# Each expected date carries how it was derived, so a future maintainer can
+# recheck it without re-running the search.
 RARE_CASES = [
+    # No day-of-week filter: the next leap year after 2028 is 2032 (+4, no
+    # intervening century skip), whatever weekday Feb 29 falls on that year.
     ("0 0 29 2 *", datetime(2028, 3, 1), datetime(2032, 2, 29, 0, 0)),
+    # Filtered to Friday (cron dow=5): 2032-02-29 is a Sunday, so the next
+    # Friday Feb 29 is 2036 (both confirmed via `date(year, 2, 29).weekday()`).
     ("0 0 29 2 5", datetime(2028, 3, 1), datetime(2036, 2, 29, 0, 0)),
+    # Filtered to Monday (cron dow=1): 2072-02-29 and 2112-02-29 are both
+    # Mondays. This is the longest gap (40 years) between same-weekday Feb 29s
+    # anywhere in the 400-year Gregorian cycle, found by checking every
+    # leap-year Feb 29 across two full cycles (800 years) and taking the
+    # largest year-to-year gap per weekday. A search bound of 41 years already
+    # finds this exact match; the shipped 400-year bound is far more generous
+    # than any satisfiable pattern needs.
+    ("0 0 29 2 1", datetime(2072, 3, 1), datetime(2112, 2, 29, 0, 0)),
 ]
 
 
