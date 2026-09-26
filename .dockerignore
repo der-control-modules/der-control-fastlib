@@ -95,3 +95,6 @@ bacnet-proxy.log
 driver.log
 proxy.log
 platform-driver.log
+
+# Secret-bearing files for docker/*/docker-compose.yml compose secrets (#68).
+docker/secrets/

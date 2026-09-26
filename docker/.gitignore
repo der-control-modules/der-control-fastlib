@@ -1,0 +1,3 @@
+# Secret-bearing files mounted into containers as compose secrets (#68, #52).
+# Never commit real credentials here.
+secrets/
