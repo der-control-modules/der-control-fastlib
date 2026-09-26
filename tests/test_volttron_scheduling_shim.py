@@ -8,6 +8,7 @@ import pytest
 
 from derhost.client.agent import CronTimer
 from derhost.compat.import_hook import install_volttron_compatibility
+from derhost.compat.shims.scheduling import cron as shim_cron, periodic as shim_periodic
 
 
 def _import_compat():
@@ -75,3 +76,32 @@ def test_unknown_name_raises_import_error():
 
     with pytest.raises(ImportError):
         exec("from volttron.platform.scheduling import not_a_real_export", {})
+
+
+def test_cron_rejects_non_string_schedule():
+    """cron() type-checks before constructing a CronTimer (scheduling.py:27-28)."""
+    with pytest.raises(TypeError):
+        shim_cron(60)
+
+
+def test_periodic_rejects_start():
+    """derhost's scheduler has no delayed-start equivalent, so a start value fails fast."""
+    with pytest.raises(NotImplementedError):
+        shim_periodic(1.0, start=datetime.now())
+
+
+def test_periodic_rejects_count():
+    """derhost's scheduler has no fire-count-limit equivalent, so a count value fails fast."""
+    with pytest.raises(NotImplementedError):
+        shim_periodic(1.0, count=5)
+
+
+def test_periodic_rejects_non_number_period():
+    """periodic() type-checks the period once start/count are ruled out."""
+    with pytest.raises(TypeError):
+        shim_periodic("not-a-number")
+
+
+def test_periodic_converts_timedelta_to_seconds():
+    """periodic() converts a timedelta period to the seconds Core.schedule expects."""
+    assert shim_periodic(timedelta(minutes=2)) == 120.0
