@@ -67,8 +67,8 @@ pip install -e ".[historians,drivers,ilc]"
 # Start server on default port 8000
 aems-server
 
-# Or specify custom host/port
-aems-server --host 0.0.0.0 --port 9000
+# Or specify custom host/port (host still defaults to loopback)
+aems-server --host 127.0.0.1 --port 9000
 ```
 
 ### 3. Run an Agent
@@ -322,8 +322,33 @@ export VOLTTRON_HOME=/home/user/.volttron
 export JWT_SECRET_KEY=<generated-value>
 
 # Start server
-aems-server --host 0.0.0.0 --port 8000
+aems-server --host 127.0.0.1 --port 8000
 ```
+
+### Port Binding (`start-server`, Docker Compose, `docker-helper.sh run`)
+
+`start-server`, the generated `docker-compose.yml`, and `docker-helper.sh run`
+(`make docker-run`) all bind or publish the server on loopback by default, so
+it is not reachable off the host unless configured otherwise. Publishing or
+binding on `0.0.0.0` exposes an API with no authentication in front of it to
+the network, and that server holds the Docker socket, so a reachable caller
+can control agent containers; leave both settings at their loopback default
+until #36 adds authentication.
+
+```bash
+# start-server: server process bind address, default 127.0.0.1
+export DERHOST_HOST=0.0.0.0
+
+# generate-docker-compose.py and docker-helper.sh run: host side of the
+# published port, default 127.0.0.1; must be a valid IP address (rejected
+# otherwise), and IPv6 is bracketed automatically; re-run the generator
+# after changing this
+export DERHOST_PUBLISH_HOST=0.0.0.0
+python generate-docker-compose.py
+```
+
+The container's own bind stays `0.0.0.0` inside the compose network, so
+agent containers always reach the server regardless of this setting.
 
 ### Server Options
 ```bash

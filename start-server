@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Start AEMS Server
 # This script starts the AEMS message bus server with the configuration from launch.json
@@ -10,5 +11,5 @@ echo "Starting AEMS Server..."
 echo "VOLTTRON_HOME: $VOLTTRON_HOME"
 
 "$SCRIPT_DIR/.venv/bin/python" -m derhost.server.fastapi_message_bus \
-    --host 0.0.0.0 \
+    --host "${DERHOST_HOST:-127.0.0.1}" \
     --port 8000

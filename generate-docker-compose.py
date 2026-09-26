@@ -11,7 +11,9 @@ Usage:
 """
 
 import argparse
+import ipaddress
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -48,9 +50,16 @@ services:
 """
 
 
-def generate_server_service() -> str:
-    """Generate AEMS server service definition."""
-    return """  aems-fastlib-server:
+def generate_server_service(publish_host: str) -> str:
+    """Generate AEMS server service definition.
+
+    publish_host is the host-side address of the published port. It
+    defaults to loopback (der-control-modules/der-control-fastlib#36); set
+    DERHOST_PUBLISH_HOST to publish on another interface. The container's
+    own bind stays 0.0.0.0 (Dockerfile), since sibling agent containers
+    reach it over the compose network regardless of the host publication.
+    """
+    return f"""  aems-fastlib-server:
     build:
       context: .
       dockerfile: Dockerfile
@@ -59,7 +68,7 @@ def generate_server_service() -> str:
     image: aems-fastapi:latest
     container_name: aems-fastlib-server
     ports:
-      - "5410:8000"
+      - "{publish_host}:5410:8000"
     volumes:
       - volttron-home:/var/volttron
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -213,10 +222,30 @@ networks:
 """
 
 
+def resolve_publish_host() -> str:
+    """Resolve DERHOST_PUBLISH_HOST to a validated compose ports host.
+
+    Unset or empty means loopback (#36). Any other value must parse as an
+    IP address, which also closes the YAML-injection surface of writing the
+    raw env value straight into the ports line; IPv6 is bracketed for the
+    host:port:container syntax docker-compose.yml uses.
+    """
+    raw = os.environ.get("DERHOST_PUBLISH_HOST", "")
+    if not raw:
+        return "127.0.0.1"
+    try:
+        parsed = ipaddress.ip_address(raw)
+    except ValueError:
+        print(f"Error: DERHOST_PUBLISH_HOST is not a valid IP address: {raw!r}", file=sys.stderr)
+        sys.exit(1)
+    return f"[{parsed}]" if parsed.version == 6 else str(parsed)
+
+
 def generate_docker_compose(config: dict[str, Any]) -> str:
     """Generate complete docker-compose.yml content."""
+    publish_host = resolve_publish_host()
     compose = generate_compose_header()
-    compose += generate_server_service()
+    compose += generate_server_service(publish_host)
 
     # Generate agent services
     agents = config["agents"]
@@ -297,7 +326,7 @@ def main():
         with open(args.output, "w") as f:
             f.write(compose_content)
 
-        print(f"✓ Generated {args.output}")
+        print(f"[x] Generated {args.output}")
         print()
         print_summary(config)
         print()
