@@ -6,6 +6,8 @@ import logging
 import gevent
 from agent import Agent
 
+from derhost._redact import redact_secrets
+
 _log = logging.getLogger(__name__)
 
 
@@ -37,7 +39,7 @@ class ModernAgent(Agent):
         # Log the message
         timestamp = datetime.datetime.now().isoformat()
         _log.info(f"[MODERN] [{timestamp}] {self.identity} received: {topic} from {sender}")
-        _log.info(f"  Data: {data}")
+        _log.info(f"  Data: {redact_secrets(data)}")
 
 
 if __name__ == "__main__":

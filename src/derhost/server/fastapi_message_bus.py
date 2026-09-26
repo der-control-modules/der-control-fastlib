@@ -25,6 +25,7 @@ except ImportError:
     # Python < 3.8
     from importlib_metadata import PackageNotFoundError, version
 
+from derhost._redact import redact_secrets as _redact_secrets, redact_text as _redact_text
 from derhost.server.config_store import ConfigStore
 from derhost.server.connection_manager import ConnectionManager
 from derhost.server.models import Message, MessageBus
@@ -447,7 +448,7 @@ class FastAPIMessageBus(MessageBus):
                         if "msg_id" in data and "result" in data:
                             msg_id = data["msg_id"]
                             result = data["result"]
-                            _log.debug(f"Setting RPC response for msg_id {msg_id}: {result}")
+                            _log.debug(f"Setting RPC response for msg_id {msg_id}: {_redact_secrets(result)}")
                             self.manager.set_rpc_response(msg_id, result)
 
                     elif data["type"] == "rpc_error":
@@ -455,7 +456,7 @@ class FastAPIMessageBus(MessageBus):
                         if "msg_id" in data and "error" in data:
                             msg_id = data["msg_id"]
                             error = data["error"]
-                            _log.debug(f"Setting RPC error for msg_id {msg_id}: {error}")
+                            _log.debug(f"Setting RPC error for msg_id {msg_id}: {_redact_secrets(error)}")
                             self.manager.set_rpc_error(msg_id, error)
 
                     elif data["type"] == "register_rpc_methods":
@@ -482,7 +483,7 @@ class FastAPIMessageBus(MessageBus):
                 while True:
                     # Just wait for messages (could be used for control later)
                     data = await websocket.receive_json()
-                    _log.debug(f"Monitor {monitor_id} sent: {data}")
+                    _log.debug(f"Monitor {monitor_id} sent: {_redact_secrets(data)}")
             except WebSocketDisconnect:
                 _log.debug(f"Monitor {monitor_id} disconnected")
                 self.manager.disconnect_monitor(monitor_id)
@@ -690,7 +691,7 @@ class FastAPIMessageBus(MessageBus):
                 # Wait for response with 30 second timeout (longer for web UI)
                 try:
                     response = await asyncio.wait_for(future, 30.0)
-                    _log.info(f"RPC response received for msg_id {msg_id}: {response}")
+                    _log.info(f"RPC response received for msg_id {msg_id}: {_redact_secrets(response)}")
                     return {
                         "success": True,
                         "result": response,
@@ -1129,7 +1130,9 @@ class FastAPIMessageBus(MessageBus):
                     "msg_id": msg_id,
                 }
 
-                _log.debug(f"Sending HTTP RPC request to {agent_id}: {method}\nparams: {params}")
+                _log.debug(
+                    f"Sending HTTP RPC request to {agent_id}: {method}\nparams: {_redact_secrets(params.model_dump())}"
+                )
                 await self.manager.send_message(agent_id, rpc_message)
 
                 # Wait for the response (with timeout)
@@ -1167,7 +1170,7 @@ class FastAPIMessageBus(MessageBus):
             except Exception as rpc_error:
                 # Clean up the future - this is our fallback for truly unexpected errors
                 self.manager.clear_rpc_response(msg_id)
-                _log.error(f"Unexpected error in RPC processing: {type(rpc_error).__name__}: {rpc_error}")
+                _log.error(_redact_text(f"Unexpected error in RPC processing: {type(rpc_error).__name__}: {rpc_error}"))
                 return JsonRpcResponse(
                     id=agent_id,
                     error=JsonRpcError(code=-32603, message="Internal error: Unexpected error occurred"),

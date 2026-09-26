@@ -10,11 +10,17 @@ from typing import Any
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
+from derhost._redact import redact_known_secret_values, redact_secrets, redact_text, truncate_for_log
+
 _log = logging.getLogger(__name__)
 
 
 def truncate_debug_message(message: Any, max_length: int = 200) -> str:
     """Truncate a message for debug logging to limit output size.
+
+    Redaction runs before truncation (see `truncate_for_log`): truncating a
+    secret-bearing value first can cut a redaction marker in half and let an
+    unredacted prefix through.
 
     Args:
         message: The message to truncate
@@ -22,12 +28,9 @@ def truncate_debug_message(message: Any, max_length: int = 200) -> str:
 
     Returns
     -------
-        Truncated string representation of the message
+        Truncated, redacted string representation of the message
     """
-    message_str = str(message)
-    if len(message_str) <= max_length:
-        return message_str
-    return message_str[:max_length] + "..."
+    return truncate_for_log(message, max_length)
 
 
 # Subscription callback type
@@ -207,7 +210,10 @@ class ConnectionManager:
     async def handle_rpc(self, sender: str, peer: str, method: str, args: list, kwargs: dict, msg_id: str):
         """Handle RPC request between clients."""
         # Log at INFO level with full parameters for visibility
-        _log.info(f"RPC request from {sender} to {peer}: {method}(args={args}, kwargs={kwargs}) [msg_id: {msg_id}]")
+        _log.info(
+            f"RPC request from {sender} to {peer}: {method}(args={redact_secrets(args)}, "
+            f"kwargs={redact_secrets(kwargs)}) [msg_id: {msg_id}]"
+        )
         _log.debug(
             f"RPC request from {sender} to {peer}: {method}({truncate_debug_message(args)}, "
             f"{truncate_debug_message(kwargs)}) [msg_id: {msg_id}]"
@@ -246,13 +252,13 @@ class ConnectionManager:
         try:
             _log.debug(f"Waiting for RPC response for msg_id {msg_id}")
             response = await asyncio.wait_for(future, 30.0)  # 30 second timeout for BACnet operations
-            _log.info(f"RPC response from {peer} to {sender}: {method} returned {response}")
+            _log.info(f"RPC response from {peer} to {sender}: {method} returned {redact_secrets(response)}")
             _log.debug(f"Received RPC response for msg_id {msg_id}: {truncate_debug_message(response)}")
             await self.send_message(sender, {"type": "rpc_response", "msg_id": msg_id, "result": response})
         except asyncio.TimeoutError:
             _log.warning(
-                f"RPC request from {sender} to {peer}.{method}(args={args}, kwargs={kwargs}) "
-                f"timed out after 30s [msg_id: {msg_id}]"
+                f"RPC request from {sender} to {peer}.{method}(args={redact_secrets(args)}, "
+                f"kwargs={redact_secrets(kwargs)}) timed out after 30s [msg_id: {msg_id}]"
             )
             _log.debug(f"RPC request timed out for msg_id {msg_id}")
             await self.send_message(
@@ -265,12 +271,18 @@ class ConnectionManager:
             )
             self.clear_rpc_response(msg_id)
         except Exception as e:
-            # Handle exceptions from RPC method execution
+            # Handle exceptions from RPC method execution. Redacted here, not
+            # just for the log: this error text is also sent on to the
+            # requesting client as this RPC's result.
+            error = redact_known_secret_values(str(e), args, kwargs)
+            # The wire error (sent below) stays byte-identical apart from
+            # the value-blanking above; the structural key scan runs only
+            # for this log line, never on text sent to the caller.
             _log.error(
-                f"RPC request from {sender} to {peer}.{method}(args={args}, kwargs={kwargs}) "
-                f"failed: {e} [msg_id: {msg_id}]"
+                f"RPC request from {sender} to {peer}.{method}(args={redact_secrets(args)}, "
+                f"kwargs={redact_secrets(kwargs)}) failed: {redact_text(error)} [msg_id: {msg_id}]"
             )
-            await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": str(e)})
+            await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": error})
             self.clear_rpc_response(msg_id)
 
     def _start_status_reporter(self):
