@@ -13,8 +13,9 @@ parsing it as JSON when it looks like JSON, and otherwise (or when parsing
 fails) by finding the first "name: value" or "name=value" pair whose name
 is a secret field and dropping everything from its separator onward: no
 attempt is made to find where that one value ends, since a value can be
-free text with its own quotes and colons (see redact#36's round-3 leak,
-where quote-pairing itself was the bug). Every public function fails
+free text with its own quotes and colons (see #36's quote-pairing leak,
+where tracking quote pairs to find a value's end got the pairing wrong on a
+stray quote earlier in the text). Every public function fails
 closed: on any exception, including RecursionError from pathological
 nesting, it returns "[REDACTED]" rather than let a partially-built value
 or an unredacted string escape.
@@ -22,6 +23,7 @@ or an unredacted string escape.
 
 import json
 import re
+from collections.abc import Iterator
 from functools import lru_cache
 from typing import Any
 
@@ -76,6 +78,12 @@ _SECRET_SUBSTRINGS = (
     "authorization",
 )
 
+# Field names redacted when the normalized name ENDS WITH one of these,
+# unlike _SECRET_SUBSTRINGS which matches anywhere: a suffix match is precise
+# enough for these three short forms ("db_pass", "user_passwd") without also
+# catching an unrelated word that merely contains them mid-string.
+_SECRET_SUFFIXES = ("passwd", "pass", "pwd")
+
 # Names that would otherwise match above but name a diagnostic, not a
 # credential; hiding them would hide auth-failure or metadata information
 # from an operator reading the log. Checked before the substring match, so
@@ -96,11 +104,27 @@ _SECRET_EXEMPT_SUFFIXES = (
 _SECRET_EXEMPT_PREFIXES = ("max", "min", "num")
 
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]")
+_SEGMENT_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+")
 
 
 @lru_cache(maxsize=4096)
 def _normalize_field_name(name: str) -> str:
     return _NON_ALNUM_RE.sub("", name.lower())
+
+
+@lru_cache(maxsize=4096)
+def _first_name_segment(name: str) -> str:
+    """The leading run of alphanumeric characters, lowercased.
+
+    The min/max/num prefix exemption checks this instead of the fully
+    normalized name: a product name that merely starts with one of those
+    letters ("minio") must not be exempted just because stripping its own
+    separators makes it look like a numeric-bound prefix. "min_token_length"
+    (first segment "min") is exempt; "minio_secret_key" (first segment
+    "minio") is not.
+    """
+    segments = _SEGMENT_SPLIT_RE.split(name)
+    return segments[0].lower() if segments else ""
 
 
 def is_secret_field(key: Any) -> bool:
@@ -118,10 +142,10 @@ def is_secret_field(key: Any) -> bool:
     if (
         normalized in _SECRET_EXEMPT_EXACT
         or normalized.endswith(_SECRET_EXEMPT_SUFFIXES)
-        or normalized.startswith(_SECRET_EXEMPT_PREFIXES)
+        or _first_name_segment(key) in _SECRET_EXEMPT_PREFIXES
     ):
         return False
-    return any(word in normalized for word in _SECRET_SUBSTRINGS)
+    return normalized.endswith(_SECRET_SUFFIXES) or any(word in normalized for word in _SECRET_SUBSTRINGS)
 
 
 # A candidate "name" followed by optional closing quote/backslash noise,
@@ -134,9 +158,9 @@ _FIELD_ASSIGNMENT_RE = re.compile(r"(?<![A-Za-z0-9_\-])([A-Za-z0-9_\-]+)[\"'\\]*
 def _redact_conservative(text: str) -> str:
     """Blank from the first secret-named separator to the end of text.
 
-    Deliberately does not try to find where the matched value ends: the
-    round-3 regression was exactly that attempt (tracking quote pairs)
-    getting the pairing wrong on a stray quote earlier in the text. Losing
+    Deliberately does not try to find where the matched value ends: an
+    earlier version of this code tried exactly that (tracking quote pairs)
+    and got the pairing wrong on a stray quote earlier in the text. Losing
     whatever diagnostic text follows a secret key is the accepted trade,
     and it only applies to text bound for a log, never to wire text (see
     redact_known_secret_values).
@@ -197,13 +221,14 @@ def redact_text(text: str) -> str:
         return REDACTED
 
 
-def _iter_secret_leaf_values(value: Any):
-    """Yield every leaf value reachable under a secret-named key, and every
-    ordinary leaf elsewhere, recursing through nested dicts, lists, and
-    tuples in both directions: down to find a secret-named key, and further
-    down again once one is found, so a container held under a secret key
-    (a `credentials` dict, a `tokens` list) yields its own string, bytes,
-    and int leaves instead of being skipped as "not a string"."""
+def _iter_secret_leaf_values(value: Any) -> Iterator[Any]:
+    """Yield every leaf value reachable under a secret-named key, recursing
+    through nested dicts, lists, and tuples in both directions: down to find
+    a secret-named key, and further down again once one is found, so a
+    container held under a secret key (a `credentials` dict, a `tokens`
+    list) yields its own string, bytes, and int leaves instead of being
+    skipped as "not a string". A leaf never reached through a secret-named
+    key is not yielded at all."""
     if isinstance(value, dict):
         for k, v in value.items():
             if is_secret_field(k):
@@ -215,7 +240,7 @@ def _iter_secret_leaf_values(value: Any):
             yield from _iter_secret_leaf_values(v)
 
 
-def _iter_leaves(value: Any):
+def _iter_leaves(value: Any) -> Iterator[Any]:
     if isinstance(value, dict):
         for v in value.values():
             yield from _iter_leaves(v)
@@ -229,6 +254,14 @@ def _iter_leaves(value: Any):
 _MIN_BLANK_LENGTH = 8
 _MIN_SHORTENED_LENGTH = 16
 _SHORTENED_ANCHOR_LENGTH = 8
+# Upper bound on how far apart a display library's own head and tail can
+# land. An unbounded ".*" is quadratic on adversarial input and, being
+# greedy, spans from the first occurrence of head all the way to the LAST
+# occurrence of tail anywhere later in the text, blanking real diagnostic
+# text between two unrelated occurrences. 128 is generous for any known
+# "first N...last M" shortening (pydantic's is under 60 characters wide)
+# while keeping the match close to linear.
+_MAX_SHORTENED_SPAN = 128
 
 
 def _secret_text_forms(secret_text: str) -> set[str]:
@@ -244,20 +277,43 @@ def _secret_text_forms(secret_text: str) -> set[str]:
     }
 
 
+def _blank_shortened_form(text: str, anchor_text: str) -> str:
+    """Blank a display library's own "first N...last M" shortening of
+    anchor_text (e.g. pydantic's input_value repr), without depending on
+    that library's exact truncation length or constant.
+
+    Two bounded passes, not one unbounded one: head-and-tail, replacing
+    every occurrence within _MAX_SHORTENED_SPAN characters of each other (a
+    secret echoed more than once must be blanked each time, not just the
+    first); then head-only, for a shortening that never shows a tail at
+    all, bounded to a short run of trailing ellipsis punctuation so a plain
+    word that happens to match the head is not blanked on its own.
+    """
+    if len(anchor_text) < _MIN_SHORTENED_LENGTH:
+        return text
+    head = re.escape(anchor_text[:_SHORTENED_ANCHOR_LENGTH])
+    tail = re.escape(anchor_text[-_SHORTENED_ANCHOR_LENGTH:])
+    text = re.sub(head + f".{{0,{_MAX_SHORTENED_SPAN}}}?" + tail, REDACTED, text, flags=re.DOTALL)
+    return re.sub(head + r"\.{1,3}(?=[^A-Za-z0-9]|$)", REDACTED, text)
+
+
 def _blank_all_forms(text: str, forms: set[str], anchor_text: str) -> str:
     """Blank every occurrence of every form in forms, longest first, so a
     longer encoded form is blanked whole rather than leaving quote or
     backslash fragments behind after a shorter form matches part of it.
 
-    anchor_text also drives the "maximal run" match: a display library's own
-    "first N...last M" shortening (e.g. pydantic's input_value repr) is
-    covered by matching from the secret's own first and last characters
-    without depending on that library's exact truncation length.
+    The shortened-form match (see _blank_shortened_form) runs once per
+    candidate anchor: the raw secret and any of its encoded forms at least
+    _MIN_SHORTENED_LENGTH long. A display library may shorten its own
+    escaped repr of the secret rather than the raw text, so a secret whose
+    first characters need escaping (a quote, a backslash) is only found by
+    anchoring on that escaped form too.
     """
+    anchors = {form for form in forms if len(form) >= _MIN_SHORTENED_LENGTH}
     if len(anchor_text) >= _MIN_SHORTENED_LENGTH:
-        head = re.escape(anchor_text[:_SHORTENED_ANCHOR_LENGTH])
-        tail = re.escape(anchor_text[-_SHORTENED_ANCHOR_LENGTH:])
-        text = re.sub(head + ".*" + tail, REDACTED, text, count=1, flags=re.DOTALL)
+        anchors.add(anchor_text)
+    for anchor in anchors:
+        text = _blank_shortened_form(text, anchor)
     for form in sorted({f for f in forms if f}, key=len, reverse=True):
         text = text.replace(form, REDACTED)
     return text
