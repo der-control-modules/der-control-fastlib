@@ -2393,6 +2393,11 @@ class CronTimer:
         # Parse the cron pattern
         self.minutes, self.hours, self.days_of_month, self.months, self.days_of_week = self._parse_pattern(cron_pattern)
 
+        # A pattern that can never match (e.g. day 31 of February) is
+        # rejected at construction rather than surfacing later as an
+        # unresolvable next time in the scheduler loop.
+        self.get_next(datetime(2000, 1, 1))
+
     def _parse_pattern(self, pattern):
         """Parse a cron pattern into its components."""
         if pattern is None:
@@ -2567,26 +2572,48 @@ class CronTimer:
             now = datetime.now()
 
         # Start from the next minute
-        next_time = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+        start = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
 
-        # Check up to 1000 minutes ahead to avoid infinite loops
-        for _ in range(1000000):
-            # Check if this time matches the schedule
-            if (
-                next_time.month in self.months
-                and next_time.day in self.days_of_month
-                and next_time.hour in self.hours
-                and next_time.minute in self.minutes
-                # weekday() is 0=Monday; days_of_week is stored in cron's
-                # 0=Sunday numbering, so shift before comparing.
-                and (next_time.weekday() + 1) % 7 in self.days_of_week
-            ):
-                return next_time
+        sorted_months = sorted(self.months)
+        sorted_hours = sorted(self.hours)
+        sorted_minutes = sorted(self.minutes)
 
-            # Increment to the next minute
-            next_time += timedelta(minutes=1)
+        # A 400-year span covers a full Gregorian cycle: every combination of
+        # date and weekday repeats within it, so no match in that span means
+        # the pattern can never match. This also bounds the search without
+        # stepping minute by minute, so it does not block the caller on a
+        # rare pattern (e.g. day 29 of February).
+        try:
+            for year in range(start.year, start.year + 400):
+                for month in sorted_months:
+                    if year == start.year and month < start.month:
+                        continue
+                    _, days_in_month = calendar.monthrange(year, month)
+                    for day in range(1, days_in_month + 1):
+                        if year == start.year and month == start.month and day < start.day:
+                            continue
+                        if day not in self.days_of_month:
+                            continue
+                        candidate_day = datetime(year, month, day)
+                        # weekday() is 0=Monday; days_of_week is stored in
+                        # cron's 0=Sunday numbering, so shift before comparing.
+                        if (candidate_day.weekday() + 1) % 7 not in self.days_of_week:
+                            continue
 
-        # If we get here, we couldn't find a match within the limit
+                        is_start_day = year == start.year and month == start.month and day == start.day
+                        for hour in sorted_hours:
+                            if is_start_day and hour < start.hour:
+                                continue
+                            for minute in sorted_minutes:
+                                if is_start_day and hour == start.hour and minute < start.minute:
+                                    continue
+                                return datetime(year, month, day, hour, minute)
+        except (ValueError, OverflowError):
+            # A candidate year past datetime's range (near year 9999) means
+            # the search cannot go further; treat it the same as exhausting
+            # the 400-year bound with no match.
+            pass
+
         raise ValueError("Could not find next scheduled time within reasonable limits")
 
 
