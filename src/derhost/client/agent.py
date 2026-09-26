@@ -2616,6 +2616,59 @@ class CronTimer:
 
         raise ValueError("Could not find next scheduled time within reasonable limits")
 
+    def next_fire_epoch(self, after: float) -> float:
+        """
+        Get the next UTC epoch this cron schedule should fire at.
+
+        `get_next` finds the matching wall-clock day, but its naive
+        hour/minute comparison cannot tell a DST-repeated hour from a
+        single occurrence: replace(tzinfo=...) on such a wall time (the
+        get_utc_seconds_from_epoch path this replaces) always resolves to
+        the pre-transition instant, which can be earlier than `after`
+        (issue #30). This walks every wall time the pattern allows on the
+        matched day and resolves each to an instant with PEP 495 fold,
+        then returns the smallest one strictly after `after`.
+        """
+        search_from = datetime.fromtimestamp(after)
+        fires_every_hour = self.hours == set(range(24))
+
+        while True:
+            candidate_day = self.get_next(search_from)
+            best = None
+            for hour in sorted(self.hours):
+                for minute in sorted(self.minutes):
+                    wall = datetime(candidate_day.year, candidate_day.month, candidate_day.day, hour, minute)
+                    for epoch in self._wall_epoch_candidates(wall, fires_every_hour):
+                        if epoch > after and (best is None or epoch < best):
+                            best = epoch
+            if best is not None:
+                return best
+            # Every wall time on the matched day resolved at or before
+            # `after` (its only remaining slot was a fold-1 duplicate
+            # excluded below). Move past this date and let get_next find
+            # the next matching one.
+            search_from = datetime(candidate_day.year, candidate_day.month, candidate_day.day, 23, 59)
+
+    @staticmethod
+    def _wall_epoch_candidates(wall: datetime, include_fold1_duplicate: bool) -> list[float]:
+        """
+        Resolve one candidate wall time to the instant(s) it can fire at.
+
+        A wall time is ambiguous during a fall-back (it occurs twice) or
+        nonexistent during a spring-forward gap (round-tripping through
+        fromtimestamp() lands on a different wall). PEP 495 fold resolves
+        both: fold 0 always fires; fold 1 fires too only when the pattern
+        matches every hour, so a fixed-time job still fires once per day
+        and an hourly-or-finer job fires on both fall-back occurrences.
+        """
+        epoch0 = wall.replace(fold=0).timestamp()
+        if datetime.fromtimestamp(epoch0) != wall:
+            return [epoch0]
+        epoch1 = wall.replace(fold=1).timestamp()
+        if epoch1 == epoch0:
+            return [epoch0]
+        return [epoch0, epoch1] if include_fold1_duplicate else [epoch0]
+
 
 class Peerlist:
     """Peerlist subsystem for the Agent."""
@@ -2696,15 +2749,14 @@ class ScheduledEvent:
             self.periodic = True
             self.cron_expression = when
             self.cron_timer = CronTimer(when)
-            next_time = self.cron_timer.get_next()
-            self.next_time = get_utc_seconds_from_epoch(next_time)
+            self.next_time = self.cron_timer.next_fire_epoch(time.time())
 
             # Trace cron event creation
             scheduler_trace(
                 "CRON EVENT CREATED",
                 event_name=self.name,
                 cron_expression=when,
-                next_execution=next_time,
+                next_execution=datetime.fromtimestamp(self.next_time),
                 utc_timestamp=self.next_time,
             )
         else:
@@ -2734,8 +2786,7 @@ class ScheduledEvent:
             # One-time events don't reschedule
             self.running = False
         elif self.is_cron:
-            next_time = self.cron_timer.get_next(datetime.fromtimestamp(time.time()))
-            self.next_time = get_utc_seconds_from_epoch(next_time)
+            self.next_time = self.cron_timer.next_fire_epoch(time.time())
         else:
             self.next_time = time.time() + self.interval
 
