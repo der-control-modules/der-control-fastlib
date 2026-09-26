@@ -29,21 +29,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN useradd -m -u 1000 -s /usr/sbin/nologin derhost \
     && mkdir -p /var/volttron /app \
-    && chown -R derhost:derhost /var/volttron /home/derhost /app
+    && chown -R derhost:derhost /var/volttron /home/derhost
 
 WORKDIR /app
 
-COPY --chown=derhost:derhost pyproject.toml ./
-COPY --chown=derhost:derhost src ./src
-COPY --chown=derhost:derhost start-legacy.py ./
+COPY pyproject.toml ./
+COPY src ./src
+COPY start-legacy.py ./
 
-USER derhost
-
+# Install as root and leave /app root-owned: the runtime user (derhost) must
+# not be able to rewrite its own installed code or virtualenv.
 RUN python3 -m venv /app/.venv \
     && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_DER_CONTROL_FASTLIB="${DERHOST_VERSION}" \
        /app/.venv/bin/pip install --upgrade pip setuptools wheel \
     && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_DER_CONTROL_FASTLIB="${DERHOST_VERSION}" \
-       /app/.venv/bin/pip install .
+       /app/.venv/bin/pip install . \
+    && chown -R root:root /app \
+    && chmod -R a+rX /app
+
+USER derhost
 
 FROM base AS server
 
