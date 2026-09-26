@@ -35,6 +35,10 @@ FRIDAY = datetime(2026, 9, 25, 9, 30)
         # Thursday, by number and by name.
         ("0 9 * * 4", datetime(2026, 10, 1, 9, 0)),
         ("0 9 * * thu", datetime(2026, 10, 1, 9, 0)),
+        # Friday, by number and by name. FRIDAY's own weekday, so the next
+        # match is the following week, not the reference day itself.
+        ("0 9 * * 5", datetime(2026, 10, 2, 9, 0)),
+        ("0 9 * * fri", datetime(2026, 10, 2, 9, 0)),
         # Saturday, by number and by name.
         ("0 9 * * 6", datetime(2026, 9, 26, 9, 0)),
         ("0 9 * * sat", datetime(2026, 9, 26, 9, 0)),
