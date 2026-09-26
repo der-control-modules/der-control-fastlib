@@ -33,6 +33,12 @@ _SECRET_LOG_FIELD_SUBSTRINGS = (
     "credential",
 )
 
+# Normalized field names that contain "auth" but name a diagnostic, not a
+# credential; hiding them would hide auth-failure information from an
+# operator reading the log.
+_SECRET_LOG_FIELD_EXEMPTIONS = {"authenticated", "authorized"}
+
+
 def _normalize_field_name(name: str) -> str:
     return name.lower().replace("-", "").replace("_", "")
 
@@ -46,9 +52,11 @@ def is_secret_field(key: Any) -> bool:
     """
     if not isinstance(key, str):
         return False
+    normalized = _normalize_field_name(key)
+    if normalized in _SECRET_LOG_FIELD_EXEMPTIONS:
+        return False
     if key.lower() in SECRET_LOG_FIELDS:
         return True
-    normalized = _normalize_field_name(key)
     return any(word in normalized for word in _SECRET_LOG_FIELD_SUBSTRINGS)
 
 
@@ -199,12 +207,22 @@ def redact_known_secret_values(text: str, *payloads: Any) -> str:
     names to key on. This instead looks up the actual secret values from the
     request payload (args, kwargs) and blanks any occurrence of them, so the
     check is on the value itself rather than on the shape of the text.
+
+    Only a str or bytes value of at least 8 characters is blanked. A shorter
+    or non-string value (a one-character token, `None`, `True`, `1`) is a
+    common word or literal that is likely to appear in the text for reasons
+    unrelated to the secret, and that same text is often the RPC error the
+    caller receives, so blanking it would corrupt the message instead of
+    protecting anything.
     """
     for payload in payloads:
         for secret in _iter_secret_leaf_values(payload):
+            if not isinstance(secret, str | bytes):
+                continue
             secret_text = str(secret)
-            if secret_text:
-                text = text.replace(secret_text, REDACTED)
+            if len(secret_text) < 8:
+                continue
+            text = text.replace(secret_text, REDACTED)
     return text
 
 
