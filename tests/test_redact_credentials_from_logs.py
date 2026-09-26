@@ -11,6 +11,9 @@ import httpx
 import pytest
 
 MARKER = "s3cr3t-marker"
+# The marker's own prefix: a partial leak (a value truncated mid-marker)
+# must fail these tests too, not only a leak of the whole string.
+MARKER_PREFIX = MARKER[:6]
 
 
 def is_derhost_record(record: logging.LogRecord) -> bool:
@@ -19,9 +22,14 @@ def is_derhost_record(record: logging.LogRecord) -> bool:
 
 
 def assert_marker_absent(records, marker: str) -> None:
-    """Fail if any caplog record's rendered message contains marker."""
+    """Fail if any caplog record's rendered message contains marker's prefix.
+
+    Checking the prefix, not the whole marker, means a truncated partial
+    leak (the marker cut in half by a length limit) fails this check too.
+    """
+    prefix = marker[:6]
     for record in records:
-        assert marker not in record.getMessage()
+        assert prefix not in record.getMessage()
 
 
 class TestControlFires:
@@ -49,7 +57,19 @@ class TestRedactCredentialsFromLogs:
         def echo_method(**kwargs):
             return "ok"
 
+        def echo_args_method(*args, **kwargs):
+            return "ok"
+
+        def int_key_result_method(**kwargs):
+            return {1: "one"}
+
         self.agent.vip.rpc.export_method("echo_target_method", echo_method)
+        # A one-character name: the WS receive log truncates at SIZE_OUTPUT
+        # (100) characters, and a realistic method name pushes a short
+        # secret value past that cutoff before it can be checked.
+        self.agent.vip.rpc.export_method("e", echo_method)
+        self.agent.vip.rpc.export_method("echo_args_target_method", echo_args_method)
+        self.agent.vip.rpc.export_method("int_key_result_method", int_key_result_method)
         gevent.sleep(1)
 
         yield
@@ -77,3 +97,162 @@ class TestRedactCredentialsFromLogs:
 
         method_named = any("echo_target_method" in r.getMessage() for r in derhost_records)
         assert method_named, "expected at least one RPC log record to still name the method"
+
+    def test_gs_call_with_dict_authentication_leaves_no_marker_in_any_log_record(self, caplog):
+        """Item 1: a dict-valued authentication field leaks on the WS
+        receive log's text-based redaction path, not only a string value."""
+        base_url = self.manager.get_base_url()
+        rpc_data = {
+            "jsonrpc": "2.0",
+            "id": "gs_redact_target",
+            "method": "e",
+            "params": {"authentication": {"v": MARKER}, "kwargs": {}},
+        }
+
+        with caplog.at_level(logging.DEBUG):
+            response = httpx.post(f"{base_url}/gs", json=rpc_data, timeout=10.0)
+            gevent.sleep(1)
+
+        assert response.status_code == 200
+
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert derhost_records, "expected at least one record from a derhost logger"
+        assert_marker_absent(derhost_records, MARKER)
+
+    def test_call_and_handle_request_logs_redact_args(self, caplog):
+        """Item 4: RPC args are redacted in logs the same way kwargs are, on
+        both the outbound call log and the inbound dispatch log."""
+        with caplog.at_level(logging.DEBUG):
+            # Outbound: RPC.call's own "sent RPC call" log (agent.py, the
+            # method= / args= / kwargs= debug line).
+            self.agent.vip.rpc.call("nonexistent_peer_xyz", "some_remote_method", {"token": MARKER})
+
+            # Inbound: handle_request's "RPC CALL" log for a locally exported
+            # method, called directly so it does not depend on the outbound
+            # call above reaching a peer.
+            self.agent.vip.rpc.handle_request(
+                sender="test_sender",
+                method_name="echo_args_target_method",
+                args=[{"token": MARKER}],
+                kwargs={},
+                msg_id="handle-request-args-test",
+            )
+            gevent.sleep(0.5)
+
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert derhost_records, "expected at least one record from a derhost logger"
+        assert_marker_absent(derhost_records, MARKER)
+
+    def test_gs_call_with_non_string_result_keys_succeeds(self):
+        """Item 3: redaction must not raise on a non-string dict key, or a
+        successful RPC whose result has int keys turns into an internal
+        error instead of returning its result."""
+        base_url = self.manager.get_base_url()
+        rpc_data = {
+            "jsonrpc": "2.0",
+            "id": "gs_redact_target",
+            "method": "int_key_result_method",
+            "params": {"kwargs": {}},
+        }
+
+        response = httpx.post(f"{base_url}/gs", json=rpc_data, timeout=10.0)
+        gevent.sleep(1)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("error") is None, f"unexpected error: {data.get('error')}"
+        assert data.get("result") == {"1": "one"}
+
+
+class TestExceptionMessagesNeverLeakSecrets:
+    """Item 2: no exception message this code builds, and no exception text
+    it logs, carries a secret value."""
+
+    @pytest.fixture(autouse=True)
+    def setup_agent(self, message_bus_manager_fixture):
+        self.manager = message_bus_manager_fixture
+        self.manager.start_bus()
+        self.agent = self.manager.create_connected_agent("gs_redact_exc_target")
+
+        def raising_method(**kwargs):
+            # Simulates a validator (e.g. pydantic) that echoes its rejected
+            # input in its own exception text, the way ValidationError does.
+            raise ValueError(f"boom {kwargs.get('token')}")
+
+        self.agent.vip.rpc.export_method("raising_target_method", raising_method)
+        gevent.sleep(1)
+
+        yield
+
+        self.agent.disconnect()
+
+    def test_non_serializable_secret_kwarg_does_not_leak(self, caplog):
+        """P1: RPC.call's own TypeError for a non-serializable kwarg must not
+        embed the raw secret value in its message."""
+        with caplog.at_level(logging.DEBUG):
+            with pytest.raises(TypeError) as exc_info:
+                self.agent.vip.rpc.call(
+                    "nonexistent_peer_xyz", "some_method", authentication=MARKER.encode()
+                )
+
+        assert MARKER_PREFIX not in str(exc_info.value)
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert_marker_absent(derhost_records, MARKER)
+
+    def test_rpc_method_exception_does_not_leak_secret_in_logs(self, caplog):
+        """An exported method's own exception text (not built by this code
+        from a fixed template) must not surface a secret in a log record."""
+        base_url = self.manager.get_base_url()
+        rpc_data = {
+            "jsonrpc": "2.0",
+            "id": "gs_redact_exc_target",
+            "method": "raising_target_method",
+            "params": {"kwargs": {"token": MARKER}},
+        }
+
+        with caplog.at_level(logging.DEBUG):
+            response = httpx.post(f"{base_url}/gs", json=rpc_data, timeout=10.0)
+            gevent.sleep(1)
+
+        assert response.status_code == 200
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert derhost_records, "expected at least one record from a derhost logger"
+        assert_marker_absent(derhost_records, MARKER)
+
+
+def test_redact_secrets_handles_non_string_keys_without_raising():
+    """Item 3, unit level: a non-string dict key must not raise, and a
+    sibling secret-named string key in the same dict must still redact."""
+    from derhost._redact import redact_secrets
+
+    result = redact_secrets({1: "one", "token": MARKER})
+
+    assert result[1] == "one"
+    assert result["token"] == "[REDACTED]"
+
+
+def test_redact_secrets_matches_normalized_secret_key_variants():
+    """Item 5: key matching is case- and -/_-insensitive and catches
+    normalized names that contain a secret word, not only the exact field
+    names in SECRET_LOG_FIELDS. "author" is a known false positive from the
+    "auth" substring; over-redacting a log line is an acceptable trade for
+    never missing an authorization/authentication spelling variant, and
+    "primary_key" (a non-secret identifier) must NOT match."""
+    from derhost._redact import redact_secrets
+
+    payload = {
+        "API-Key": MARKER,
+        "access_key": MARKER,
+        "private_key": MARKER,
+        "Passwd": MARKER,
+        "Cookie": MARKER,
+        "credentials": MARKER,
+        "author": "not-a-secret",
+        "primary_key": "not-a-secret-id",
+    }
+
+    result = redact_secrets(payload)
+
+    for key in ("API-Key", "access_key", "private_key", "Passwd", "Cookie", "credentials", "author"):
+        assert result[key] == "[REDACTED]", f"expected {key} to be redacted"
+    assert result["primary_key"] == "not-a-secret-id"
