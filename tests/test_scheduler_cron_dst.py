@@ -88,6 +88,27 @@ def test_next_fire_epoch_fixed_hour_fires_once_on_fall_back_day(eastern_time):
     assert second == _utc(2026, 11, 2, 6, 30)
 
 
+def test_next_fire_epoch_23_of_24_hours_excludes_fold1_but_24_of_24_includes_it(eastern_time):
+    """The fold-1 duplicate needs every one of the 24 hours, not merely most
+    of them: an hour field covering 23 of 24 hours excludes it exactly like
+    a single fixed hour does, and only all 24 hours includes it.
+    """
+    almost_every_hour = CronTimer("30 0-22 * * *")
+    first = almost_every_hour.next_fire_epoch(_utc(2026, 11, 1, 5, 0))
+    assert first == _utc(2026, 11, 1, 5, 30)
+    second = almost_every_hour.next_fire_epoch(first)
+    assert second != _utc(2026, 11, 1, 6, 30), "fold-1 1:30 must not fire when hour 23 is excluded"
+    assert second == _utc(2026, 11, 1, 7, 30)
+
+    every_hour = CronTimer("30 * * * *")
+    first_every = every_hour.next_fire_epoch(_utc(2026, 11, 1, 5, 0))
+    second_every = every_hour.next_fire_epoch(first_every)
+    assert (first_every, second_every) == (
+        _utc(2026, 11, 1, 5, 30),
+        _utc(2026, 11, 1, 6, 30),
+    )
+
+
 def test_next_fire_epoch_spring_forward_gap_maps_after_the_gap(eastern_time):
     """2:30 a.m. does not exist on the gap day; it fires once, after the gap."""
     timer = CronTimer("30 2 * * *")
