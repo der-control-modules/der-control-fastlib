@@ -46,6 +46,7 @@ class VolttronImportRedirector(MetaPathFinder, Loader):
         "volttron.platform.vip": "derhost.compat.shims.vip",
         # Platform base
         "volttron.platform.jsonapi": "derhost.compat.shims.jsonapi",
+        "volttron.platform.scheduling": "derhost.compat.shims.scheduling",
         "volttron.platform": "derhost.compat.shims.platform",
         # Utils
         "volttron.utils.docs": "derhost.compat.shims.utils_docs",
@@ -117,9 +118,18 @@ class VolttronImportRedirector(MetaPathFinder, Loader):
                 module.__file__ = getattr(target_module, "__file__", "<aems-compat>")
                 module.__loader__ = self
 
-                # IMPORTANT: Mark as a package so sub-imports work
-                # This allows "from volttron.platform.agent import X" to work
-                if not hasattr(module, "__path__"):
+                # Mark as a package only when the map has a deeper entry under
+                # this name (e.g. "volttron.platform.agent" has
+                # ".base_historian"), so "from volttron.platform.agent import X"
+                # keeps working. A leaf entry (no deeper map key) is left
+                # without __path__: with it, "from <leaf> import anything"
+                # falls back to importing "<leaf>.anything" as a submodule,
+                # which this redirector resolves via the same parent-match
+                # rule and so always "succeeds", masking a genuinely unknown
+                # name behind a fabricated module instead of ImportError.
+                if not hasattr(module, "__path__") and any(
+                    key != fullname and key.startswith(fullname + ".") for key in self.REDIRECT_MAP
+                ):
                     module.__path__ = []
 
                 # Set package name correctly for relative imports
