@@ -152,6 +152,9 @@ compose-down: ## Stop services with docker-compose
 compose-logs: ## View docker-compose logs
 	docker-compose logs -f
 
+# docker/ stack (server and, in later PRs, one container per agent): #68.
+include docker/docker.mk
+
 # Help
 .PHONY: help
 help: ## Show this help message
