@@ -12,6 +12,7 @@ import http.server
 import ipaddress
 import json
 import os
+import re
 import socket
 import subprocess
 import threading
@@ -171,3 +172,23 @@ def test_stack_check_zero_expected_exits_zero(connections_server: http.server.HT
     result = _run_make("stack-check", overrides={"DERHOST_CHECK_BASE_URL": base_url, "EXPECTED": ""})
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == ""
+
+
+# --- make help: unaffected by docker.mk joining $(MAKEFILE_LIST). -----------
+
+
+def test_help_lists_targets_with_no_filename_prefix_and_includes_stack_targets() -> None:
+    # $(MAKEFILE_LIST) now holds two files (Makefile, docker/docker.mk); a
+    # plain `grep -E ... $(MAKEFILE_LIST)` prefixes every match with its
+    # filename once there is more than one, which breaks the awk split this
+    # target relies on. `help`'s recipe uses `grep -hE` to suppress that.
+    result = _run_make("help")
+    assert result.returncode == 0, result.stderr
+    assert "Makefile:" not in result.stdout
+    assert "docker.mk:" not in result.stdout
+    # A target defined before docker.mk was included, unaffected by this fix
+    # on its own: proves the split still works, not just that the prefix
+    # is gone.
+    assert re.search(r"^\x1b\[36mtest\s*\x1b\[0m", result.stdout, re.MULTILINE), result.stdout
+    # A target docker.mk itself defines, only reachable through the include.
+    assert re.search(r"^\x1b\[36mstack-up\s*\x1b\[0m", result.stdout, re.MULTILINE), result.stdout
