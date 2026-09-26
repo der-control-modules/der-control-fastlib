@@ -185,7 +185,7 @@ def test_scheduler_with_various_times(message_bus_manager_fixture):
 
 
 def test_scheduler_8am_6pm_simulation_duplicate(message_bus_manager_fixture):
-    """Simulate the actual 8am-6pm scheduling scenario (duplicate test)."""
+    """Simulate a past/future scheduling scenario (duplicate of test_scheduler_8am_6pm_simulation)."""
     manager = message_bus_manager_fixture
     manager.start_bus()
 
@@ -195,34 +195,35 @@ def test_scheduler_8am_6pm_simulation_duplicate(message_bus_manager_fixture):
     agent.connect()
     agent.core._scheduler.start()
 
-    # Create times for today at 8am and 6pm
-    today = datetime.now().date()
-    time_8am = datetime.combine(today, datetime.strptime("08:00", "%H:%M").time())
-    time_6pm = datetime.combine(today, datetime.strptime("18:00", "%H:%M").time())
-
+    # Past and future relative to "now", not a fixed wall-clock hour (#27,
+    # the same pattern #18 fixed elsewhere in this file): a fixed 08:00/18:00
+    # is only in the past/future depending on when the test runs, which let
+    # the assertions below skip entirely outside that window.
     now = datetime.now()
+    past_event_time = now - timedelta(hours=1)
+    future_event_time = now + timedelta(hours=1)
     _log.info(f"Current time: {now}")
-    _log.info(f"8am time: {time_8am} (is past: {time_8am < now})")
-    _log.info(f"6pm time: {time_6pm} (is past: {time_6pm < now})")
+    _log.info(f"Past event time: {past_event_time} (is past: {past_event_time < now})")
+    _log.info(f"Future event time: {future_event_time} (is past: {future_event_time < now})")
 
     # Check what timestamps we get
-    timestamp_8am = time.mktime(time_8am.timetuple())
-    timestamp_6pm = time.mktime(time_6pm.timetuple())
+    timestamp_past = time.mktime(past_event_time.timetuple())
+    timestamp_future = time.mktime(future_event_time.timetuple())
     timestamp_now = time.time()
 
     _log.info(
-        f"8am timestamp: {timestamp_8am} ({datetime.fromtimestamp(timestamp_8am)})"
+        f"Past event timestamp: {timestamp_past} ({datetime.fromtimestamp(timestamp_past)})"
     )
     _log.info(
-        f"6pm timestamp: {timestamp_6pm} ({datetime.fromtimestamp(timestamp_6pm)})"
+        f"Future event timestamp: {timestamp_future} ({datetime.fromtimestamp(timestamp_future)})"
     )
     _log.info(
         f"Now timestamp: {timestamp_now} ({datetime.fromtimestamp(timestamp_now)})"
     )
 
     # Schedule the events
-    agent.core.schedule(time_8am, agent.test_callback, "8am_event")
-    agent.core.schedule(time_6pm, agent.test_callback, "6pm_event")
+    agent.core.schedule(past_event_time, agent.test_callback, "past_event")
+    agent.core.schedule(future_event_time, agent.test_callback, "future_event")
 
     # Check scheduler queue
     _log.info(f"Scheduler queue size: {len(agent.core._scheduler._event_queue)}")
@@ -236,20 +237,11 @@ def test_scheduler_8am_6pm_simulation_duplicate(message_bus_manager_fixture):
     # Check which events fired
     _log.info(f"Events fired: {agent.events_fired}")
 
-    # If current time is between 8am and 6pm, we expect 8am to have fired
-    if time_8am < now < time_6pm:
-        assert any(
-            "8am" in evt[0] for evt in agent.events_fired
-        ), "8am event should have fired (time is past)"
-
-    # If current time is after 6pm, both should have fired
-    if now > time_6pm:
-        assert any(
-            "8am" in evt[0] for evt in agent.events_fired
-        ), "8am event should have fired"
-        assert any(
-            "6pm" in evt[0] for evt in agent.events_fired
-        ), "6pm event should have fired"
+    # The past event must fire immediately on every run, whatever the local
+    # time of day is.
+    assert any(
+        "past" in evt[0] for evt in agent.events_fired
+    ), "past event should have fired (time is past)"
 
     agent.disconnect()
 
