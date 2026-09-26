@@ -1,0 +1,39 @@
+name: derhost-server
+
+services:
+  derhost-server:
+    build:
+      context: ../..
+      dockerfile: docker/server/Dockerfile
+      target: server
+    image: derhost-server:local
+    container_name: derhost-server
+    user: "1000"
+    environment:
+      VOLTTRON_HOME: /var/volttron
+    volumes:
+      - derhost-home:/var/volttron
+    ports:
+      - "${DERHOST_PUBLISH_HOST:-127.0.0.1}:5410:8000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - derhost-net
+
+volumes:
+  derhost-home:
+    driver: local
+
+networks:
+  derhost-net:
+    name: derhost-net
+    driver: bridge
