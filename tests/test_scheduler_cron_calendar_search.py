@@ -66,21 +66,16 @@ AGREEING_CASES = [
 # years) cannot reach the answer; the calendar search resolves them directly.
 # Each expected date carries how it was derived, so a future maintainer can
 # recheck it without re-running the search.
+#
+# Feb 29 combined with a day-of-week restriction used to belong here too
+# (dow=5 waiting to 2036, dow=1 waiting to 2112, the longest gap in the
+# 400-year cycle at 40 years): both are now refused at construction instead
+# (issue #65, see test_scheduler_cron_window.py), so building either pattern
+# here would raise before the oracle ever ran.
 RARE_CASES = [
     # No day-of-week filter: the next leap year after 2028 is 2032 (+4, no
     # intervening century skip), whatever weekday Feb 29 falls on that year.
     ("0 0 29 2 *", datetime(2028, 3, 1), datetime(2032, 2, 29, 0, 0)),
-    # Filtered to Friday (cron dow=5): 2032-02-29 is a Sunday, so the next
-    # Friday Feb 29 is 2036 (both confirmed via `date(year, 2, 29).weekday()`).
-    ("0 0 29 2 5", datetime(2028, 3, 1), datetime(2036, 2, 29, 0, 0)),
-    # Filtered to Monday (cron dow=1): 2072-02-29 and 2112-02-29 are both
-    # Mondays. This is the longest gap (40 years) between same-weekday Feb 29s
-    # anywhere in the 400-year Gregorian cycle, found by checking every
-    # leap-year Feb 29 across two full cycles (800 years) and taking the
-    # largest year-to-year gap per weekday. A search bound of 41 years already
-    # finds this exact match; the shipped 400-year bound is far more generous
-    # than any satisfiable pattern needs.
-    ("0 0 29 2 1", datetime(2072, 3, 1), datetime(2112, 2, 29, 0, 0)),
 ]
 
 
@@ -112,4 +107,16 @@ def test_never_matching_pattern_rejected_at_construction():
     start = time.perf_counter()
     with pytest.raises(ValueError):
         CronTimer("0 0 31 2 *")
+    assert time.perf_counter() - start < 0.1
+
+
+def test_feb29_monday_no_longer_resolves_to_2112_but_is_refused():
+    """The 2072-to-2112 case above (the longest gap in the whole 400-year
+    cycle, 40 years) used to be a RARE_CASES entry resolving to 2112-02-29;
+    it is refused at construction instead (issue #65), and the rejection
+    is immediate, not a search out to 2112.
+    """
+    start = time.perf_counter()
+    with pytest.raises(ValueError, match="Feb 29"):
+        CronTimer("0 0 29 2 1")
     assert time.perf_counter() - start < 0.1
