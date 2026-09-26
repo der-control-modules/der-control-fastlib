@@ -5,6 +5,7 @@ level, from any module under derhost, carries a credential value from the
 """
 
 import copy
+import dataclasses
 import json
 import logging
 import random
@@ -13,6 +14,7 @@ import time
 import gevent
 import httpx
 import pytest
+from gevent.event import AsyncResult
 
 MARKER = "s3cr3t-marker"
 # The marker's own prefix: a partial leak (a value truncated mid-marker)
@@ -183,7 +185,25 @@ class TestExceptionMessagesNeverLeakSecrets:
             # input in its own exception text, the way ValidationError does.
             raise ValueError(f"boom {kwargs.get('token')}")
 
+        def raising_method_with_untracked_pattern(**kwargs):
+            # The secret-named pattern here is not part of any payload the
+            # RPC received, so value-blanking alone has nothing to blank:
+            # only the text-based rule (item 2) catches it.
+            raise ValueError(f"downstream auth failed, password: {MARKER}")
+
+        def async_raising_method(**kwargs):
+            result = AsyncResult()
+
+            def fail_later():
+                gevent.sleep(0.1)
+                result.set_exception(ValueError(f"downstream auth failed, password: {MARKER}"))
+
+            gevent.spawn(fail_later)
+            return result
+
         self.agent.vip.rpc.export_method("raising_target_method", raising_method)
+        self.agent.vip.rpc.export_method("raising_untracked_pattern_method", raising_method_with_untracked_pattern)
+        self.agent.vip.rpc.export_method("async_raising_target_method", async_raising_method)
         gevent.sleep(1)
 
         yield
@@ -195,9 +215,51 @@ class TestExceptionMessagesNeverLeakSecrets:
         embed the raw secret value in its message."""
         with caplog.at_level(logging.DEBUG):
             with pytest.raises(TypeError) as exc_info:
+                self.agent.vip.rpc.call("nonexistent_peer_xyz", "some_method", authentication=MARKER.encode())
+
+        assert MARKER_PREFIX not in str(exc_info.value)
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert_marker_absent(derhost_records, MARKER)
+
+    def test_nested_secret_under_non_secret_kwarg_does_not_leak(self, caplog):
+        """Item 3: a secret nested under a non-secret-named kwarg (e.g.
+        payload={"credentials": {...}}) must be redacted by walking the
+        value, not only by checking the kwarg's own name."""
+        with caplog.at_level(logging.DEBUG):
+            with pytest.raises(TypeError) as exc_info:
                 self.agent.vip.rpc.call(
-                    "nonexistent_peer_xyz", "some_method", authentication=MARKER.encode()
+                    "nonexistent_peer_xyz",
+                    "some_method",
+                    payload={"credentials": {"token": MARKER}, "cache": {1, 2, 3}},
                 )
+
+        assert MARKER_PREFIX not in str(exc_info.value)
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert_marker_absent(derhost_records, MARKER)
+
+    def test_dataclass_positional_arg_does_not_leak(self, caplog):
+        """Item 4: a non-container positional arg (a dataclass with a
+        password field) is stringified and text-redacted, not passed
+        through unchanged."""
+
+        @dataclasses.dataclass
+        class _Creds:
+            password: str
+
+        with caplog.at_level(logging.DEBUG):
+            with pytest.raises(TypeError) as exc_info:
+                self.agent.vip.rpc.call("nonexistent_peer_xyz", "some_method", _Creds(password=MARKER))
+
+        assert MARKER_PREFIX not in str(exc_info.value)
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert_marker_absent(derhost_records, MARKER)
+
+    def test_bytes_positional_arg_does_not_leak(self, caplog):
+        """Item 4: raw bytes as a positional arg (b'token=...') is
+        stringified and text-redacted the same way."""
+        with caplog.at_level(logging.DEBUG):
+            with pytest.raises(TypeError) as exc_info:
+                self.agent.vip.rpc.call("nonexistent_peer_xyz", "some_method", f"token={MARKER}".encode())
 
         assert MARKER_PREFIX not in str(exc_info.value)
         derhost_records = [r for r in caplog.records if is_derhost_record(r)]
@@ -219,6 +281,47 @@ class TestExceptionMessagesNeverLeakSecrets:
             gevent.sleep(1)
 
         assert response.status_code == 200
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert derhost_records, "expected at least one record from a derhost logger"
+        assert_marker_absent(derhost_records, MARKER)
+
+    def test_rpc_method_exception_with_untracked_pattern_is_text_redacted(self, caplog):
+        """Item 2: exception text carrying a secret-named "name: value"
+        pattern that is not part of the RPC's own payload (so value
+        blanking has nothing to blank) must still be caught by the
+        text-based rule, on both the local-dispatch log and the
+        send-response log."""
+        base_url = self.manager.get_base_url()
+        rpc_data = {
+            "jsonrpc": "2.0",
+            "id": "gs_redact_exc_target",
+            "method": "raising_untracked_pattern_method",
+            "params": {"kwargs": {}},
+        }
+
+        with caplog.at_level(logging.DEBUG):
+            response = httpx.post(f"{base_url}/gs", json=rpc_data, timeout=10.0)
+            gevent.sleep(1)
+
+        assert response.status_code == 200
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert derhost_records, "expected at least one record from a derhost logger"
+        assert_marker_absent(derhost_records, MARKER)
+
+    def test_async_result_exception_text_is_text_redacted(self, caplog):
+        """Item 2: an exported method that returns an AsyncResult, whose
+        result later fails, must have its RPC ERROR log text-redacted too,
+        not only value-blanked."""
+        with caplog.at_level(logging.DEBUG):
+            self.agent.vip.rpc.handle_request(
+                sender="test_sender",
+                method_name="async_raising_target_method",
+                args=[],
+                kwargs={},
+                msg_id="async-error-redaction-test",
+            )
+            gevent.sleep(1)
+
         derhost_records = [r for r in caplog.records if is_derhost_record(r)]
         assert derhost_records, "expected at least one record from a derhost logger"
         assert_marker_absent(derhost_records, MARKER)
@@ -262,10 +365,10 @@ def test_redact_secrets_matches_normalized_secret_key_variants():
     assert result["primary_key"] == "not-a-secret-id"
 
 
-# Bound justified by measurement: at 9e7bdb2 (the restartable-regex scanner)
-# the escaped-quote input took 17.9s and the nested-JSON-as-string input took
-# 3.3s on this host; a linear scanner finishes each 256 KB shape well under
-# this bound (design measurement: worst shape 0.35s/MB).
+# Bound justified by measurement: a restartable regex scanner took 17.9s on
+# the escaped-quote input and 3.3s on the nested-JSON-as-string input on this
+# host; a linear scanner finishes each 256 KB shape well under this bound
+# (measured worst shape 0.35s/MB).
 _SCAN_TIME_BOUND_SECONDS = 0.5
 _SHAPE_SIZE = 256 * 1024
 
@@ -285,7 +388,7 @@ def _deep_nesting_json(size: int) -> str:
 
 
 def _distinct_key_names(size: int) -> str:
-    # G1's measured worst shape: many distinct "nX:" names, none secret.
+    # The measured worst shape: many distinct "nX:" names, none secret.
     parts = []
     n = 0
     while sum(len(p) for p in parts) < size:
@@ -327,9 +430,9 @@ _TIME_BOUND_SHAPES = {
 
 @pytest.mark.parametrize("shape_name", sorted(_TIME_BOUND_SHAPES))
 def test_redact_text_stays_within_time_bound_on_adversarial_shapes(shape_name):
-    """G1: every shape runs in linear time. A reviewer reverting to the
-    restartable regex scanner (9e7bdb2) on any of these should make this
-    test fail, not just the two it was originally measured against."""
+    """Every shape runs in linear time. A reviewer reverting to a
+    restartable regex scanner on any of these should make this test fail,
+    not just the two it was originally measured against."""
     from derhost._redact import redact_text
 
     text = _TIME_BOUND_SHAPES[shape_name](_SHAPE_SIZE)
@@ -347,8 +450,8 @@ def test_redact_text_redacts_unterminated_value_to_the_end():
     """Keeps the fail-closed guarantee through the rewrite: a secret value
     with no closing quote is redacted to the end of the text, not left with
     an unredacted prefix. redact_text does not try to find the value's own
-    end (that quote-pairing was round 3's bug); it drops everything after
-    the separator."""
+    end (quote-pairing to find that end was an earlier bug); it drops
+    everything after the separator."""
     from derhost._redact import redact_text
 
     text = f'"token": "{MARKER}'
@@ -400,9 +503,9 @@ def test_auth_failure_diagnostic_fields_stay_visible():
 
 
 # ---------------------------------------------------------------------------
-# Q5 test plan: field-name table, fuzz properties (G2/G3), never_raises (G6),
-# no_mutation (G6), and the value-blanking forms (Q3), each with the control
-# that shows it can fail.
+# Test plan: field-name table, fuzz properties, never-raises and
+# no-mutation guarantees, and the value-blanking forms, each with the
+# control that shows it can fail.
 # ---------------------------------------------------------------------------
 
 _NAMES_TABLE = [
@@ -468,12 +571,20 @@ _NAMES_TABLE = [
     ("foreign_key", False),
     ("serverkey", False),
     ("alert_key", False),
+    # min/max/num prefix exemption applies to the first name segment only
+    # (min_token_length above already covers the exempt case)
+    ("minio_secret_key", True),
+    ("minio_root_password", True),
+    # pass, pwd, and passwd as secret suffixes
+    ("db_pass", True),
+    ("db_pwd", True),
+    ("user_passwd", True),
 ]
 
 
 @pytest.mark.parametrize("name,expected", _NAMES_TABLE)
 def test_is_secret_field_names_table(name, expected):
-    """Q4's full field-name contract, both sides: every listed secret name
+    """The full field-name contract, both sides: every listed secret name
     is caught, and every listed exemption or fixed false positive is not."""
     from derhost._redact import is_secret_field
 
@@ -481,10 +592,10 @@ def test_is_secret_field_names_table(name, expected):
 
 
 def test_redact_secrets_never_raises_on_pathological_nesting():
-    """G6: deep nesting, a non-string key, and a tuple of dicts must not
-    raise. The control (deep nesting alone) raises RecursionError at
-    b7cb58d, per redact_secrets_in_text's caller-side json.loads/walk having
-    no depth guard."""
+    """Deep nesting, a non-string key, and a tuple of dicts must not raise.
+    The control (deep nesting alone) raises RecursionError against the old
+    redact_secrets_in_text's caller-side json.loads/walk, which had no depth
+    guard."""
     from derhost._redact import redact_secrets
 
     deep = current = {}
@@ -503,8 +614,8 @@ def test_redact_secrets_never_raises_on_pathological_nesting():
 
 
 def test_redact_secrets_does_not_mutate_its_input():
-    """G6: redact_secrets is copy-on-read. The wire payload (and anything
-    else the caller still holds after logging) must be unchanged."""
+    """redact_secrets is copy-on-read. The wire payload (and anything else
+    the caller still holds after logging) must be unchanged."""
     from derhost._redact import redact_secrets
 
     payload = {"token": MARKER, "nested": {"password": MARKER, "method": "echo"}, "items": [1, 2, {"key": MARKER}]}
@@ -554,8 +665,8 @@ def _secret_leaves(value, under_secret_key=False):
 
 
 def test_fuzz_json_no_secret_prefix_survives_redact_text_or_redact_secrets():
-    """G2: over 2000 seeded JSON values, no 6-character prefix of a value
-    under a secret-named key survives redact_text(json.dumps(v)) or
+    """Over 2000 seeded JSON values, no 6-character prefix of a value under
+    a secret-named key survives redact_text(json.dumps(v)) or
     str(redact_secrets(v)). The identity-swap control (redaction skipped)
     must report leaks, proving the check can fail."""
     from derhost._redact import redact_secrets, redact_text
@@ -594,10 +705,10 @@ _KEY_VALUE_FORMS = (
 
 
 def test_fuzz_text_nothing_survives_a_secret_separator_regardless_of_quote_noise():
-    """G3: 2000 seeded quote-noise prefixes across 5 key forms; nothing
-    after a secret-named separator survives, whatever quotes came before.
-    The identity-swap control (redact_text replaced with a no-op) must
-    report leaks, same as the odd-quote regression at b7cb58d did."""
+    """2000 seeded quote-noise prefixes across 5 key forms; nothing after a
+    secret-named separator survives, whatever quotes came before. The
+    identity-swap control (redact_text replaced with a no-op) must report
+    leaks, the same way an earlier odd-quote regression did."""
     from derhost._redact import redact_text
 
     rng = random.Random(20260925)
@@ -677,7 +788,7 @@ def _case_container(secret):
 
 @pytest.mark.parametrize("case_name", sorted(_BLANKING_CASES))
 def test_redact_known_secret_values_blanks_every_form(case_name):
-    """Q3: every form a secret can render as (literal, JSON-escaped with and
+    """Every form a secret can render as (literal, JSON-escaped with and
     without ensure_ascii, repr, bytes repr and decode, a pydantic-style
     shortened repr, and a value nested inside a container) is blanked."""
     from derhost._redact import redact_known_secret_values
@@ -690,8 +801,90 @@ def test_redact_known_secret_values_blanks_every_form(case_name):
     assert secret[:8] not in result and secret[-8:] not in result, f"{case_name} leaked: {result!r}"
 
 
+def test_redact_known_secret_values_blanks_two_occurrences_and_keeps_the_rest():
+    """Item 1: the bounded head-and-tail match blanks every occurrence of a
+    shortened secret, not just the first, and leaves surrounding text alone.
+    An unbounded match would instead span from the first occurrence's head
+    all the way to the second occurrence's tail, swallowing the text
+    between them."""
+    from derhost._redact import redact_known_secret_values
+
+    secret = "s3cr3t-marker-abcdefghij-0123456789-longenough"
+    shortened = secret[:8] + "..." + secret[-8:]
+    text = f"token {shortened} expired at 12:00; resend token {shortened} after rotation"
+
+    result = redact_known_secret_values(text, {"token": secret})
+
+    assert secret not in result
+    assert "expired at 12:00" in result
+    assert "after rotation" in result
+    assert result.count("[REDACTED]") == 2
+
+
+def test_redact_known_secret_values_blanks_a_head_only_shortened_secret():
+    """Item 1: a secret shortened to its first part only, with no tail
+    shown, is still blanked. The head-and-tail match alone would never fire
+    here, since there is no tail to anchor on."""
+    from derhost._redact import redact_known_secret_values
+
+    secret = "s3cr3t-marker-headonly-0123456789-longenough"
+    shortened = secret[:8] + "..."
+    text = f"value was {shortened} and stayed that way"
+
+    result = redact_known_secret_values(text, {"token": secret})
+
+    assert secret[:8] not in result
+    assert "and stayed that way" in result
+
+
+def test_redact_known_secret_values_blanks_shortened_secret_with_backslash_in_head():
+    """Item 1: when a secret's first 8 characters need escaping (a quote, a
+    backslash), a display library shortens its own escaped repr, not the
+    raw text; anchoring on the raw secret's head alone misses this."""
+    from derhost._redact import redact_known_secret_values
+
+    secret = 'ab"cd\\ef01gh"secretval-74chars-of-pydantic-style-token-material-abcdefgh'
+    escaped = repr(secret)[1:-1]
+    shortened = escaped[:8] + "..." + escaped[-8:]
+    text = f"1 validation error\ninput_value='{shortened}'"
+
+    result = redact_known_secret_values(text, {"token": secret})
+
+    assert secret[:8] not in result
+    assert secret[-8:] not in result
+
+
+# Bound justified by measurement: the head-and-tail match is bounded to
+# _MAX_SHORTENED_SPAN characters, so it stays close to linear in the input
+# size instead of the quadratic behavior an unbounded ".*" showed on
+# adversarial input. A dense repeat of the head with no tail nearby (one
+# match attempt every 20 characters) measured 3.7s on a 512 KB text at the
+# head this fixes, and 0.03s on the same host with the bounded match.
+_VALUE_BLANKING_TIME_BOUND_SECONDS = 1.0
+_VALUE_BLANKING_SHAPE_SIZE = 512 * 1024
+
+
+def test_redact_known_secret_values_value_blanking_stays_within_time_bound():
+    """Item 1: a 512 KB error text carrying a dense repeat of a shortened
+    secret's head, with no matching tail nearby, must not make the bounded
+    match quadratic."""
+    from derhost._redact import redact_known_secret_values
+
+    secret = "abcdefgh" + "z" * 30 + "12345678"
+    near_miss = "abcdefgh" + "x" * 12
+    text = near_miss * (_VALUE_BLANKING_SHAPE_SIZE // len(near_miss))
+
+    start = time.monotonic()
+    redact_known_secret_values(text, {"token": secret})
+    elapsed = time.monotonic() - start
+
+    assert elapsed < _VALUE_BLANKING_TIME_BOUND_SECONDS, (
+        f"value blanking took {elapsed:.3f}s, expected under {_VALUE_BLANKING_TIME_BOUND_SECONDS}s"
+    )
+
+
 def test_redact_known_secret_values_unchanged_with_no_payload_secrets():
-    """Q3 wire contract: no payload secrets means byte-identical text."""
+    """Wire contract: no payload secrets means byte-identical text."""
     from derhost._redact import redact_known_secret_values
 
     text = "boom short and eightlet failed with retry True"
@@ -700,7 +893,7 @@ def test_redact_known_secret_values_unchanged_with_no_payload_secrets():
 
 
 def test_redact_known_secret_values_blanks_eight_digit_int_secret():
-    """Q3: an int secret with 8+ decimal digits (e.g. a PIN-like value) is
+    """An int secret with 8+ decimal digits (e.g. a PIN-like value) is
     blanked; a shorter int is left alone (existing short-value test)."""
     from derhost._redact import redact_known_secret_values
 
@@ -729,9 +922,9 @@ def test_redact_secrets_redacts_a_bare_error_string():
 
 
 class TestExceptionMessagesWithContainerSecretsNeverLeak:
-    """Regression (round 3): a dict- or list-valued secret nested in an RPC
-    exception must not leak on the wire error or in the log, the same as a
-    scalar secret already does not."""
+    """Regression: a dict- or list-valued secret nested in an RPC exception
+    must not leak on the wire error or in the log, the same as a scalar
+    secret already does not."""
 
     @pytest.fixture(autouse=True)
     def setup_agent(self, message_bus_manager_fixture):
@@ -766,6 +959,49 @@ class TestExceptionMessagesWithContainerSecretsNeverLeak:
         data = response.json()
         assert MARKER_PREFIX not in json.dumps(data)
 
+        derhost_records = [r for r in caplog.records if is_derhost_record(r)]
+        assert derhost_records, "expected at least one record from a derhost logger"
+        assert_marker_absent(derhost_records, MARKER)
+
+
+class TestFastapiUnexpectedRpcErrorIsTextRedacted:
+    """Item 2: fastapi_message_bus.py's fallback "Unexpected error in RPC
+    processing" log, the one error log line outside the delta files, must
+    go through redact_text too."""
+
+    @pytest.fixture(autouse=True)
+    def setup_agent(self, message_bus_manager_fixture):
+        self.manager = message_bus_manager_fixture
+        self.manager.start_bus()
+        self.agent = self.manager.create_connected_agent("gs_redact_fastapi_target")
+        gevent.sleep(1)
+
+        yield
+
+        self.agent.disconnect()
+
+    def test_unexpected_rpc_error_log_is_text_redacted(self, caplog, monkeypatch):
+        """Force the fallback except branch by making the connection
+        manager's own send_message raise, with a secret-named pattern in
+        its text that is not part of any RPC payload."""
+
+        async def raising_send_message(*args, **kwargs):
+            raise RuntimeError(f"downstream auth failed, password: {MARKER}")
+
+        monkeypatch.setattr(self.manager.bus.manager, "send_message", raising_send_message)
+
+        base_url = self.manager.get_base_url()
+        rpc_data = {
+            "jsonrpc": "2.0",
+            "id": "gs_redact_fastapi_target",
+            "method": "some_method",
+            "params": {"kwargs": {}},
+        }
+
+        with caplog.at_level(logging.DEBUG):
+            response = httpx.post(f"{base_url}/gs", json=rpc_data, timeout=10.0)
+
+        assert response.status_code == 200
         derhost_records = [r for r in caplog.records if is_derhost_record(r)]
         assert derhost_records, "expected at least one record from a derhost logger"
         assert_marker_absent(derhost_records, MARKER)
