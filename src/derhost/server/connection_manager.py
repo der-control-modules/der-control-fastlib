@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
-from derhost._redact import redact_known_secret_values, redact_secrets, truncate_for_log
+from derhost._redact import redact_known_secret_values, redact_secrets, redact_text, truncate_for_log
 
 _log = logging.getLogger(__name__)
 
@@ -275,9 +275,12 @@ class ConnectionManager:
             # just for the log: this error text is also sent on to the
             # requesting client as this RPC's result.
             error = redact_known_secret_values(str(e), args, kwargs)
+            # The wire error (sent below) stays byte-identical apart from
+            # the value-blanking above; the structural key scan runs only
+            # for this log line, never on text sent to the caller.
             _log.error(
                 f"RPC request from {sender} to {peer}.{method}(args={redact_secrets(args)}, "
-                f"kwargs={redact_secrets(kwargs)}) failed: {error} [msg_id: {msg_id}]"
+                f"kwargs={redact_secrets(kwargs)}) failed: {redact_text(error)} [msg_id: {msg_id}]"
             )
             await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": error})
             self.clear_rpc_response(msg_id)

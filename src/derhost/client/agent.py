@@ -35,7 +35,6 @@ from derhost._redact import (
     is_secret_field as _is_secret_field,
     redact_known_secret_values as _redact_known_secret_values,
     redact_secrets as _redact_secrets,
-    redact_secrets_in_text as _redact_secrets_in_text,
 )
 from derhost.client import dualmethod
 
@@ -250,8 +249,15 @@ class RPC:
             try:
                 json.dumps(arg)
             except TypeError as e:
-                _log.error(f"RPC call failed: arg[{i}] is not JSON serializable: {arg} (type: {type(arg).__name__})")
-                raise TypeError(f"RPC arg[{i}] is not JSON serializable: {arg}") from e
+                # Redact for the raised message too, same as the kwarg case
+                # below: a caller's own `except Exception as e: log(f"...{e}")`
+                # would otherwise re-surface a secret this redaction exists
+                # to hide.
+                logged_arg = _redact_secrets(arg)
+                _log.error(
+                    f"RPC call failed: arg[{i}] is not JSON serializable: {logged_arg} (type: {type(arg).__name__})"
+                )
+                raise TypeError(f"RPC arg[{i}] is not JSON serializable: {logged_arg}") from e
 
         for key, val in kwargs.items():
             try:
@@ -3483,13 +3489,10 @@ class Agent:
     def __on_ws_message__(self, ws, message):
         """Internal callback when a WebSocket message is received."""
         try:
-            # Redact before logging: the raw message may carry a credential
-            # value (top-level fields, or kwargs.authentication before the
-            # delete below runs). String-level redaction, not a parse and
-            # reserialize, so this stays cheap on the WS receive hot path.
-            redacted_msg = _redact_secrets_in_text(message)
-            small_msg = get_smaller_print(redacted_msg, '"type":"rpc","method":"set_temperature_setpoints"')
-            if '"type":"rpc","method":"set_temperature_setpoints"' in redacted_msg:
+            # This check stays on the raw message text rather than a
+            # json.dumps of the parsed data below: it is a boolean that logs
+            # no content, and json.dumps spacing would not match this literal.
+            if '"type":"rpc","method":"set_temperature_setpoints"' in message:
                 _log.debug(f"Agent {self.identity} received set_temperature_setpoints RPC call")
 
             data = json.loads(message)
@@ -3498,7 +3501,13 @@ class Agent:
 
             self.received_messages.append(data)
 
-            _log.debug(f"Agent {self.identity} received data {small_msg}. ")
+            # Redact the parsed data rather than scanning raw text, and only
+            # when DEBUG is enabled: this is the WS receive hot path, and
+            # redaction should not cost anything when its result is never
+            # logged.
+            if _log.isEnabledFor(logging.DEBUG):
+                small_msg = get_smaller_print(_redact_secrets(data))
+                _log.debug(f"Agent {self.identity} received data {small_msg}. ")
 
             # Handle different message types
             msg_type = data.get("type")

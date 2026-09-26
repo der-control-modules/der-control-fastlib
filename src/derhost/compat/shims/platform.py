@@ -5,7 +5,7 @@ Provides: platform namespace as a proper package
 """
 
 # Import submodules to make them available as attributes
-from derhost._redact import redact_secrets
+from derhost._redact import redact_known_secret_values, redact_secrets, redact_text
 from derhost.client.jsonrpc import RemoteError
 from derhost.compat.shims import messaging as messaging_module, platform_agent, vip as vip_module
 
@@ -55,6 +55,13 @@ class AsyncCall:
             result = func(*args, **kwargs)
             _log.debug(f"AsyncCall.send() completed, result={redact_secrets(result)}")
             return result
-        except Exception as e:
-            _log.error(f"AsyncCall.send() failed calling {func}: {e}", exc_info=True)
+        except Exception:
+            # exc_info is not used here: it would reattach the traceback
+            # unredacted. The formatted traceback (which repeats the
+            # exception's own text) is blanked against the call's own args
+            # and kwargs first, then structurally redacted, before logging.
+            import traceback
+
+            tb_text = redact_text(redact_known_secret_values(traceback.format_exc(), args, kwargs))
+            _log.error(f"AsyncCall.send() failed calling {func}: {tb_text}")
             raise
