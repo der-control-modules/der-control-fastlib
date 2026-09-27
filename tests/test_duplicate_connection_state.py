@@ -14,6 +14,7 @@ import gevent
 import pytest
 
 from derhost.client.agent import Agent
+from derhost.server.connection_manager import ConnectionManager
 
 
 class TestDuplicateConnectionDoesNotEvictLiveAgent:
@@ -95,3 +96,31 @@ class TestDuplicateConnectionDoesNotEvictLiveAgent:
         assert identity in connection_manager.active_connections
 
         agent2.disconnect()
+
+
+class TestDisconnectGuardRejectsStaleSocket:
+    """Issue #80: `disconnect` must only tear down state for the socket it names.
+
+    Unlike the class above, this drives `ConnectionManager.disconnect`
+    directly, with no websocket or event loop involved, so it fails when the
+    ownership check alone is removed even if every early-return guard
+    upstream of it stays intact.
+    """
+
+    def test_disconnect_with_a_stale_socket_leaves_the_live_one_registered(self):
+        manager = ConnectionManager()
+        identity = "ownership-guard-agent"
+        live_socket = object()
+        stale_socket = object()
+
+        manager.active_connections[identity] = live_socket
+        manager.agent_rpc_methods[identity] = [{"name": "ping", "params": []}]
+        manager.add_prefix_subscription(identity, "devices/", lambda *args: None)
+
+        # A stale socket (refused, or superseded by a later reconnect before
+        # this call ran) must not evict the identity's live registration.
+        manager.disconnect(identity, stale_socket)
+
+        assert manager.active_connections[identity] is live_socket
+        assert manager.agent_rpc_methods[identity] == [{"name": "ping", "params": []}]
+        assert identity in manager.prefix_subscriptions
