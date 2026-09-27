@@ -62,13 +62,16 @@ class ConnectionManager:
         -------
             True if `websocket` was accepted and registered for `identity`.
             False if it was refused because `identity` already holds a
-            CONNECTED socket; the caller must not read from a refused
+            non-DISCONNECTED socket; the caller must not read from a refused
             socket, since it was never accepted (der-control-modules/der-control-fastlib#80).
         """
-        # VOLTTRON compatibility: Only one agent per identity allowed
+        # VOLTTRON compatibility: Only one agent per identity allowed. Any
+        # state short of DISCONNECTED still owns the identity (#83 decision
+        # 5): a socket whose accept() has not finished (CONNECTING) must
+        # also be refused, or a concurrent connect can slip in.
         existing_ws = self.active_connections.get(identity)
         if existing_ws is not None:
-            if existing_ws.client_state == WebSocketState.CONNECTED:
+            if existing_ws.client_state != WebSocketState.DISCONNECTED:
                 _log.warning(f"Agent {identity} already connected - refusing new connection")
                 # Refuse before accept, via the denial-response extension, so
                 # the reason reaches the wire as a named HTTP 409 instead of
@@ -87,11 +90,19 @@ class ConnectionManager:
 
         # Reserve the identity synchronously, before any await: a concurrent
         # duplicate must see this entry and be refused above, never both
-        # pass the CONNECTED check before either registers.
+        # pass the DISCONNECTED check before either registers.
         self.active_connections[identity] = websocket
         self.prefix_subscriptions[identity] = {}
 
-        await websocket.accept()
+        try:
+            await websocket.accept()
+        except BaseException:
+            # A failed accept must release the reservation now (#83 decision
+            # 5): otherwise this identity is refused with 409 until the
+            # server restarts, since the entry never reaches DISCONNECTED on
+            # its own.
+            self.disconnect(identity, websocket)
+            raise
 
         # Start the status reporter when the first connection is made
         if not self._status_reporter_started:
@@ -125,17 +136,27 @@ class ConnectionManager:
         }
         _log.debug(f"Client {identity} disconnected")
 
-    async def send_message(self, identity: str, message: dict):
-        """Send a message to a specific client."""
+    async def send_message(self, identity: str, message: dict) -> bool:
+        """Send a message to a specific client.
+
+        Returns
+        -------
+            True only when `send_json` completed; existing callers that
+            ignore the return value are unaffected. False when there is no
+            live socket to send to (#83 decision 4).
+        """
         if identity in self.active_connections:
             websocket = self.active_connections[identity]
             if websocket.client_state != WebSocketState.DISCONNECTED:
                 _log.debug(f"Sending message to {identity}: {truncate_debug_message(message)}")
                 await websocket.send_json(message)
+                return True
             else:
                 _log.debug(f"Cannot send message to {identity}, websocket is disconnected")
+                return False
         else:
             _log.debug(f"Cannot send message to {identity}, client not found")
+            return False
 
     async def broadcast(self, message: dict):
         """Broadcast a message to all connected clients."""
@@ -237,8 +258,36 @@ class ConnectionManager:
                 future.cancel()
             _log.debug(f"Cleared RPC response future for msg_id {msg_id}")
 
-    async def handle_rpc(self, sender: str, peer: str, method: str, args: list, kwargs: dict, msg_id: str):
-        """Handle RPC request between clients."""
+    async def _send_to_socket_if_current(self, identity: str, websocket: WebSocket, message: dict) -> None:
+        """Send `message` on `websocket`, only while it is still the socket
+        registered for `identity`.
+
+        Guards every reply `handle_rpc` sends to its caller (#83 decision
+        3.3): the caller may have reconnected under the same identity on a
+        new socket by the time a peer's answer or a forward failure comes
+        back, and a stale reply must not reach the replacement.
+        """
+        if self.active_connections.get(identity) is websocket:
+            await websocket.send_json(message)
+        else:
+            _log.debug(f"Not sending to {identity}: socket is no longer the current one")
+
+    async def handle_rpc(
+        self,
+        sender: str,
+        sender_ws: WebSocket,
+        peer: str,
+        method: str,
+        args: list,
+        kwargs: dict,
+        msg_id: str,
+    ) -> None:
+        """Handle RPC request between clients.
+
+        Every reply to the caller goes to `sender_ws` through
+        `_send_to_socket_if_current` (#83 decision 3.3), never by an
+        identity lookup that could resolve to a different, later socket.
+        """
         # Log at INFO level with full parameters for visibility
         _log.info(
             f"RPC request from {sender} to {peer}: {method}(args={redact_secrets(args)}, "
@@ -251,13 +300,8 @@ class ConnectionManager:
 
         if peer not in self.active_connections:
             _log.debug(f"RPC target {peer} not found")
-            await self.send_message(
-                sender,
-                {
-                    "type": "rpc_error",
-                    "msg_id": msg_id,
-                    "error": f"Peer {peer} not found",
-                },
+            await self._send_to_socket_if_current(
+                sender, sender_ws, {"type": "rpc_error", "msg_id": msg_id, "error": f"Peer {peer} not found"}
             )
             return
 
@@ -274,46 +318,67 @@ class ConnectionManager:
         # Register a future for the response
         future = self.register_rpc_response_future(msg_id)
 
-        # Send to the target peer
-        _log.debug(f"Sending RPC request to {peer}")
-        await self.send_message(peer, rpc_message)
-
-        # Wait for response with timeout
         try:
-            _log.debug(f"Waiting for RPC response for msg_id {msg_id}")
-            response = await asyncio.wait_for(future, 30.0)  # 30 second timeout for BACnet operations
-            _log.info(f"RPC response from {peer} to {sender}: {method} returned {redact_secrets(response)}")
-            _log.debug(f"Received RPC response for msg_id {msg_id}: {truncate_debug_message(response)}")
-            await self.send_message(sender, {"type": "rpc_response", "msg_id": msg_id, "result": response})
-        except asyncio.TimeoutError:
-            _log.warning(
-                f"RPC request from {sender} to {peer}.{method}(args={redact_secrets(args)}, "
-                f"kwargs={redact_secrets(kwargs)}) timed out after 30s [msg_id: {msg_id}]"
-            )
-            _log.debug(f"RPC request timed out for msg_id {msg_id}")
-            await self.send_message(
-                sender,
-                {
-                    "type": "rpc_error",
-                    "msg_id": msg_id,
-                    "error": "RPC request timed out",
-                },
-            )
-            self.clear_rpc_response(msg_id)
-        except Exception as e:
-            # Handle exceptions from RPC method execution. Redacted here, not
-            # just for the log: this error text is also sent on to the
-            # requesting client as this RPC's result.
-            error = redact_known_secret_values(str(e), args, kwargs)
-            # The wire error (sent below) stays byte-identical apart from
-            # the value-blanking above; the structural key scan runs only
-            # for this log line, never on text sent to the caller.
-            _log.error(
-                f"RPC request from {sender} to {peer}.{method}(args={redact_secrets(args)}, "
-                f"kwargs={redact_secrets(kwargs)}) failed: {redact_text(error)} [msg_id: {msg_id}]"
-            )
-            await self.send_message(sender, {"type": "rpc_error", "msg_id": msg_id, "error": error})
-            self.clear_rpc_response(msg_id)
+            # Send to the target peer. A failed forward (#83 decision 4)
+            # answers the caller instead of leaving the future to time out.
+            forward_exc: Exception | None = None
+            delivered = False
+            try:
+                _log.debug(f"Sending RPC request to {peer}")
+                delivered = await self.send_message(peer, rpc_message)
+            except Exception as e:
+                forward_exc = e
+
+            if forward_exc is not None or not delivered:
+                _log.warning(
+                    f"RPC forward from {sender} to {peer}.{method} failed [msg_id: {msg_id}]",
+                    exc_info=forward_exc,
+                )
+                await self._send_to_socket_if_current(
+                    sender, sender_ws, {"type": "rpc_error", "msg_id": msg_id, "error": f"Peer {peer} unreachable"}
+                )
+                return
+
+            # Wait for response with timeout
+            try:
+                _log.debug(f"Waiting for RPC response for msg_id {msg_id}")
+                response = await asyncio.wait_for(future, 30.0)  # 30 second timeout for BACnet operations
+                _log.info(f"RPC response from {peer} to {sender}: {method} returned {redact_secrets(response)}")
+                _log.debug(f"Received RPC response for msg_id {msg_id}: {truncate_debug_message(response)}")
+                await self._send_to_socket_if_current(
+                    sender, sender_ws, {"type": "rpc_response", "msg_id": msg_id, "result": response}
+                )
+            except asyncio.TimeoutError:
+                _log.warning(
+                    f"RPC request from {sender} to {peer}.{method}(args={redact_secrets(args)}, "
+                    f"kwargs={redact_secrets(kwargs)}) timed out after 30s [msg_id: {msg_id}]"
+                )
+                _log.debug(f"RPC request timed out for msg_id {msg_id}")
+                await self._send_to_socket_if_current(
+                    sender, sender_ws, {"type": "rpc_error", "msg_id": msg_id, "error": "RPC request timed out"}
+                )
+            except Exception as e:
+                # Handle exceptions from RPC method execution. Redacted here, not
+                # just for the log: this error text is also sent on to the
+                # requesting client as this RPC's result.
+                error = redact_known_secret_values(str(e), args, kwargs)
+                # The wire error (sent below) stays byte-identical apart from
+                # the value-blanking above; the structural key scan runs only
+                # for this log line, never on text sent to the caller.
+                _log.error(
+                    f"RPC request from {sender} to {peer}.{method}(args={redact_secrets(args)}, "
+                    f"kwargs={redact_secrets(kwargs)}) failed: {redact_text(error)} [msg_id: {msg_id}]"
+                )
+                await self._send_to_socket_if_current(
+                    sender, sender_ws, {"type": "rpc_error", "msg_id": msg_id, "error": error}
+                )
+        finally:
+            # Release this call's own future even on asyncio.CancelledError,
+            # which `except Exception` above never catches (#83 decision
+            # 3.2). The `is future` check means this never clears a later
+            # caller's own future registered under the same msg_id.
+            if self.rpc_responses.get(msg_id) is future:
+                del self.rpc_responses[msg_id]
 
     def _start_status_reporter(self):
         """Start the background task to report connection status every 60s."""
