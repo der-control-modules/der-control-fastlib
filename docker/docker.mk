@@ -14,8 +14,6 @@ SERVER_COMPOSE := $(DOCKER_DIR)/server/docker-compose.yml
 SERVER_PROJECT_DIR := $(DOCKER_DIR)/server
 DERHOST_STACK_PORT := 5410
 DERHOST_HEALTHY_WAIT_SECS := 60
-override OTHER_COMPOSE_FILES := $(filter-out $(SERVER_COMPOSE),$(wildcard $(DOCKER_DIR)/*/docker-compose.yml))
-export OTHER_COMPOSE_FILES
 
 # DERHOST_PUBLISH_HOST, C, EXPECTED and DERHOST_CHECK_BASE_URL are set by the
 # caller (environment or `make target VAR=value`) and are not trusted.
@@ -41,6 +39,15 @@ export OTHER_COMPOSE_FILES
 # exported, which changes its own $(origin) from "undefined" to "file" from
 # this point on. Reading $(origin) after that would see every unsupplied
 # name as "supplied, empty" and always pass it through.
+#
+# This block runs first, before anything below that calls $(shell ...):
+# unlike $(wildcard), a $(shell ...) call forks a real subprocess, so Make
+# must first compute the environment it hands that subprocess, which means
+# re-expanding any still-exported command-line variable's text and running
+# an embedded `$(shell touch ...)` payload as a side effect, the same
+# auto-export mechanism `unexport` exists to stop. Placing the whitespace
+# check below ahead of `unexport` would reopen that hole for every
+# invocation, whether or not the check itself ever reads these names.
 DERHOST_PUBLISH_HOST_ORIGIN := $(origin DERHOST_PUBLISH_HOST)
 C_ORIGIN := $(origin C)
 EXPECTED_ORIGIN := $(origin EXPECTED)
@@ -48,6 +55,21 @@ DERHOST_CHECK_BASE_URL_ORIGIN := $(origin DERHOST_CHECK_BASE_URL)
 unexport DERHOST_PUBLISH_HOST C EXPECTED DERHOST_CHECK_BASE_URL
 shell-safe = '$(subst ','\'',$(value $(1)))'
 pass-through = $(if $(filter-out undefined,$($(1)_ORIGIN)),$(1)=$(call shell-safe,$(1)))
+
+# $(wildcard) joins its matches with a single space, so a directory name that
+# itself contains whitespace is indistinguishable, once joined, from two
+# separate directories: the shell `for f in $$OTHER_COMPOSE_FILES` loops
+# below would then silently split one stack into two nonexistent paths
+# instead of failing. Checked with the shell's own glob (which, unlike
+# $(wildcard), keeps each match as one word) before that ambiguity can occur,
+# so every target refuses the same way rather than only the ones that loop.
+_DOCKER_DIRS_WITH_WHITESPACE := $(shell for d in $(DOCKER_DIR)/*/; do printf '%s\n' "$$d"; done | grep '[[:space:]]')
+ifneq ($(strip $(_DOCKER_DIRS_WITH_WHITESPACE)),)
+$(error docker.mk: refusing, a docker/ subdirectory name contains whitespace: $(_DOCKER_DIRS_WITH_WHITESPACE))
+endif
+
+override OTHER_COMPOSE_FILES := $(filter-out $(SERVER_COMPOSE),$(wildcard $(DOCKER_DIR)/*/docker-compose.yml))
+export OTHER_COMPOSE_FILES
 
 # Resolves the host address docker compose will actually publish on, by
 # asking `docker compose config` (which applies compose's own precedence:
@@ -163,8 +185,15 @@ opener = urllib.request.build_opener(_NoRedirect)
 
 try:
     with opener.open(f"{base}/connections", timeout=10) as response:
-        if 300 <= response.status < 400:
-            print(f"Error: {base}/connections redirected ({response.status}), refusing to follow", file=sys.stderr)
+        status = response.status
+        if 300 <= status < 400:
+            print(f"Error: {base}/connections redirected ({status}), refusing to follow", file=sys.stderr)
+            sys.exit(1)
+        # _NoRedirect.http_response returns every status as-is, so a 4xx or
+        # 5xx never raises on its own; checked here instead, after the
+        # redirect case above so a 3xx keeps its own message.
+        if not 200 <= status < 300:
+            print(f"Error: {base}/connections returned status {status}", file=sys.stderr)
             sys.exit(1)
         body = json.load(response)
 except (urllib.error.URLError, OSError, ValueError) as exc:
@@ -215,7 +244,7 @@ stack-up: ## Start the stack: C=server or C=all (server first, then any other do
 		echo "Error: set C=server or C=all (got C=$$c)" >&2; \
 		exit 1; \
 	fi
-	$(MAKE) --no-print-directory stack-preflight
+	$(call pass-through,DERHOST_PUBLISH_HOST) $(MAKE) --no-print-directory stack-preflight
 	@$(call pass-through,DERHOST_PUBLISH_HOST) docker compose -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) up -d --build
 	$(MAKE) --no-print-directory _stack-wait-healthy
 	@c=$(call shell-safe,C); \
