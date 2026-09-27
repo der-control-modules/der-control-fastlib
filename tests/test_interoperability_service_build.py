@@ -1,9 +1,11 @@
-"""docker/interoperability-service/check-clean.sh: refuse a dirty agent
-checkout unless ALLOW_DIRTY=1 (#68)."""
+"""docker/interoperability-service build gating: check-clean.sh's dirty-
+checkout refusal, build.sh's archive isolation and labeling, and
+docker-compose.yml's required DER_AGENT_SRC (#68)."""
 
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -189,7 +191,9 @@ def test_build_never_ships_an_uncommitted_file(agent_checkout: Path, tmp_path: P
     assert (log_dir / "leaked.txt").read_text().strip() == "absent"
 
 
-def test_build_labels_a_dirty_build_distinctly(agent_checkout: Path, tmp_path: Path) -> None:
+def test_build_label_never_claims_dirty_content_it_does_not_ship(agent_checkout: Path, tmp_path: Path) -> None:
+    """git archive always exports HEAD, dirty checkout or not (#68 F2), so an
+    ALLOW_DIRTY=1 label must not claim dirty content the image never ships."""
     clean_result, clean_log = _run_build_sh(tmp_path / "clean-run", cwd=tmp_path, der_agent_src=str(agent_checkout))
     assert clean_result.returncode == 0, clean_result.stderr
     clean_revision = (clean_log / "agent_revision.txt").read_text()
@@ -201,4 +205,46 @@ def test_build_labels_a_dirty_build_distinctly(agent_checkout: Path, tmp_path: P
     )
     assert dirty_result.returncode == 0, dirty_result.stderr
     dirty_revision = (dirty_log / "agent_revision.txt").read_text()
-    assert dirty_revision == f"{clean_revision}-dirty", dirty_revision
+    assert dirty_revision == clean_revision, dirty_revision
+
+
+# --- docker-compose.yml: DER_AGENT_SRC has no default (#68 F4) -------------
+#
+# These call the real docker CLI's "compose ... config", which only resolves
+# and prints the file; it builds, creates, and starts nothing.
+
+COMPOSE_FILE = REPO_ROOT / "docker" / "interoperability-service" / "docker-compose.yml"
+
+
+def _run_compose_config(der_agent_src: str | None) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    if der_agent_src is None:
+        env.pop("DER_AGENT_SRC", None)
+    else:
+        env["DER_AGENT_SRC"] = der_agent_src
+    return subprocess.run(
+        ["docker", "compose", "-f", str(COMPOSE_FILE), "config"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="requires the docker CLI")
+def test_compose_refuses_to_resolve_without_der_agent_src() -> None:
+    # A developer running compose directly, without build.sh, must not
+    # silently resolve a raw agent_src default (#68 F4): compose fails
+    # before any build, create, or start is attempted.
+    result = _run_compose_config(None)
+    assert result.returncode != 0
+    assert "DER_AGENT_SRC" in result.stderr
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="requires the docker CLI")
+def test_compose_resolves_once_der_agent_src_is_set() -> None:
+    # Control: the refusal above is a missing-variable check, not a broken
+    # compose file; setting the variable must let resolution proceed.
+    result = _run_compose_config("unused")
+    assert result.returncode == 0, result.stderr
+    assert "agent_src:" in result.stdout
