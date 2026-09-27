@@ -25,17 +25,15 @@ main() {
 
   export AGENT_REVISION
   AGENT_REVISION="$(git -C "${agent_src}" rev-parse HEAD)"
-  if [ "${ALLOW_DIRTY:-0}" = "1" ]; then
-    AGENT_REVISION="${AGENT_REVISION}-dirty"
-  fi
 
   archive_dir="$(mktemp -d)"
   trap 'rm -rf "${archive_dir}"' EXIT
   # git archive exports the committed tree only, so a gitignored or
   # otherwise uncommitted file in agent_src (an ALLOW_DIRTY=1 build allows
   # exactly that) never reaches the build context or the image (#68).
-  # AGENT_REVISION above is read before this, from the checkout, since the
-  # archive itself carries no git history to read a HEAD from.
+  # AGENT_REVISION is always this HEAD sha with no suffix: ALLOW_DIRTY only
+  # bypasses check-clean.sh's refusal to build, it never changes what gets
+  # archived, so a "-dirty" label would claim content the image never ships.
   git -C "${agent_src}" archive HEAD -- src/interoperability | tar -x -C "${archive_dir}"
   export DER_AGENT_SRC="${archive_dir}"
 

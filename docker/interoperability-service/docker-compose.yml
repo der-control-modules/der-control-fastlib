@@ -12,7 +12,7 @@ services:
       context: .
       dockerfile: Dockerfile
       additional_contexts:
-        agent_src: ${DER_AGENT_SRC:-../../../interoperability-service}
+        agent_src: ${DER_AGENT_SRC:?run build.sh}
       args:
         AGENT_REVISION: ${AGENT_REVISION:-unknown}
     image: derhost-interoperability-service:local
@@ -27,7 +27,7 @@ services:
       - no-new-privileges:true
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=64m
     mem_limit: 256m
     pids_limit: 100
     restart: unless-stopped
