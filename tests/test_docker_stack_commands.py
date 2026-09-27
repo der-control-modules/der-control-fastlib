@@ -135,10 +135,21 @@ def _compose_config_host_ip(overrides: dict[str, str] | None = None) -> str:
     return json.loads(result.stdout)["services"]["derhost-server"]["ports"][0]["host_ip"]
 
 
-def test_preflight_agrees_with_compose_on_an_exported_env_value() -> None:
-    result = _run_make("stack-preflight", overrides={"DERHOST_PUBLISH_HOST": "0.0.0.0"})
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == _compose_config_host_ip({"DERHOST_PUBLISH_HOST": "0.0.0.0"}) == "0.0.0.0"
+def test_preflight_agrees_with_compose_on_an_export_prefixed_env_line() -> None:
+    # docker compose strips a leading "export " keyword from a .env line; a
+    # parser that instead treats "export DERHOST_PUBLISH_HOST" as the whole
+    # key (a naive key, _, value = line.partition("=")) never matches
+    # DERHOST_PUBLISH_HOST and falls through to its own default, 127.0.0.1,
+    # while compose resolves 0.0.0.0.
+    env_path = REPO_ROOT / "docker" / "server" / ".env"
+    assert not env_path.exists(), "a real .env here would be clobbered by this test"
+    env_path.write_text("export DERHOST_PUBLISH_HOST=0.0.0.0\n")
+    try:
+        result = _run_make("stack-preflight")
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == _compose_config_host_ip() == "0.0.0.0"
+    finally:
+        env_path.unlink()
 
 
 def test_preflight_agrees_with_compose_on_a_duplicate_env_file_key() -> None:
@@ -285,6 +296,36 @@ def test_stack_check_zero_expected_exits_zero(connections_server: http.server.HT
     assert result.stdout.strip() == ""
 
 
+def test_stack_check_fails_on_a_non_2xx_status() -> None:
+    class _UnauthorizedHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            body = json.dumps({"error": "unauthorized"}).encode()
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _UnauthorizedHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        # EXPECTED="" is smoke.sh's own case: with no identity to check, a
+        # reader of the (empty, but validly parsed) body would exit 0 even
+        # though the request itself failed.
+        result = _run_make("stack-check", overrides={"DERHOST_CHECK_BASE_URL": base_url, "EXPECTED": ""})
+        assert result.returncode != 0
+        assert "returned status 401" in result.stderr
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
 def test_stack_check_does_not_follow_a_redirect() -> None:
     class _RedirectHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
@@ -339,19 +380,24 @@ def test_stack_check_default_follows_env_file() -> None:
     env_path = REPO_ROOT / "docker" / "server" / ".env"
     assert not env_path.exists(), "a real .env here would be clobbered by this test"
     host = "127.0.0.7"
-    env_path.write_text(f"DERHOST_PUBLISH_HOST={host}\n")
     _ConnectionsHandler.connected_identities = {"agent.one"}
+    # .env is written only after the bind below succeeds: if the bind fails
+    # (the address or port is already taken), nothing has written .env yet,
+    # so there is nothing left behind for a next run's own guard to trip on.
     server = http.server.HTTPServer((host, STACK_PORT), _ConnectionsHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    env_path.write_text(f"DERHOST_PUBLISH_HOST={host}\n")
     try:
-        result = _run_make("stack-check", overrides={"EXPECTED": "agent.one"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "agent.one: connected" in result.stdout
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            result = _run_make("stack-check", overrides={"EXPECTED": "agent.one"})
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "agent.one: connected" in result.stdout
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            server.server_close()
     finally:
-        server.shutdown()
-        thread.join(timeout=5)
-        server.server_close()
         env_path.unlink()
 
 
