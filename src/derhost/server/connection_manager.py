@@ -57,7 +57,8 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket, identity: str) -> bool:
         """Connect a client to the message bus.
 
-        Returns:
+        Returns
+        -------
             True if `websocket` was accepted and registered for `identity`.
             False if it was refused because `identity` already holds a
             CONNECTED socket; the caller must not read from a refused
