@@ -25,6 +25,11 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 256m
+    pids_limit: 100
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python3", "-c", "import os,sys; sys.exit(0 if any(b'start-legacy.py' in open(f'/proc/{p}/cmdline','rb').read() for p in os.listdir('/proc') if p.isdigit()) else 1)"]

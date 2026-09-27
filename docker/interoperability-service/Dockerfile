@@ -6,8 +6,8 @@
 # (the named build context agent_src, see build.sh), never a config file,
 # and never installs the agent's own package or volttron-core: installing
 # volttron-core would switch agent.py's import guard to the modern
-# volttron.client.* path, which fastlib's compatibility shim (#69) does
-# not cover.
+# volttron.client.* path, which fastlib's compatibility shim does not
+# cover.
 
 FROM derhost-base:local
 

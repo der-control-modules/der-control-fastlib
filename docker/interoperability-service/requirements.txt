@@ -2,7 +2,7 @@
 # resource.py, mapping_engine.py, transform_registry.py,
 # transform_parser.py). volttron-core is intentionally excluded: installing
 # it switches agent.py's import guard to the modern volttron.client.* path,
-# which fastlib's compatibility shim does not cover (#68 design doc, Q2).
+# which fastlib's compatibility shim does not cover.
 # Ranges mirror interoperability-service's pyproject.toml; a bare poetry
 # version pin ("x.y.z") is a caret constraint, ">=x.y.z,<(x+1).0.0".
 convtools>=1.14.7
