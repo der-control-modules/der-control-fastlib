@@ -17,10 +17,15 @@ import pytest
 from derhost.client.agent import CronTimer
 
 
-def _oracle_get_next(minutes, hours, days_of_month, months, days_of_week, now):
-    """The pre-#32 minute-by-minute scan, kept as the equivalence oracle."""
+def _oracle_get_next(minutes, hours, days_of_month, months, days_of_week, now, steps=None):
+    """The pre-#32 minute-by-minute scan, kept as the equivalence oracle.
+
+    ``steps``, when given a one-item list, receives the number of minutes
+    the scan walked, so a caller can assert on work done instead of on
+    wall-clock time (issue #98: elapsed time depends on the host).
+    """
     next_time = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
-    for _ in range(1000000):
+    for i in range(1000000):
         if (
             next_time.month in months
             and next_time.day in days_of_month
@@ -28,8 +33,12 @@ def _oracle_get_next(minutes, hours, days_of_month, months, days_of_week, now):
             and next_time.minute in minutes
             and (next_time.weekday() + 1) % 7 in days_of_week
         ):
+            if steps is not None:
+                steps[0] = i + 1
             return next_time
         next_time += timedelta(minutes=1)
+    if steps is not None:
+        steps[0] = 1000000
     raise ValueError("Could not find next scheduled time within reasonable limits")
 
 
@@ -81,16 +90,20 @@ RARE_CASES = [
 
 @pytest.mark.parametrize(("pattern", "start", "expected"), RARE_CASES)
 def test_calendar_search_finds_rare_pattern_the_oracle_misses(pattern, start, expected):
-    # Control: the oracle cannot find the match within its window and raises
-    # after a real, measurable delay.
-    oracle_start = time.perf_counter()
+    # Control: the oracle walks its full 1,000,000-minute window without a
+    # match, proven by a work count rather than elapsed time (issue #98: a
+    # fast CI runner cleared the old 0.5s bound in under 0.4s).
+    oracle_steps = [0]
     with pytest.raises(ValueError):
-        _oracle_get_next(*_components(pattern), start)
-    assert time.perf_counter() - oracle_start > 0.5
+        _oracle_get_next(*_components(pattern), start, steps=oracle_steps)
+    assert oracle_steps[0] == 1000000
 
+    # The calendar search itself stays bounded by a generous wall-clock
+    # ceiling: it never needs to touch the oracle's 1,000,000-minute path,
+    # so even a loaded host clears this without the search being fast.
     search_start = time.perf_counter()
     result = CronTimer(pattern).get_next(start)
-    assert time.perf_counter() - search_start < 0.1
+    assert time.perf_counter() - search_start < 5.0
     assert result == expected
     assert result.tzinfo is None
 
