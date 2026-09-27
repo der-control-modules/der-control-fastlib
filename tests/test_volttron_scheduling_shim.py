@@ -44,12 +44,8 @@ def test_cron_fires_on_schedule(monkeypatch, message_bus_manager_fixture):
     """cron() from the shim schedules a cron event that fires."""
     Agent, cron, _periodic = _import_compat()
 
-    # ScheduledEvent (agent.py) takes the fire time from next_fire_epoch,
-    # not from get_next: next_fire_epoch uses get_next only to pick a day,
-    # then scans whole-minute boundaries on its own (issue #79). Patching
-    # get_next alone no longer shortens the wait, so this patches the
-    # method the scheduler actually calls for both the initial schedule and
-    # every reschedule after a fire.
+    # ScheduledEvent uses next_fire_epoch for fire times.
+    # Patch it to make the test's short interval work.
     def fast_next_fire_epoch(self, after):
         return after + 0.1
 
