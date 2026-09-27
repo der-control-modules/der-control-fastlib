@@ -625,8 +625,12 @@ def test_stack_down_passes_server_project_name(docker_stub: Path, monkeypatch: p
     _run_make("stack-down")
     calls = _stub_calls(docker_stub.read_text())
     down_calls = _compose_calls(calls, "down")
-    assert down_calls, calls
-    for call in down_calls:
+    # AGENT_DIRS (#68) is non-empty now, so the server is one of several down
+    # calls; isolate it by its own project directory rather than assuming
+    # every down call belongs to the server.
+    server_calls = [c for c in down_calls if _flag_value(c, "--project-directory") == "docker/server"]
+    assert server_calls, down_calls
+    for call in server_calls:
         assert _flag_value(call, "-p") == "derhost-server", call
 
 
@@ -635,8 +639,12 @@ def test_stack_status_passes_server_project_name(docker_stub: Path, monkeypatch:
     _run_make("stack-status")
     calls = _stub_calls(docker_stub.read_text())
     ps_calls = _compose_calls(calls, "ps")
-    assert ps_calls, calls
-    for call in ps_calls:
+    # AGENT_DIRS (#68) is non-empty now, so the server is one of several ps
+    # calls; isolate it by its own project directory rather than assuming
+    # every ps call belongs to the server.
+    server_calls = [c for c in ps_calls if _flag_value(c, "--project-directory") == "docker/server"]
+    assert server_calls, ps_calls
+    for call in server_calls:
         assert _flag_value(call, "-p") == "derhost-server", call
 
 
@@ -721,7 +729,10 @@ def test_stack_status_ignores_an_unlisted_directory_even_with_a_compose_file(doc
     payload_dir.mkdir()
     try:
         (payload_dir / "docker-compose.yml").write_text("name: probe-dirname\nservices: {}\n")
-        result = _run_make("stack-status")
+        # AGENT_DIRS is overridden to empty so this proves the fixed-list
+        # property (an unlisted directory is never picked up) independent of
+        # docker.mk's own agent list (#68).
+        result = _run_make("AGENT_DIRS=", "stack-status")
         assert result.returncode == 0, result.stdout + result.stderr
         calls = _stub_calls(docker_stub.read_text())
         compose_calls = [c for c in calls if c and c[0] == "compose"]
