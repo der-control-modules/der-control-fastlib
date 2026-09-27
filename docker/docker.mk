@@ -1,8 +1,9 @@
 # Developer commands for the docker/ stack (#68).
 #
 # Included from the root Makefile. Only docker/server exists at this PR;
-# `stack-up C=all` starts the server, then any other docker/*/docker-compose.yml
-# discovered under docker/, so a later per-agent PR needs no wiring here.
+# `stack-up C=all` starts the server, then each directory in AGENT_DIRS
+# below, so a later per-agent PR adds one word here rather than being
+# discovered from the filesystem.
 #
 # DERHOST_PUBLISH_HOST resolution and the port-5410-busy refusal are
 # validated up front (stack-preflight) by asking `docker compose config`
@@ -12,6 +13,7 @@
 DOCKER_DIR := docker
 SERVER_COMPOSE := $(DOCKER_DIR)/server/docker-compose.yml
 SERVER_PROJECT_DIR := $(DOCKER_DIR)/server
+SERVER_PROJECT_NAME := derhost-server
 DERHOST_STACK_PORT := 5410
 DERHOST_HEALTHY_WAIT_SECS := 60
 
@@ -56,19 +58,15 @@ unexport DERHOST_PUBLISH_HOST C EXPECTED DERHOST_CHECK_BASE_URL
 shell-safe = '$(subst ','\'',$(value $(1)))'
 pass-through = $(if $(filter-out undefined,$($(1)_ORIGIN)),$(1)=$(call shell-safe,$(1)))
 
-# $(wildcard) joins its matches with a single space, so a directory name that
-# itself contains whitespace is indistinguishable, once joined, from two
-# separate directories: the shell `for f in $$OTHER_COMPOSE_FILES` loops
-# below would then silently split one stack into two nonexistent paths
-# instead of failing. Checked with the shell's own glob (which, unlike
-# $(wildcard), keeps each match as one word) before that ambiguity can occur,
-# so every target refuses the same way rather than only the ones that loop.
-_DOCKER_DIRS_WITH_WHITESPACE := $(shell for d in $(DOCKER_DIR)/*/; do printf '%s\n' "$$d"; done | grep '[[:space:]]')
-ifneq ($(strip $(_DOCKER_DIRS_WITH_WHITESPACE)),)
-$(error docker.mk: refusing, a docker/ subdirectory name contains whitespace: $(_DOCKER_DIRS_WITH_WHITESPACE))
-endif
+# Agent directories under docker/, named here rather than discovered by a
+# filesystem glob: a name this list does not carry is invisible to every
+# stack-* target, so filesystem text (a stray directory, a name with a
+# shell metacharacter) never reaches a recipe. Empty at this PR; each later
+# per-agent PR adds its one directory name. A listed directory with no
+# docker-compose.yml fails `stack-up` the same way a typo would.
+AGENT_DIRS :=
 
-override OTHER_COMPOSE_FILES := $(filter-out $(SERVER_COMPOSE),$(wildcard $(DOCKER_DIR)/*/docker-compose.yml))
+override OTHER_COMPOSE_FILES := $(foreach d,$(AGENT_DIRS),$(DOCKER_DIR)/$(d)/docker-compose.yml)
 export OTHER_COMPOSE_FILES
 
 # Resolves the host address docker compose will actually publish on, by
@@ -214,9 +212,13 @@ sys.exit(1 if missing else 0)
 endef
 export DERHOST_CHECK_PY
 
+.PHONY: _stack-resolve-host
+_stack-resolve-host: ## Print the host DERHOST_PUBLISH_HOST resolves to; binds nothing
+	@printf '%s\n' "$$DERHOST_RESOLVE_PY" | $(call pass-through,DERHOST_PUBLISH_HOST) DERHOST_COMPOSE_FILE="$(SERVER_COMPOSE)" DERHOST_PROJECT_DIR="$(SERVER_PROJECT_DIR)" python3 -
+
 .PHONY: stack-preflight
 stack-preflight: ## Validate DERHOST_PUBLISH_HOST and refuse if port 5410 is already bound
-	@host=$$(printf '%s\n' "$$DERHOST_RESOLVE_PY" | $(call pass-through,DERHOST_PUBLISH_HOST) DERHOST_COMPOSE_FILE="$(SERVER_COMPOSE)" DERHOST_PROJECT_DIR="$(SERVER_PROJECT_DIR)" python3 -) || exit 1; \
+	@host=$$($(call pass-through,DERHOST_PUBLISH_HOST) $(MAKE) --no-print-directory _stack-resolve-host) || exit 1; \
 	printf '%s\n' "$$DERHOST_BIND_CHECK_PY" | DERHOST_RESOLVED_HOST="$$host" DERHOST_RAW_PORT="$(DERHOST_STACK_PORT)" python3 - || exit 1; \
 	printf '%s\n' "$$host"
 
@@ -245,7 +247,7 @@ stack-up: ## Start the stack: C=server or C=all (server first, then any other do
 		exit 1; \
 	fi
 	$(call pass-through,DERHOST_PUBLISH_HOST) $(MAKE) --no-print-directory stack-preflight
-	@$(call pass-through,DERHOST_PUBLISH_HOST) docker compose -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) up -d --build
+	@$(call pass-through,DERHOST_PUBLISH_HOST) docker compose -p $(SERVER_PROJECT_NAME) -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) up -d --build
 	$(MAKE) --no-print-directory _stack-wait-healthy
 	@c=$(call shell-safe,C); \
 	if [ "$$c" = "all" ]; then \
@@ -257,7 +259,7 @@ stack-up: ## Start the stack: C=server or C=all (server first, then any other do
 
 .PHONY: stack-down
 stack-down: ## Stop the stack (server and any other docker/*/docker-compose.yml)
-	-docker compose -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) down
+	-docker compose -p $(SERVER_PROJECT_NAME) -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) down
 	@for f in $$OTHER_COMPOSE_FILES; do \
 		dir=$$(dirname "$$f"); \
 		docker compose -f "$$f" --project-directory "$$dir" down || true; \
@@ -265,7 +267,7 @@ stack-down: ## Stop the stack (server and any other docker/*/docker-compose.yml)
 
 .PHONY: stack-status
 stack-status: ## Show status of the derhost stack
-	-docker compose -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) ps
+	-docker compose -p $(SERVER_PROJECT_NAME) -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) ps
 	@for f in $$OTHER_COMPOSE_FILES; do \
 		dir=$$(dirname "$$f"); \
 		docker compose -f "$$f" --project-directory "$$dir" ps || true; \

@@ -50,10 +50,16 @@ environment; an environment value always wins over the `.env` file.
 
 ## Smoke test
 
-`docker/smoke.sh` runs `config -q`, `build`, `up`, a health wait, `stack-check`
-and `down` against `docker/server`, each step bounded with `timeout`, and
-always brings the stack down on exit. CI does not build or run containers
-here, so the author runs this locally and pastes its output into the PR:
+`docker/smoke.sh` runs `config -q`, `build`, `up --wait`, `stack-check` and
+`down` against `docker/server`, each step bounded with `timeout`, and always
+brings the stack down on exit. It runs in its own compose project
+(`derhost-smoke`, `docker/server/compose.smoke.yml`), disjoint by name from
+the `stack-up` project, so it may run while a developer's stack is up; it
+refuses only when a leftover `derhost-smoke` object already exists (a killed
+or concurrent run). Its published port is ephemeral, so port 5410 does not
+matter to it; `DERHOST_PUBLISH_HOST` still selects the loopback address. CI
+does not build or run containers here, so the author runs this locally and
+pastes its output into the PR:
 
 ```
 DERHOST_PUBLISH_HOST=127.0.0.2 docker/smoke.sh
