@@ -5,70 +5,116 @@
 # discovered under docker/, so a later per-agent PR needs no wiring here.
 #
 # DERHOST_PUBLISH_HOST resolution and the port-5410-busy refusal are
-# validated up front (stack-preflight), separately from docker-compose.yml's
-# own `${DERHOST_PUBLISH_HOST:-127.0.0.1}` interpolation, because compose
-# cannot reject a scope id or refuse to start when the port is already the
-# root stack's.
+# validated up front (stack-preflight) by asking `docker compose config`
+# what it will actually publish on, so preflight agrees with compose by
+# construction instead of re-deriving compose's own .env/env precedence.
 
 DOCKER_DIR := docker
 SERVER_COMPOSE := $(DOCKER_DIR)/server/docker-compose.yml
 SERVER_PROJECT_DIR := $(DOCKER_DIR)/server
-SERVER_ENV := $(DOCKER_DIR)/server/.env
 DERHOST_STACK_PORT := 5410
 DERHOST_HEALTHY_WAIT_SECS := 60
-OTHER_COMPOSE_FILES := $(filter-out $(SERVER_COMPOSE),$(wildcard $(DOCKER_DIR)/*/docker-compose.yml))
+override OTHER_COMPOSE_FILES := $(filter-out $(SERVER_COMPOSE),$(wildcard $(DOCKER_DIR)/*/docker-compose.yml))
+export OTHER_COMPOSE_FILES
 
 # DERHOST_PUBLISH_HOST, C, EXPECTED and DERHOST_CHECK_BASE_URL are set by the
-# caller (environment or `make target VAR=value`) and are not trusted. Every
-# recipe below reads them as a real shell environment variable ($$NAME,
-# expanded by the shell) rather than a Make variable ($(NAME), expanded by
-# Make into the recipe's literal text before the shell ever sees it): a value
-# containing a `"` breaks out of a Make-substituted string and runs as shell
-# syntax, which a shell-level expansion does not. `export` makes each name
-# reach the recipe environment even when it is left at its Make-side default.
-export DERHOST_PUBLISH_HOST
-export C
-export EXPECTED
+# caller (environment or `make target VAR=value`) and are not trusted.
+#
+# They are `unexport`ed so GNU Make never auto-exports their text into a
+# recipe's subprocess environment: Make does this for a command-line-set
+# variable on every recipe command it runs, whether or not that recipe
+# references the variable, and doing so expands a `$(shell ...)` call
+# embedded in the value as a side effect of building the environment. A
+# Make-level reference ($(NAME)) has the same problem: referencing a
+# recursively-flavored variable re-expands its stored text.
+#
+# So a value never appears as $(NAME) and is never `export`ed here. Where a
+# recipe needs it, `$(value NAME)` reads the literal text without
+# evaluating anything embedded in it, `shell-safe` single-quotes that text
+# for the shell (escaping an embedded `'`), and `pass-through` emits a bare
+# `NAME='value'` prefix, or nothing at all when the caller never supplied
+# NAME, so an absent value still lets `docker compose` fall through to
+# `.env` instead of arriving as an empty override.
+#
+# Each name's $(origin) is captured here, before `unexport`: `unexport` on
+# a name with no prior value defines it (empty) to track that it is not
+# exported, which changes its own $(origin) from "undefined" to "file" from
+# this point on. Reading $(origin) after that would see every unsupplied
+# name as "supplied, empty" and always pass it through.
+DERHOST_PUBLISH_HOST_ORIGIN := $(origin DERHOST_PUBLISH_HOST)
+C_ORIGIN := $(origin C)
+EXPECTED_ORIGIN := $(origin EXPECTED)
+DERHOST_CHECK_BASE_URL_ORIGIN := $(origin DERHOST_CHECK_BASE_URL)
+unexport DERHOST_PUBLISH_HOST C EXPECTED DERHOST_CHECK_BASE_URL
+shell-safe = '$(subst ','\'',$(value $(1)))'
+pass-through = $(if $(filter-out undefined,$($(1)_ORIGIN)),$(1)=$(call shell-safe,$(1)))
 
-# The raw value is passed via the environment, never interpolated into the
-# script text, so an untrusted value cannot inject code (same convention as
-# docker-helper.sh's resolve_publish_host). Unlike that copy, this one also
-# rejects a scope id: ipaddress.ip_address() accepts "fe80::1%eth0" on
-# Python 3.9+, which is not a value docker compose's ports mapping can use.
-define DERHOST_PREFLIGHT_PY
-import errno
+# Resolves the host address docker compose will actually publish on, by
+# asking `docker compose config` (which applies compose's own precedence:
+# an explicit env value, even empty, beats `.env`; `.env`'s last matching
+# key wins; an unset value falls through to the compose file's own
+# default). DERHOST_PUBLISH_HOST reaches this script's environment only
+# via the caller's own `pass-through` invocation, never a blanket export.
+define DERHOST_RESOLVE_PY
 import ipaddress
+import json
+import os
+import subprocess
+import sys
+
+# ipaddress.ip_address() accepts a scope id ("fe80::1%eth0") on Python
+# 3.9+, which docker compose's ports mapping cannot use; checked here,
+# ahead of compose, for a clearer message than compose's own rejection.
+raw = os.environ.get("DERHOST_PUBLISH_HOST", "")
+if "%" in raw:
+    print(f"Error: DERHOST_PUBLISH_HOST carries a scope id, not accepted: {raw!r}", file=sys.stderr)
+    sys.exit(1)
+
+compose_file = os.environ["DERHOST_COMPOSE_FILE"]
+project_dir = os.environ["DERHOST_PROJECT_DIR"]
+
+try:
+    result = subprocess.run(
+        ["docker", "compose", "-f", compose_file, "--project-directory", project_dir, "config", "--format", "json"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+except subprocess.CalledProcessError as exc:
+    stderr = (exc.stderr or "").strip()
+    if "invalid ip address" in stderr.lower():
+        print(f"Error: DERHOST_PUBLISH_HOST is not a valid IP address: {stderr}", file=sys.stderr)
+    else:
+        print(f"Error: docker compose config failed: {stderr}", file=sys.stderr)
+    sys.exit(1)
+except OSError as exc:
+    print(f"Error: could not run docker compose config: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    config = json.loads(result.stdout)
+    host = config["services"]["derhost-server"]["ports"][0]["host_ip"]
+except (json.JSONDecodeError, KeyError, IndexError) as exc:
+    print(f"Error: could not read the published host_ip from docker compose config: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    parsed = ipaddress.ip_address(host)
+except ValueError:
+    print(f"Error: DERHOST_PUBLISH_HOST is not a valid IP address: {host!r}", file=sys.stderr)
+    sys.exit(1)
+
+print(str(parsed))
+endef
+export DERHOST_RESOLVE_PY
+
+define DERHOST_BIND_CHECK_PY
+import errno
 import os
 import socket
 import sys
 
-raw = os.environ.get("DERHOST_ENV_VALUE", "")
-if not raw:
-    env_file = os.environ.get("DERHOST_ENV_FILE", "")
-    if env_file and os.path.isfile(env_file):
-        with open(env_file, encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                key, sep, value = line.partition("=")
-                if sep and key.strip() == "DERHOST_PUBLISH_HOST":
-                    raw = value.strip().strip('"').strip("'")
-                    break
-
-if not raw:
-    host = "127.0.0.1"
-elif "%" in raw:
-    print(f"Error: DERHOST_PUBLISH_HOST carries a scope id, not accepted: {raw!r}", file=sys.stderr)
-    sys.exit(1)
-else:
-    try:
-        parsed = ipaddress.ip_address(raw)
-    except ValueError:
-        print(f"Error: DERHOST_PUBLISH_HOST is not a valid IP address: {raw!r}", file=sys.stderr)
-        sys.exit(1)
-    host = str(parsed)
-
+host = os.environ["DERHOST_RESOLVED_HOST"]
 port = int(os.environ["DERHOST_RAW_PORT"])
 family, socktype, proto, _, sockaddr = socket.getaddrinfo(
     host, port, type=socket.SOCK_STREAM
@@ -80,8 +126,9 @@ try:
 except OSError as exc:
     if exc.errno == errno.EADDRINUSE:
         print(
-            f"Error: {host}:{port} is already bound ({exc}); the root docker-compose.yml "
-            "stack publishes the same host port, and only one stack runs at a time",
+            f"Error: {host}:{port} is already bound ({exc}); a derhost or root "
+            "stack already publishes that host port, and only one stack runs "
+            "at a time",
             file=sys.stderr,
         )
     else:
@@ -89,15 +136,8 @@ except OSError as exc:
     sys.exit(1)
 finally:
     probe.close()
-
-print(host)
 endef
-export DERHOST_PREFLIGHT_PY
-
-# DERHOST_CHECK_BASE_URL is overridable so a test can point this at a stub
-# HTTP server instead of a running derhost-server.
-DERHOST_CHECK_BASE_URL ?= http://$(if $(DERHOST_PUBLISH_HOST),$(DERHOST_PUBLISH_HOST),127.0.0.1):$(DERHOST_STACK_PORT)
-export DERHOST_CHECK_BASE_URL
+export DERHOST_BIND_CHECK_PY
 
 define DERHOST_CHECK_PY
 import json
@@ -106,11 +146,26 @@ import sys
 import urllib.error
 import urllib.request
 
+
+class _NoRedirect(urllib.request.HTTPErrorProcessor):
+    # Returns a 3xx response as-is instead of following it, so a
+    # forwarded header (the operator token, eventually) never reaches a
+    # server this call did not name.
+    def http_response(self, request, response):
+        return response
+
+    https_response = http_response
+
+
 base = os.environ["DERHOST_CHECK_BASE_URL"].rstrip("/")
 expected = [name for name in os.environ.get("DERHOST_EXPECTED_IDENTITIES", "").split(",") if name.strip()]
+opener = urllib.request.build_opener(_NoRedirect)
 
 try:
-    with urllib.request.urlopen(f"{base}/connections", timeout=10) as response:
+    with opener.open(f"{base}/connections", timeout=10) as response:
+        if 300 <= response.status < 400:
+            print(f"Error: {base}/connections redirected ({response.status}), refusing to follow", file=sys.stderr)
+            sys.exit(1)
         body = json.load(response)
 except (urllib.error.URLError, OSError, ValueError) as exc:
     print(f"Error: could not read {base}/connections: {exc}", file=sys.stderr)
@@ -132,7 +187,9 @@ export DERHOST_CHECK_PY
 
 .PHONY: stack-preflight
 stack-preflight: ## Validate DERHOST_PUBLISH_HOST and refuse if port 5410 is already bound
-	@printf '%s\n' "$$DERHOST_PREFLIGHT_PY" | DERHOST_ENV_VALUE="$${DERHOST_PUBLISH_HOST:-}" DERHOST_ENV_FILE="$(SERVER_ENV)" DERHOST_RAW_PORT="$(DERHOST_STACK_PORT)" python3 -
+	@host=$$(printf '%s\n' "$$DERHOST_RESOLVE_PY" | $(call pass-through,DERHOST_PUBLISH_HOST) DERHOST_COMPOSE_FILE="$(SERVER_COMPOSE)" DERHOST_PROJECT_DIR="$(SERVER_PROJECT_DIR)" python3 -) || exit 1; \
+	printf '%s\n' "$$DERHOST_BIND_CHECK_PY" | DERHOST_RESOLVED_HOST="$$host" DERHOST_RAW_PORT="$(DERHOST_STACK_PORT)" python3 - || exit 1; \
+	printf '%s\n' "$$host"
 
 .PHONY: _stack-wait-healthy
 _stack-wait-healthy:
@@ -153,16 +210,17 @@ _stack-wait-healthy:
 
 .PHONY: stack-up
 stack-up: ## Start the stack: C=server or C=all (server first, then any other docker/*)
-	@c="$${C:-}"; \
+	@c=$(call shell-safe,C); \
 	if [ "$$c" != "server" ] && [ "$$c" != "all" ]; then \
 		echo "Error: set C=server or C=all (got C=$$c)" >&2; \
 		exit 1; \
 	fi
 	$(MAKE) --no-print-directory stack-preflight
-	docker compose -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) up -d --build
+	@$(call pass-through,DERHOST_PUBLISH_HOST) docker compose -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) up -d --build
 	$(MAKE) --no-print-directory _stack-wait-healthy
-	@if [ "$${C:-}" = "all" ]; then \
-		for f in $(OTHER_COMPOSE_FILES); do \
+	@c=$(call shell-safe,C); \
+	if [ "$$c" = "all" ]; then \
+		for f in $$OTHER_COMPOSE_FILES; do \
 			dir=$$(dirname "$$f"); \
 			docker compose -f "$$f" --project-directory "$$dir" up -d --build; \
 		done; \
@@ -171,19 +229,27 @@ stack-up: ## Start the stack: C=server or C=all (server first, then any other do
 .PHONY: stack-down
 stack-down: ## Stop the stack (server and any other docker/*/docker-compose.yml)
 	-docker compose -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) down
-	@for f in $(OTHER_COMPOSE_FILES); do \
+	@for f in $$OTHER_COMPOSE_FILES; do \
 		dir=$$(dirname "$$f"); \
-		docker compose -f "$$f" --project-directory "$$dir" down; \
+		docker compose -f "$$f" --project-directory "$$dir" down || true; \
 	done
 
 .PHONY: stack-status
 stack-status: ## Show status of the derhost stack
 	-docker compose -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) ps
-	@for f in $(OTHER_COMPOSE_FILES); do \
+	@for f in $$OTHER_COMPOSE_FILES; do \
 		dir=$$(dirname "$$f"); \
-		docker compose -f "$$f" --project-directory "$$dir" ps; \
+		docker compose -f "$$f" --project-directory "$$dir" ps || true; \
 	done
 
 .PHONY: stack-check
 stack-check: ## GET /connections and confirm EXPECTED (comma-separated) identities are there
-	@printf '%s\n' "$$DERHOST_CHECK_PY" | DERHOST_CHECK_BASE_URL="$$DERHOST_CHECK_BASE_URL" DERHOST_EXPECTED_IDENTITIES="$${EXPECTED:-}" python3 -
+	@base=$(call shell-safe,DERHOST_CHECK_BASE_URL); \
+	if [ -z "$$base" ]; then \
+		host=$$(printf '%s\n' "$$DERHOST_RESOLVE_PY" | $(call pass-through,DERHOST_PUBLISH_HOST) DERHOST_COMPOSE_FILE="$(SERVER_COMPOSE)" DERHOST_PROJECT_DIR="$(SERVER_PROJECT_DIR)" python3 -) || exit 1; \
+		case "$$host" in \
+			*:*) base="http://[$$host]:$(DERHOST_STACK_PORT)" ;; \
+			*) base="http://$$host:$(DERHOST_STACK_PORT)" ;; \
+		esac; \
+	fi; \
+	printf '%s\n' "$$DERHOST_CHECK_PY" | DERHOST_CHECK_BASE_URL="$$base" DERHOST_EXPECTED_IDENTITIES=$(call shell-safe,EXPECTED) python3 -
