@@ -10,6 +10,12 @@
 # fastlib's compatibility shim does not cover; the operator has decided
 # native control modes only, so Julia is never installed in this image
 # (issue #68).
+#
+# --debug on the CMD is load-bearing, not cosmetic: the periodic control
+# tick (rt_control/agent.py's loop()) and the scheduler's own per-event
+# trace both log at DEBUG only, so without it the container's log never
+# shows a tick even while the loop runs correctly every --config
+# "resolution" seconds.
 
 FROM derhost-base:local
 
@@ -34,4 +40,4 @@ USER derhost
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python3", "-c", "import os,sys; sys.exit(0 if any(b'start-legacy.py' in open(f'/proc/{p}/cmdline','rb').read() for p in os.listdir('/proc') if p.isdigit()) else 1)"]
 
-CMD ["python3", "/app/start-legacy.py", "--agent-dir", "/agent", "--module", "rt_control.agent", "--config", "config.json", "--identity", "der.rtc"]
+CMD ["python3", "/app/start-legacy.py", "--agent-dir", "/agent", "--module", "rt_control.agent", "--config", "config.json", "--identity", "der.rtc", "--debug"]

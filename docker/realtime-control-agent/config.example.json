@@ -9,21 +9,8 @@
     "actuator_vip": "",
     "power_command_point": ""
   },
-  "modes": [
-    {
-      "name": "ActivePowerResponseName",
-      "class_name": "ActivePowerResponse",
-      "activation_threshold": 10.0,
-      "output_ratio": 1.0,
-      "ramp_params": {}
-    }
-  ],
-  "use_cases": [
-    {
-      "class_name": "PeakLimiting",
-      "realtime_power_topic": "devices/SomeLoad/RealPower"
-    }
-  ],
+  "modes": [],
+  "use_cases": [],
   "resolution": 5.0,
   "start_time": null
 }
