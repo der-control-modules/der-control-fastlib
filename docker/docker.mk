@@ -63,7 +63,11 @@ pass-through = $(if $(filter-out undefined,$($(1)_ORIGIN)),$(1)=$(call shell-saf
 # stack-* target, so filesystem text (a stray directory, a name with a
 # shell metacharacter) never reaches a recipe. Empty at this PR; each later
 # per-agent PR adds its one directory name. A listed directory with no
-# docker-compose.yml fails `stack-up` the same way a typo would.
+# docker-compose.yml fails `stack-up` the same way a typo would. Each
+# agent's own compose calls below pass -p derhost-<dir>, the same pinning
+# the server project already has, so an exported COMPOSE_PROJECT_NAME
+# cannot retarget an agent's stack-up/down/status the way it could the
+# server's before that fix.
 AGENT_DIRS :=
 
 override OTHER_COMPOSE_FILES := $(foreach d,$(AGENT_DIRS),$(DOCKER_DIR)/$(d)/docker-compose.yml)
@@ -253,24 +257,24 @@ stack-up: ## Start the stack: C=server or C=all (server first, then any other do
 	if [ "$$c" = "all" ]; then \
 		for f in $$OTHER_COMPOSE_FILES; do \
 			dir=$$(dirname "$$f"); \
-			docker compose -f "$$f" --project-directory "$$dir" up -d --build; \
+			docker compose -p "derhost-$$(basename "$$dir")" -f "$$f" --project-directory "$$dir" up -d --build; \
 		done; \
 	fi
 
 .PHONY: stack-down
-stack-down: ## Stop the stack (server and any other docker/*/docker-compose.yml)
-	-docker compose -p $(SERVER_PROJECT_NAME) -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) down
+stack-down: ## Stop the stack (any other docker/*/docker-compose.yml, then the server)
 	@for f in $$OTHER_COMPOSE_FILES; do \
 		dir=$$(dirname "$$f"); \
-		docker compose -f "$$f" --project-directory "$$dir" down || true; \
+		docker compose -p "derhost-$$(basename "$$dir")" -f "$$f" --project-directory "$$dir" down || true; \
 	done
+	-docker compose -p $(SERVER_PROJECT_NAME) -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) down
 
 .PHONY: stack-status
 stack-status: ## Show status of the derhost stack
 	-docker compose -p $(SERVER_PROJECT_NAME) -f $(SERVER_COMPOSE) --project-directory $(SERVER_PROJECT_DIR) ps
 	@for f in $$OTHER_COMPOSE_FILES; do \
 		dir=$$(dirname "$$f"); \
-		docker compose -f "$$f" --project-directory "$$dir" ps || true; \
+		docker compose -p "derhost-$$(basename "$$dir")" -f "$$f" --project-directory "$$dir" ps || true; \
 	done
 
 .PHONY: stack-check

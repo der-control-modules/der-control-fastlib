@@ -16,7 +16,9 @@ Run from the repository root.
 - `make stack-up C=server` - build and start the server.
 - `make stack-up C=all` - start the server, then any other
   `docker/*/docker-compose.yml` (currently none: agents come in later PRs).
-- `make stack-down` - stop everything under `docker/`.
+- `make stack-down` - stop everything under `docker/` (any agent first, then
+  the server, since agents join the server's network and it must be free of
+  attached containers before the server's own `down` can remove it).
 - `make stack-status` - `docker compose ps` for each stack.
 - `make stack-check` - `GET /connections` from the host and confirm the
   identities in `EXPECTED` (comma-separated) are connected; `EXPECTED=`
