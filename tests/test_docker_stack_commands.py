@@ -2,8 +2,7 @@
 
 Each `make` target under test reads its inputs from the environment, so
 these tests invoke `make` as a subprocess exactly as a developer would,
-rather than importing anything: that is the path the actual value travels
-(see [[claims-and-provenance]] "read by the consumer's path").
+rather than importing anything.
 """
 
 from __future__ import annotations
@@ -103,7 +102,7 @@ def test_preflight_refuses_when_port_busy() -> None:
         result = _run_make("stack-preflight", overrides={"DERHOST_PUBLISH_HOST": "127.0.0.1"})
         assert result.returncode != 0
         assert "already bound" in result.stderr
-        assert "root docker-compose.yml" in result.stderr
+        assert "a derhost or root stack" in result.stderr
     finally:
         sock.close()
 
@@ -113,6 +112,118 @@ def test_preflight_succeeds_once_port_is_free() -> None:
     # the port, so the refusal above is about the port, not a broken command.
     result = _run_make("stack-preflight", overrides={"DERHOST_PUBLISH_HOST": "127.0.0.1"})
     assert result.returncode == 0, result.stderr
+
+
+# --- preflight resolves the same host docker compose will publish on. ------
+
+
+def _compose_config_host_ip(overrides: dict[str, str] | None = None) -> str:
+    env = os.environ.copy()
+    for key in _OVERRIDE_KEYS:
+        env.pop(key, None)
+    if overrides:
+        env.update(overrides)
+    result = subprocess.run(
+        ["docker", "compose", "-f", "docker/server/docker-compose.yml", "--project-directory", "docker/server", "config", "--format", "json"],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    return json.loads(result.stdout)["services"]["derhost-server"]["ports"][0]["host_ip"]
+
+
+def test_preflight_agrees_with_compose_on_an_exported_env_value() -> None:
+    result = _run_make("stack-preflight", overrides={"DERHOST_PUBLISH_HOST": "0.0.0.0"})
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == _compose_config_host_ip({"DERHOST_PUBLISH_HOST": "0.0.0.0"}) == "0.0.0.0"
+
+
+def test_preflight_agrees_with_compose_on_a_duplicate_env_file_key() -> None:
+    # docker/server/.env is gitignored; this test owns its full lifecycle.
+    env_path = REPO_ROOT / "docker" / "server" / ".env"
+    assert not env_path.exists(), "a real .env here would be clobbered by this test"
+    # compose's own .env parsing takes the LAST match for a repeated key;
+    # a naive parser that stops at the first match (the pre-fix preflight
+    # script) picks 127.0.0.2 here instead of compose's 0.0.0.0.
+    env_path.write_text("DERHOST_PUBLISH_HOST=127.0.0.2\nDERHOST_PUBLISH_HOST=0.0.0.0\n")
+    try:
+        result = _run_make("stack-preflight")
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == _compose_config_host_ip() == "0.0.0.0"
+    finally:
+        env_path.unlink()
+
+
+def test_preflight_agrees_with_compose_when_env_is_set_empty_over_env_file() -> None:
+    env_path = REPO_ROOT / "docker" / "server" / ".env"
+    assert not env_path.exists(), "a real .env here would be clobbered by this test"
+    env_path.write_text("DERHOST_PUBLISH_HOST=127.0.0.2\n")
+    try:
+        result = _run_make("stack-preflight", overrides={"DERHOST_PUBLISH_HOST": ""})
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == _compose_config_host_ip({"DERHOST_PUBLISH_HOST": ""}) == "127.0.0.1"
+    finally:
+        env_path.unlink()
+
+
+# --- No caller-supplied or filesystem-derived value is Make-expanded. -------
+#
+# GNU Make auto-exports a command-line-set variable's text into every
+# recipe's subprocess environment, expanding a `$(shell ...)` payload
+# embedded in it as a side effect, whether or not any recipe references the
+# variable by name; a Make-level reference ($(NAME)) in recipe text has the
+# same problem. docker.mk avoids both routes for every caller-supplied
+# name. Swept: DERHOST_PUBLISH_HOST, C, EXPECTED, DERHOST_CHECK_BASE_URL
+# (the four caller-supplied names) and OTHER_COMPOSE_FILES (filesystem-
+# derived from `wildcard`); `git grep` for `$(NAME)` inside docker.mk finds
+# no remaining reference to any of the five outside their own declaration.
+
+_INJECTION_TARGET = {
+    "DERHOST_PUBLISH_HOST": "stack-status",
+    "C": "stack-up",
+    "EXPECTED": "stack-check",
+    "DERHOST_CHECK_BASE_URL": "stack-check",
+}
+
+
+@pytest.mark.parametrize("var_name", sorted(_INJECTION_TARGET))
+def test_no_caller_value_is_make_expanded_via_environment(tmp_path: Path, var_name: str) -> None:
+    marker = tmp_path / f"pwned-env-{var_name}"
+    payload = f"$(shell touch {marker})"
+    _run_make(_INJECTION_TARGET[var_name], overrides={var_name: payload})
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("var_name", sorted(_INJECTION_TARGET))
+def test_no_caller_value_is_make_expanded_via_command_line(tmp_path: Path, var_name: str) -> None:
+    marker = tmp_path / f"pwned-cli-{var_name}"
+    payload = f"$(shell touch {marker})"
+    result = _run_make(f"{var_name}={payload}", _INJECTION_TARGET[var_name])
+    assert not marker.exists(), result.stdout + result.stderr
+
+
+def test_no_compose_directory_name_reaches_the_shell_as_code() -> None:
+    # The marker name carries no path separator: a directory name is one
+    # shell word once spliced into recipe text, and `make` runs recipes
+    # with REPO_ROOT as the working directory, so a bare filename in the
+    # backtick payload lands there if the backtick is ever executed.
+    marker_name = "pwned-dirname-test-no-compose-directory-name"
+    marker = REPO_ROOT / marker_name
+    payload_dir = REPO_ROOT / "docker" / f"x`touch {marker_name}`"
+    payload_dir.mkdir()
+    try:
+        (payload_dir / "docker-compose.yml").write_text("name: probe-dirname\nservices: {}\n")
+        result = _run_make("stack-status")
+        assert not marker.exists(), result.stdout + result.stderr
+    finally:
+        if marker.exists():
+            marker.unlink()
+        for child in payload_dir.iterdir():
+            child.unlink()
+        payload_dir.rmdir()
 
 
 # --- stack-check: GET /connections against a stub server. -------------------
@@ -172,6 +283,110 @@ def test_stack_check_zero_expected_exits_zero(connections_server: http.server.HT
     result = _run_make("stack-check", overrides={"DERHOST_CHECK_BASE_URL": base_url, "EXPECTED": ""})
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == ""
+
+
+def test_stack_check_does_not_follow_a_redirect() -> None:
+    class _RedirectHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{self.server.server_port}/elsewhere")
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _RedirectHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        result = _run_make("stack-check", overrides={"DERHOST_CHECK_BASE_URL": base_url, "EXPECTED": ""})
+        assert result.returncode != 0
+        assert "redirected" in result.stderr
+        assert "refusing to follow" in result.stderr
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+# --- stack-check's default target: resolved the same way preflight is. -----
+
+
+def test_stack_check_default_rejects_localhost_like_preflight() -> None:
+    result = _run_make("stack-check", overrides={"DERHOST_PUBLISH_HOST": "localhost"})
+    assert result.returncode != 0
+    assert "not a valid IP address" in result.stderr
+
+
+def test_stack_check_default_rejects_scope_id_like_preflight() -> None:
+    result = _run_make("stack-check", overrides={"DERHOST_PUBLISH_HOST": "fe80::1%eth0"})
+    assert result.returncode != 0
+    assert "scope id" in result.stderr
+
+
+def test_stack_check_default_brackets_ipv6() -> None:
+    # No server listens on ::1:5410; the connection-refused message names
+    # the URL stack-check actually built, proving the bracket is there
+    # (an unbracketed "http://::1:5410" is not a URL urllib can even parse
+    # into host and port the same way).
+    result = _run_make("stack-check", overrides={"DERHOST_PUBLISH_HOST": "::1", "EXPECTED": ""})
+    assert result.returncode != 0
+    assert "http://[::1]:5410/connections" in result.stderr
+
+
+def test_stack_check_default_follows_env_file() -> None:
+    env_path = REPO_ROOT / "docker" / "server" / ".env"
+    assert not env_path.exists(), "a real .env here would be clobbered by this test"
+    host = "127.0.0.7"
+    env_path.write_text(f"DERHOST_PUBLISH_HOST={host}\n")
+    _ConnectionsHandler.connected_identities = {"agent.one"}
+    server = http.server.HTTPServer((host, STACK_PORT), _ConnectionsHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        result = _run_make("stack-check", overrides={"EXPECTED": "agent.one"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "agent.one: connected" in result.stdout
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+        env_path.unlink()
+
+
+# --- smoke.sh: never tears down a stack it did not start. ------------------
+
+
+def test_smoke_does_not_tear_down_a_stack_it_never_started() -> None:
+    # Port 5410 busy simulates a stack already up (the same convention
+    # test_preflight_refuses_when_port_busy uses). If smoke.sh's trap were
+    # armed before `up`, or if `build` ran ahead of `preflight`, a refusal
+    # here would still tear the existing stack down.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", STACK_PORT))
+    sock.listen(1)
+    try:
+        env = os.environ.copy()
+        for key in _OVERRIDE_KEYS:
+            env.pop(key, None)
+        env["DERHOST_SMOKE_STEP_TIMEOUT"] = "20"
+        result = subprocess.run(
+            [str(REPO_ROOT / "docker" / "smoke.sh")],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "[smoke] preflight" in result.stdout, result.stdout
+        assert "[smoke] build" not in result.stdout, result.stdout
+        assert "[smoke] down" not in result.stdout, result.stdout
+    finally:
+        sock.close()
 
 
 # --- make help: unaffected by docker.mk joining $(MAKEFILE_LIST). -----------
