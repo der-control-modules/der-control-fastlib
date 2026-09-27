@@ -1,9 +1,8 @@
 """
 Test issue #83: a restarting agent can be refused for 30 s or more.
 
-The design is `design-83-84-connection-ownership.md` (workspace plans, not
-committed here). Its T6a-T6f are implemented below, one test function per
-id except T6d, which is the existing `#80` regression test in
+T6a-T6f are implemented below, one test function per id except T6d, which
+is the existing `#80` regression test in
 `test_duplicate_connection_state.py::TestDuplicateConnectionDoesNotEvictLiveAgent::
 test_refused_duplicate_preserves_state_and_rpc_delivery`: unchanged, and
 verified separately rather than duplicated here.
@@ -67,6 +66,8 @@ class TestT6aRestartReconnectsPromptly:
         # A raw socket, not an Agent: it must never send an rpc_response, so
         # the server's handle_rpc(30.0) wait for `identity` never resolves.
         silent_peer = websocket.create_connection(self.manager.get_ws_url(peer_id), timeout=5)
+        agent1 = None
+        agent2 = None
         try:
             agent1 = self.manager.create_connected_agent(identity, auto_reconnect=False)
             gevent.sleep(0.5)
@@ -74,6 +75,9 @@ class TestT6aRestartReconnectsPromptly:
 
             agent1.vip.rpc.call(peer_id, "never_answers")
             gevent.sleep(0.5)  # let the server start blocking in handle_rpc
+            assert connection_manager.rpc_responses, (
+                "expected the RPC to be registered as pending before simulating the restart"
+            )
 
             # Simulate the old process dying: TCP closes, nothing tells the
             # server's blocked receive loop for `identity`.
@@ -89,16 +93,15 @@ class TestT6aRestartReconnectsPromptly:
                 pytest.fail(
                     f"restart refused for >{elapsed:.1f}s (design requires <5s): {e}. "
                     "Design reason: the receive loop for the old socket is blocked "
-                    "inside handle_rpc's 30s wait (F7), so it never reads the TCP "
-                    "close and keeps reporting CONNECTED (F1)."
+                    "inside handle_rpc's 30s wait, so it never reads the TCP "
+                    "close and keeps reporting CONNECTED (#83)."
                 )
             assert agent2.connected
-            agent2.disconnect()
         finally:
             # Resolve the RPC the server is still waiting on ourselves,
             # through the peer's own connection (the normal message path,
             # handled on the server's event loop), instead of waiting out
-            # handle_rpc's 30s timeout (F7). Otherwise the old task and its
+            # handle_rpc's 30s timeout. Otherwise the old task and its
             # server thread outlive this test and can corrupt the next
             # test's event loop.
             pending_msg_ids = list(connection_manager.rpc_responses)
@@ -109,6 +112,13 @@ class TestT6aRestartReconnectsPromptly:
             if pending_msg_ids:
                 gevent.sleep(0.3)
             silent_peer.close()
+            if agent2 is not None:
+                agent2.disconnect()
+            if agent1 is not None:
+                try:
+                    agent1.disconnect()
+                except Exception:  # noqa: BLE001 - socket was already closed above
+                    pass
 
 
 class TestT6bKeepaliveConfiguredNotDefaulted:
@@ -122,8 +132,8 @@ class TestT6bKeepaliveConfiguredNotDefaulted:
             missing = [n for n in ("ws_ping_interval", "ws_ping_timeout") if n not in kwargs]
             assert not missing, (
                 f"{label}(...) at fastapi_message_bus.py has no {missing}. "
-                "Design reason (F5): neither call site sets it, so uvicorn's "
-                "own defaults (F4: 20.0/20.0) apply."
+                "Design reason (#83): neither call site sets it, so uvicorn's "
+                "own defaults (20.0/20.0) apply."
             )
             for name in ("ws_ping_interval", "ws_ping_timeout"):
                 value_node = kwargs[name]
@@ -131,6 +141,14 @@ class TestT6bKeepaliveConfiguredNotDefaulted:
                     assert value_node.value == 10, (
                         f"{label}(...) passes {name}={value_node.value}, design decision 1.2 wants 10"
                     )
+
+    def test_constructor_defaults_for_ws_ping_are_10(self):
+        """PR #100 review: the AST check above only reads the call sites;
+        nothing pinned the FastAPIMessageBus constructor defaults the call
+        sites forward."""
+        sig = inspect.signature(fastapi_message_bus_module.FastAPIMessageBus.__init__)
+        assert sig.parameters["ws_ping_interval"].default == 10
+        assert sig.parameters["ws_ping_timeout"].default == 10
 
     def test_stalled_socket_replaced_within_5s_with_fast_keepalive(self, message_bus_manager_fixture):
         """With the fixture at 1s/1s, a peer that stops reading after the
@@ -157,7 +175,7 @@ class TestT6bKeepaliveConfiguredNotDefaulted:
             assert replaced, (
                 f"identity still refused after 5s of a stalled peer (last: {last_error}). "
                 "Design reason: with the fixture at 1s/1s the stalled peer should be "
-                "failed by uvicorn's own keepalive (F4) within one cycle."
+                "failed by uvicorn's own keepalive (#83) within one cycle."
             )
         finally:
             try:
@@ -186,7 +204,7 @@ class TestT6cDuplicateGetsNamedRefusal:
             response = excinfo.value.response
             assert response.status_code == 409, (
                 f"got HTTP {response.status_code}, body {bytes(response.body)!r}. "
-                "Design reason (F8): a pre-accept close today becomes a 403 with "
+                "Design reason (#83): a pre-accept close today becomes a 403 with "
                 "an empty body; the reason never reaches the wire."
             )
             assert identity.encode() in bytes(response.body)
@@ -232,7 +250,7 @@ class TestT6eConcurrentConnectsToOneFreeIdentity:
         assert not bad_rounds, (
             f"rounds with != 1 accepted: {bad_rounds}. Design reason: this control "
             "rules out a reservation-vs-accept race; it must stay green after #83's "
-            "fix reserves the identity before any await (F10)."
+            "fix reserves the identity before any await."
         )
 
 
