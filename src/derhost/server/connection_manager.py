@@ -54,8 +54,16 @@ class ConnectionManager:
         self.known_topics: set[str] = set()  # Track all topics that have been published
         self.monitor_connections: dict[str, WebSocket] = {}  # WebSocket connections for monitors
 
-    async def connect(self, websocket: WebSocket, identity: str):
-        """Connect a client to the message bus."""
+    async def connect(self, websocket: WebSocket, identity: str) -> bool:
+        """Connect a client to the message bus.
+
+        Returns
+        -------
+            True if `websocket` was accepted and registered for `identity`.
+            False if it was refused because `identity` already holds a
+            CONNECTED socket; the caller must not read from a refused
+            socket, since it was never accepted (der-control-modules/der-control-fastlib#80).
+        """
         # VOLTTRON compatibility: Only one agent per identity allowed
         if identity in self.active_connections:
             existing_ws = self.active_connections[identity]
@@ -63,11 +71,11 @@ class ConnectionManager:
                 _log.warning(f"Agent {identity} already connected - rejecting new connection")
                 # Reject BEFORE accepting to prevent client from thinking it's connected
                 await websocket.close(code=4000, reason=f"Agent {identity} already connected")
-                return
+                return False
             else:
                 # Clean up stale connection
                 _log.info(f"Replacing stale connection for agent {identity}")
-                self.disconnect(identity)
+                self.disconnect(identity, existing_ws)
 
         await websocket.accept()
         self.active_connections[identity] = websocket
@@ -78,11 +86,21 @@ class ConnectionManager:
             self._start_status_reporter()
 
         _log.debug(f"Client {identity} connected")
+        return True
 
-    def disconnect(self, identity: str):
-        """Disconnect a client from the message bus."""
-        if identity in self.active_connections:
-            del self.active_connections[identity]
+    def disconnect(self, identity: str, websocket: WebSocket) -> None:
+        """Disconnect a client from the message bus.
+
+        Removes state for `identity` only when `websocket` is still the
+        socket currently registered for it. A socket that was refused, or
+        superseded by a later reconnect before this call ran, must never
+        evict state that belongs to a different, still-live socket
+        (der-control-modules/der-control-fastlib#80).
+        """
+        if self.active_connections.get(identity) is not websocket:
+            _log.debug(f"Skipping disconnect for {identity}: socket is not the current one")
+            return
+        del self.active_connections[identity]
         if identity in self.prefix_subscriptions:
             del self.prefix_subscriptions[identity]
         if identity in self.agent_rpc_methods:
@@ -349,11 +367,19 @@ class ConnectionManager:
         self.monitor_connections[monitor_id] = websocket
         _log.info(f"Message bus monitor {monitor_id} connected")
 
-    def disconnect_monitor(self, monitor_id: str):
-        """Disconnect a message bus monitor client."""
-        if monitor_id in self.monitor_connections:
-            del self.monitor_connections[monitor_id]
-            _log.info(f"Message bus monitor {monitor_id} disconnected")
+    def disconnect_monitor(self, monitor_id: str, websocket: WebSocket) -> None:
+        """Disconnect a message bus monitor client.
+
+        Same ownership check as `disconnect`: `connect_monitor` does not
+        refuse a duplicate `monitor_id`, it overwrites the entry, so a
+        superseded socket's own cleanup must not delete the socket that
+        replaced it (der-control-modules/der-control-fastlib#80 class).
+        """
+        if self.monitor_connections.get(monitor_id) is not websocket:
+            _log.debug(f"Skipping monitor disconnect for {monitor_id}: socket is not the current one")
+            return
+        del self.monitor_connections[monitor_id]
+        _log.info(f"Message bus monitor {monitor_id} disconnected")
 
     async def _broadcast_to_monitors(self, data: dict):
         """Broadcast pub/sub message to all connected monitors."""
@@ -363,14 +389,14 @@ class ConnectionManager:
                 if websocket.client_state == WebSocketState.CONNECTED:
                     await websocket.send_json(data)
                 else:
-                    disconnected.append(monitor_id)
+                    disconnected.append((monitor_id, websocket))
             except Exception as e:
                 _log.error(f"Error broadcasting to monitor {monitor_id}: {e}")
-                disconnected.append(monitor_id)
+                disconnected.append((monitor_id, websocket))
 
         # Clean up disconnected monitors
-        for monitor_id in disconnected:
-            self.disconnect_monitor(monitor_id)
+        for monitor_id, websocket in disconnected:
+            self.disconnect_monitor(monitor_id, websocket)
 
     def get_known_topics(self) -> list[str]:
         """Get list of all known topics (sorted)."""
