@@ -8,6 +8,7 @@ from re import Pattern
 from typing import Any
 
 from fastapi import WebSocket
+from starlette.responses import PlainTextResponse
 from starlette.websockets import WebSocketState
 
 from derhost._redact import redact_known_secret_values, redact_secrets, redact_text, truncate_for_log
@@ -65,21 +66,32 @@ class ConnectionManager:
             socket, since it was never accepted (der-control-modules/der-control-fastlib#80).
         """
         # VOLTTRON compatibility: Only one agent per identity allowed
-        if identity in self.active_connections:
-            existing_ws = self.active_connections[identity]
+        existing_ws = self.active_connections.get(identity)
+        if existing_ws is not None:
             if existing_ws.client_state == WebSocketState.CONNECTED:
-                _log.warning(f"Agent {identity} already connected - rejecting new connection")
-                # Reject BEFORE accepting to prevent client from thinking it's connected
-                await websocket.close(code=4000, reason=f"Agent {identity} already connected")
+                _log.warning(f"Agent {identity} already connected - refusing new connection")
+                # Refuse before accept, via the denial-response extension, so
+                # the reason reaches the wire as a named HTTP 409 instead of
+                # a pre-accept close (whose reason never reaches the client)
+                # or an accept-then-close (which fires the client's on_open).
+                await websocket.send_denial_response(
+                    PlainTextResponse(
+                        content=f"identity {identity} is already connected; retry later",
+                        status_code=409,
+                    )
+                )
                 return False
-            else:
-                # Clean up stale connection
-                _log.info(f"Replacing stale connection for agent {identity}")
-                self.disconnect(identity, existing_ws)
+            # Clean up stale connection
+            _log.info(f"Replacing stale connection for agent {identity}")
+            self.disconnect(identity, existing_ws)
 
-        await websocket.accept()
+        # Reserve the identity synchronously, before any await: a concurrent
+        # duplicate must see this entry and be refused above, never both
+        # pass the CONNECTED check before either registers.
         self.active_connections[identity] = websocket
         self.prefix_subscriptions[identity] = {}
+
+        await websocket.accept()
 
         # Start the status reporter when the first connection is made
         if not self._status_reporter_started:

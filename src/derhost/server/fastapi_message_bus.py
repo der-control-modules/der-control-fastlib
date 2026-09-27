@@ -272,8 +272,15 @@ class FastAPIMessageBus(MessageBus):
         reload: bool = False,
         reload_dirs: list = None,
         reload_delay: float = 0.25,
+        ws_ping_interval: float = 10,
+        ws_ping_timeout: float = 10,
     ):
         _check_jwt_secret_key()
+        # Set explicitly rather than left at uvicorn's own defaults (20/20):
+        # a silent peer is then detected in about one 20s cycle instead of
+        # about 40s (#83 decision 1.2).
+        self.ws_ping_interval = ws_ping_interval
+        self.ws_ping_timeout = ws_ping_timeout
         self.app = FastAPI(title="AEMS MessageBus", lifespan=lifespan)
 
         # Setup templates directory
@@ -330,6 +337,20 @@ class FastAPIMessageBus(MessageBus):
                 # from it here would raise and run the cleanup below against
                 # the live agent's identity (der-control-modules/der-control-fastlib#80).
                 return
+
+            # RPC calls run as tasks this connection owns rather than being
+            # awaited inline: an unanswering peer must not block this loop
+            # from reading its own socket's disconnect (#83 decision 1.1).
+            # Referenced here until done so a task is never GC'd mid-flight.
+            rpc_tasks: set[asyncio.Task] = set()
+
+            def _on_rpc_task_done(task: asyncio.Task) -> None:
+                rpc_tasks.discard(task)
+                if task.cancelled():
+                    return
+                exc = task.exception()
+                if exc is not None:
+                    _log.error(f"Unhandled error in RPC task for {identity}: {exc}")
 
             try:
                 while True:
@@ -438,14 +459,18 @@ class FastAPIMessageBus(MessageBus):
                             kwargs = data.get("kwargs", {})
                             msg_id = data["msg_id"]
 
-                            await self.manager.handle_rpc(
-                                sender=identity,
-                                peer=peer,
-                                method=method,
-                                args=args,
-                                kwargs=kwargs,
-                                msg_id=msg_id,
+                            task = asyncio.create_task(
+                                self.manager.handle_rpc(
+                                    sender=identity,
+                                    peer=peer,
+                                    method=method,
+                                    args=args,
+                                    kwargs=kwargs,
+                                    msg_id=msg_id,
+                                )
                             )
+                            rpc_tasks.add(task)
+                            task.add_done_callback(_on_rpc_task_done)
 
                     elif data["type"] == "rpc_response":
                         # Handle RPC response messages
@@ -1193,6 +1218,8 @@ class FastAPIMessageBus(MessageBus):
             reload=self.reload,
             reload_dirs=self.reload_dirs,
             reload_delay=self.reload_delay,
+            ws_ping_interval=self.ws_ping_interval,
+            ws_ping_timeout=self.ws_ping_timeout,
         )
 
         # Create and start the server
@@ -1413,6 +1440,8 @@ def _main():
             reload=args.reload,
             log_level="debug",
             log_config=None,  # Disable uvicorn's logging config since we set it up ourselves
+            ws_ping_interval=server.ws_ping_interval,
+            ws_ping_timeout=server.ws_ping_timeout,
         )
     else:
         # Use the threaded approach for production
