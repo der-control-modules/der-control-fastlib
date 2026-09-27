@@ -32,6 +32,18 @@ step_down() {
     timeout "$STEP_TIMEOUT" "${COMPOSE_ARGS[@]}" down -v --rmi local
 }
 
+refuse_if_stack_exists() {
+    # The container name is fixed regardless of DERHOST_PUBLISH_HOST, so a
+    # stack already up on a different published address still collides here
+    # even though stack-preflight's port-bind check (scoped to one address)
+    # would not have caught it: `up -d --build` would recreate someone
+    # else's container and this script's teardown would then remove it.
+    if docker inspect derhost-server >/dev/null 2>&1; then
+        log "refusing: a derhost-server container already exists (not started by this run)"
+        exit 1
+    fi
+}
+
 cleanup() {
     if [ "$CLEANED_UP" -eq 0 ]; then
         CLEANED_UP=1
@@ -49,15 +61,19 @@ main() {
     log "preflight"
     timeout "$STEP_TIMEOUT" make -C "$REPO_ROOT" --no-print-directory stack-preflight
 
+    refuse_if_stack_exists
+
     log "build"
     timeout "$STEP_TIMEOUT" "${COMPOSE_ARGS[@]}" build
 
     log "up"
-    timeout "$STEP_TIMEOUT" "${COMPOSE_ARGS[@]}" up -d
-    # The trap arms only once `up` has actually started something: a stack
-    # this run never created must never be torn down by an earlier failure
-    # (config, preflight, or build all fail before this line).
+    # Armed before `up` is invoked, not after it returns: a stack this run
+    # never created must never be torn down (config, preflight, build and
+    # the existence check above all fail before this line), but a partial
+    # failure inside `up` itself (a network or volume created before the
+    # container fails to start) must still be cleaned up.
     trap cleanup EXIT INT TERM
+    timeout "$STEP_TIMEOUT" "${COMPOSE_ARGS[@]}" up -d
 
     log "health"
     timeout "$STEP_TIMEOUT" make -C "$REPO_ROOT" --no-print-directory _stack-wait-healthy
