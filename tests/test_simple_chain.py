@@ -214,5 +214,5 @@ class TestSimpleChain:
         ), f"Concurrent calls took too long: {end_time - start_time:.2f}s"
 
         _log.info(
-            f"✅ SUCCESS: {len(test_values)} concurrent RPC calls completed efficiently!"
+            f"SUCCESS: {len(test_values)} concurrent RPC calls completed efficiently!"
         )
