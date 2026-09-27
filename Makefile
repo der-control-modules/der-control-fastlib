@@ -152,10 +152,13 @@ compose-down: ## Stop services with docker-compose
 compose-logs: ## View docker-compose logs
 	docker-compose logs -f
 
+# docker/ stack (server and, in later PRs, one container per agent): #68.
+include docker/docker.mk
+
 # Help
 .PHONY: help
 help: ## Show this help message
 	@echo "Available commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .DEFAULT_GOAL := help

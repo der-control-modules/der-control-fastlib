@@ -1,0 +1,17 @@
+# Overlay smoke.sh applies on top of docker-compose.yml so its run never
+# names or removes a developer's stack-up objects (#68). Every name
+# below differs from the base file: `docker compose -p derhost-smoke -f
+# docker-compose.yml -f compose.smoke.yml` resolves project, container,
+# image, network and volume names that share nothing with the base project,
+# so `down -v --rmi local` is safe by construction rather than by a guard
+# that lists what to avoid.
+services:
+  derhost-server:
+    image: derhost-server:smoke
+    container_name: derhost-smoke-server
+    ports: !override
+      - "${DERHOST_PUBLISH_HOST:-127.0.0.1}::8000"
+
+networks:
+  derhost-net:
+    name: derhost-smoke-net
