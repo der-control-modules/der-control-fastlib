@@ -1,0 +1,29 @@
+{
+  "ess": {
+    "class_name": "FakeESS",
+    "power_capacity_kw": 100,
+    "energy_capacity_kwh": 125,
+    "bess_topic": "devices/PNNL/BESS",
+    "soc_point": "SoC",
+    "power_reading_point": "",
+    "actuator_vip": "",
+    "power_command_point": ""
+  },
+  "modes": [
+    {
+      "name": "ActivePowerResponseName",
+      "class_name": "ActivePowerResponse",
+      "activation_threshold": 10.0,
+      "output_ratio": 1.0,
+      "ramp_params": {}
+    }
+  ],
+  "use_cases": [
+    {
+      "class_name": "PeakLimiting",
+      "realtime_power_topic": "devices/SomeLoad/RealPower"
+    }
+  ],
+  "resolution": 5.0,
+  "start_time": null
+}
