@@ -17,17 +17,10 @@ main() {
     exit 1
   }
 
-  local agent_src_input="${DER_AGENT_SRC:-${REPO_ROOT}/../interoperability-service}"
-  local agent_src
-  # Canonicalize before anything reads it: compose resolves a relative
-  # additional_contexts path against its own project directory (this
-  # script's directory), not the caller's cwd, so a relative DER_AGENT_SRC
-  # used as-is here could name a different directory than the one compose
-  # builds from. An absolute path is not reinterpreted by compose (#68).
-  agent_src="$(cd -- "${agent_src_input}" >/dev/null 2>&1 && pwd -P)" || {
-    echo "build: agent checkout not found: ${agent_src_input}" >&2
-    exit 1
-  }
+  # check-clean.sh validates agent_src itself, not-a-checkout included;
+  # compose never sees agent_src directly, only the absolute archive_dir
+  # exported below, so this path does not need canonicalizing (#68).
+  local agent_src="${DER_AGENT_SRC:-${REPO_ROOT}/../interoperability-service}"
   "${SCRIPT_DIR}/check-clean.sh" "${agent_src}"
 
   export AGENT_REVISION
