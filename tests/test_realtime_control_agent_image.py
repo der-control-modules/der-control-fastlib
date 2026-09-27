@@ -9,6 +9,7 @@ here is not a check that could never fail.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -120,6 +121,34 @@ def test_config_example_sets_no_mode_to_use_julia() -> None:
     assert "ctrl_eval_engine_app_path" not in text, text
 
 
+def test_config_example_use_cases_is_empty() -> None:
+    # The agent's own shipped configs (sample_config.json, es_control_test.json)
+    # all configure a PeakLimiting use case that omits realtime_power_point,
+    # a required constructor argument with no default
+    # (rt_control/use_cases/peak_limiting.py:7 at 16804d8): loading one of
+    # those configs raises inside configure_main before the periodic control
+    # loop is ever scheduled. Left empty here rather than reproducing that
+    # defect; not a change to the agent's own source.
+    config = json.loads((AGENT_DIR / "config.example.json").read_text(encoding="utf-8"))
+    assert config["use_cases"] == []
+
+
+def test_config_example_modes_is_empty() -> None:
+    # Every mode class in rt_control.modes.active/reactive/emergency calls
+    # importlib.metadata.version('volttron') at module import time with no
+    # PackageNotFoundError guard (e.g. active_power_response.py imports
+    # active/__init__.py, which imports active_power_limit.py:4 at 16804d8),
+    # so the whole subpackage fails to import wherever volttron itself is
+    # not pip-installed, which this image deliberately never does. Every
+    # class in rt_control.modes.novel imports the julia package
+    # unconditionally at module scope (es_control_mode.py:2 at 16804d8), so
+    # that subpackage fails to import in this image too, by the operator's
+    # own no-Julia decision. No configured mode is currently reachable in
+    # this container; left empty rather than reproducing either defect.
+    config = json.loads((AGENT_DIR / "config.example.json").read_text(encoding="utf-8"))
+    assert config["modes"] == []
+
+
 def test_dockerfile_bakes_config_at_the_path_start_legacy_resolves() -> None:
     # start-legacy.py resolves --config relative to --agent-dir first
     # (rt_control/agent.py:191 at 16804d8 calls vip_main(RTControlAgent), so
@@ -136,3 +165,13 @@ def test_dockerfile_names_the_der_rtc_identity() -> None:
     # must register the same identity (#68).
     dockerfile = (AGENT_DIR / "Dockerfile").read_text(encoding="utf-8")
     assert '"--identity", "der.rtc"' in dockerfile, dockerfile
+
+
+def test_dockerfile_cmd_enables_debug_logging() -> None:
+    # The periodic control tick (rt_control/agent.py's loop()) and the
+    # scheduler's own per-event trace both log at DEBUG only
+    # (src/derhost/client/agent.py:3258 at b748a1f); without --debug,
+    # start-legacy.py's setup_logging() leaves the root logger at INFO and
+    # no tick ever appears in the container's log (#68).
+    dockerfile = (AGENT_DIR / "Dockerfile").read_text(encoding="utf-8")
+    assert '"--debug"' in dockerfile, dockerfile
