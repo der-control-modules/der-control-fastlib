@@ -44,14 +44,12 @@ def test_cron_fires_on_schedule(monkeypatch, message_bus_manager_fixture):
     """cron() from the shim schedules a cron event that fires."""
     Agent, cron, _periodic = _import_compat()
 
-    # derhost's CronTimer has minute granularity, so a real 5-field cron
-    # expression fires no more than once a minute. Patch get_next so the
-    # test observes repeated firing within a bounded wait instead of the
-    # wall clock.
-    def fast_next(self, now=None):
-        return datetime.now() + timedelta(milliseconds=100)
+    # ScheduledEvent uses next_fire_epoch for fire times.
+    # Patch it to make the test's short interval work.
+    def fast_next_fire_epoch(self, after):
+        return after + 0.1
 
-    monkeypatch.setattr(CronTimer, "get_next", fast_next)
+    monkeypatch.setattr(CronTimer, "next_fire_epoch", fast_next_fire_epoch)
 
     manager = message_bus_manager_fixture
     manager.start_bus()
