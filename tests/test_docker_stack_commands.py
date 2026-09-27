@@ -218,7 +218,7 @@ def test_preflight_agrees_with_compose_when_env_is_set_empty_over_env_file() -> 
 # name. Swept: DERHOST_PUBLISH_HOST, C, EXPECTED, DERHOST_CHECK_BASE_URL
 # (the four caller-supplied names); `git grep` for `$(NAME)` inside
 # docker.mk finds no remaining reference to any of the four outside their
-# own declaration. AGENT_DIRS (#68 item 5) is fixed text this file itself
+# own declaration. AGENT_DIRS (#68) is fixed text this file itself
 # declares, not caller- or filesystem-derived, so it carries no such test.
 
 _INJECTION_TARGET = {
@@ -530,7 +530,7 @@ def _flag_value(call: list[str], flag: str) -> str | None:
     return call[call.index(flag) + 1]
 
 
-# --- item 1: smoke.sh's overlay shares no object names with the base. ------
+# --- smoke.sh's overlay shares no object names with the base stack. -------
 
 
 def test_smoke_overlay_config_shares_no_names_with_the_base_stack() -> None:
@@ -573,7 +573,7 @@ def test_smoke_overlay_config_shares_no_names_with_the_base_stack() -> None:
     assert "published" not in merged_svc["ports"][0], merged_svc["ports"]
 
 
-# --- item 2: smoke.sh's own project-label refusal and trap discipline. -----
+# --- smoke.sh's own project-label refusal and trap discipline. ------------
 
 
 def _run_smoke(extra_env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -629,7 +629,7 @@ def test_smoke_every_compose_call_carries_the_smoke_project_flag(docker_stub: Pa
         assert _flag_value(call, "-p") == "derhost-smoke", call
 
 
-# --- item 3: docker.mk pins the server compose project name. ---------------
+# --- docker.mk pins the server compose project name. -----------------------
 
 
 def test_stack_down_passes_server_project_name(docker_stub: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -673,7 +673,7 @@ def test_stack_up_passes_server_project_name(docker_stub: Path, monkeypatch: pyt
         assert _flag_value(call, "-p") == "derhost-server", call
 
 
-# --- item 5: agent directories are a fixed list, not a filesystem glob. ----
+# --- agent directories are a fixed list, not a filesystem glob. -----------
 
 
 def test_stack_status_ignores_an_unlisted_directory_even_with_a_compose_file(docker_stub: Path) -> None:
@@ -693,7 +693,7 @@ def test_stack_status_ignores_an_unlisted_directory_even_with_a_compose_file(doc
         payload_dir.rmdir()
 
 
-# --- item 6: DERHOST_PUBLISH_HOST reaches stack-preflight's sub-make. -------
+# --- DERHOST_PUBLISH_HOST reaches stack-preflight's sub-make. --------------
 
 
 def test_stack_up_forwards_publish_host_through_the_preflight_submake(
