@@ -16,8 +16,8 @@ import shlex
 import shutil
 import socket
 import subprocess
-import tempfile
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -34,23 +34,6 @@ _OVERRIDE_KEYS = ("DERHOST_PUBLISH_HOST", "EXPECTED", "DERHOST_CHECK_BASE_URL", 
 # otherwise have to expect. Dropping both makes each nested `make` behave as
 # a fresh top-level invocation, matching a plain `make stack-check` run.
 _MAKE_RECURSION_KEYS = ("MAKELEVEL", "MAKEFLAGS", "MFLAGS")
-
-
-@pytest.fixture(autouse=True)
-def _no_real_docker_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Every docker/compose subprocess a test in this module starts sees a
-    # DOCKER_HOST pointing at a socket that does not exist, so a test whose
-    # code path skips its intended stub and reaches the real docker CLI
-    # fails to connect instead of touching, or starting, a real stack.
-    # Fixed under the process's own tempdir rather than pytest's per-test
-    # tmp_path: a unix socket path is capped at 108 bytes by the kernel, and
-    # tmp_path's nested per-test directories blow past that (measured: over
-    # 130 chars made docker fail to even start, "path is too long", instead
-    # of failing to connect, which defeats this fixture's own purpose).
-    # `docker compose ... config` needs no daemon and is unaffected (M:
-    # `docker compose -f docker/server/docker-compose.yml config -q` still
-    # exits 0 under this same override).
-    monkeypatch.setenv("DOCKER_HOST", f"unix://{tempfile.gettempdir()}/derhost-test-no-daemon.sock")
 
 
 def _run_make(*args: str, overrides: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -480,6 +463,11 @@ if [ "${1-}" = "compose" ]; then
 elif [ "${1-}" = "ps" ]; then
     printf '%s\\n' "${STUB_DOCKER_PS_OUTPUT:-}"
     exit 0
+elif [ "${1-}" = "inspect" ]; then
+    # _stack-wait-healthy's health poll; a fixed "healthy" default lets a
+    # stack-up test reach its agent-loop compose calls without a real wait.
+    printf '%s\\n' "${STUB_INSPECT_HEALTH:-healthy}"
+    exit 0
 elif [ "${1-}" = "network" ] && [ "${2-}" = "ls" ]; then
     printf '%s\\n' "${STUB_NETWORK_LS_OUTPUT:-}"
     exit 0
@@ -671,6 +659,58 @@ def test_stack_up_passes_server_project_name(docker_stub: Path, monkeypatch: pyt
     assert up_calls, calls
     for call in up_calls:
         assert _flag_value(call, "-p") == "derhost-server", call
+
+
+# --- docker.mk pins each agent's own compose project too. -------------------
+#
+# AGENT_DIRS is empty at this PR (#68), so these tests add one entry on the
+# `make` command line, standing in for the per-agent PR that will list a real
+# directory; the directory itself need not hold a compose file, since the
+# stub `docker` never reads one.
+
+
+@pytest.fixture
+def agent_fixture_dir() -> Iterator[Path]:
+    path = REPO_ROOT / "docker" / "agent-fixture"
+    path.mkdir()
+    try:
+        yield path
+    finally:
+        path.rmdir()
+
+
+def test_stack_status_passes_agent_project_name(docker_stub: Path, agent_fixture_dir: Path) -> None:
+    _run_make("AGENT_DIRS=agent-fixture", "stack-status")
+    calls = _stub_calls(docker_stub.read_text())
+    ps_calls = _compose_calls(calls, "ps")
+    assert len(ps_calls) == 2, calls
+    agent_call = next(c for c in ps_calls if _flag_value(c, "--project-directory") == "docker/agent-fixture")
+    assert _flag_value(agent_call, "-p") == "derhost-agent-fixture", agent_call
+
+
+def test_stack_down_stops_agents_before_the_server(docker_stub: Path, agent_fixture_dir: Path) -> None:
+    _run_make("AGENT_DIRS=agent-fixture", "stack-down")
+    calls = _stub_calls(docker_stub.read_text())
+    down_calls = _compose_calls(calls, "down")
+    assert len(down_calls) == 2, calls
+    assert [_flag_value(c, "-p") for c in down_calls] == ["derhost-agent-fixture", "derhost-server"], down_calls
+
+
+def test_stack_up_passes_agent_project_name(docker_stub: Path, agent_fixture_dir: Path) -> None:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("127.0.0.1", STACK_PORT))
+    except OSError:
+        pytest.skip(f"127.0.0.1:{STACK_PORT} is already held by something else on this host")
+    finally:
+        sock.close()
+    _run_make("AGENT_DIRS=agent-fixture", "stack-up", overrides={"C": "all"})
+    calls = _stub_calls(docker_stub.read_text())
+    up_calls = _compose_calls(calls, "up")
+    assert len(up_calls) == 2, calls
+    agent_call = next(c for c in up_calls if _flag_value(c, "--project-directory") == "docker/agent-fixture")
+    assert _flag_value(agent_call, "-p") == "derhost-agent-fixture", agent_call
 
 
 # --- agent directories are a fixed list, not a filesystem glob. -----------

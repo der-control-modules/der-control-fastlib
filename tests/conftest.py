@@ -3,6 +3,8 @@ Test configuration for pytest
 """
 
 import asyncio
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +15,17 @@ from .utils import (
     get_random_open_port,
     get_test_port,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_real_docker_daemon(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Points DOCKER_HOST at a socket that does not exist, so a bug that reaches the real
+    # docker CLI fails to connect instead of touching a real stack. Matches any
+    # test_docker*.py module (not just this one); uses the process tempdir, not
+    # tmp_path, because a unix socket path is capped at 108 bytes.
+    if not Path(request.module.__file__).name.startswith("test_docker"):
+        return
+    monkeypatch.setenv("DOCKER_HOST", f"unix://{tempfile.gettempdir()}/derhost-test-no-daemon.sock")
 
 
 @pytest.fixture(scope="session")
