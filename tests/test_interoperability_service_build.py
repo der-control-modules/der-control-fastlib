@@ -164,9 +164,9 @@ def _run_build_sh(
 
 def test_build_canonicalizes_a_relative_der_agent_src(agent_checkout: Path, tmp_path: Path) -> None:
     """A relative DER_AGENT_SRC, resolved from an arbitrary caller cwd, must
-    reach compose as the same absolute directory check-clean.sh validated
-    (#68 review F1: compose resolves a relative path against build.sh's own
-    directory, not the caller's cwd, so the two disagreed)."""
+    reach compose as the same absolute directory check-clean.sh validated:
+    compose resolves a relative path against build.sh's own directory, not
+    the caller's cwd, so the two could otherwise disagree (#68)."""
     caller_cwd = tmp_path / "somewhere-else"
     caller_cwd.mkdir()
     relative = os.path.relpath(agent_checkout, start=caller_cwd)

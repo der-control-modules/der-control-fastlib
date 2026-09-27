@@ -65,8 +65,8 @@ def test_check_never_installs_agent_package_fixture_fails() -> None:
 
 
 def test_check_never_installs_agent_package_fixture_fails_on_appended_context() -> None:
-    # Control for #68 review M4: "-r requirements.txt" is still present, but
-    # a bare "." is appended, which also installs the build context itself.
+    # Control: "-r requirements.txt" is still present, but a bare "." is
+    # appended too, which also installs the build context itself (#68).
     with pytest.raises(AssertionError, match="pip install line"):
         check_never_installs_agent_package("RUN /app/.venv/bin/pip install -r requirements.txt .\n")
 
@@ -77,8 +77,8 @@ COPY_FROM_AGENT_SRC = "COPY --from=agent_src --chown=root:root src/interoperabil
 def check_copy_from_agent_src_is_scoped(text: str) -> None:
     # The only line copying from the agent_src build context must copy
     # exactly src/interoperability, never the whole context: agent_src is
-    # the agent's checkout (or, once archived, its committed tree, #68
-    # review F2), and a broader copy would ship whatever else lives there.
+    # the agent's checkout (or, once archived, its committed tree), and a
+    # broader copy would ship whatever else lives there (#68).
     for line in text.splitlines():
         if "--from=agent_src" not in line:
             continue
@@ -91,7 +91,6 @@ def test_dockerfile_copy_from_agent_src_is_scoped() -> None:
 
 
 def test_check_copy_from_agent_src_is_scoped_fixture_fails() -> None:
-    # Control for #68 review M5: copying the whole context instead of the
-    # named subdirectory.
+    # Control: copying the whole context instead of the named subdirectory (#68).
     with pytest.raises(AssertionError, match="COPY --from=agent_src line"):
         check_copy_from_agent_src_is_scoped("COPY --from=agent_src . ./\n")

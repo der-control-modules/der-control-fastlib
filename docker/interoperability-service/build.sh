@@ -22,8 +22,8 @@ main() {
   # Canonicalize before anything reads it: compose resolves a relative
   # additional_contexts path against its own project directory (this
   # script's directory), not the caller's cwd, so a relative DER_AGENT_SRC
-  # used as-is here named a different directory than the one compose built
-  # from (#68 review F1). An absolute path is not reinterpreted by compose.
+  # used as-is here could name a different directory than the one compose
+  # builds from. An absolute path is not reinterpreted by compose (#68).
   agent_src="$(cd -- "${agent_src_input}" >/dev/null 2>&1 && pwd -P)" || {
     echo "build: agent checkout not found: ${agent_src_input}" >&2
     exit 1
@@ -40,9 +40,9 @@ main() {
   trap 'rm -rf "${archive_dir}"' EXIT
   # git archive exports the committed tree only, so a gitignored or
   # otherwise uncommitted file in agent_src (an ALLOW_DIRTY=1 build allows
-  # exactly that) never reaches the build context or the image (#68 review
-  # F2). AGENT_REVISION above is read before this, from the checkout, since
-  # the archive itself carries no git history to read a HEAD from.
+  # exactly that) never reaches the build context or the image (#68).
+  # AGENT_REVISION above is read before this, from the checkout, since the
+  # archive itself carries no git history to read a HEAD from.
   git -C "${agent_src}" archive HEAD -- src/interoperability | tar -x -C "${archive_dir}"
   export DER_AGENT_SRC="${archive_dir}"
 
