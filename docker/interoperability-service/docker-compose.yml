@@ -1,0 +1,45 @@
+# interoperability-service agent, in its own container on derhost-net (#68).
+#
+# derhost-base:local must exist before this file builds (docker/server/
+# Dockerfile, --target base): run build.sh in this directory, which builds
+# it if missing and refuses a dirty agent checkout unless ALLOW_DIRTY=1.
+
+name: derhost-interoperability-service
+
+services:
+  derhost-interoperability-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      additional_contexts:
+        agent_src: ${DER_AGENT_SRC:?run build.sh}
+      args:
+        AGENT_REVISION: ${AGENT_REVISION:-unknown}
+    image: derhost-interoperability-service:local
+    container_name: derhost-interoperability-service
+    user: "1000"
+    environment:
+      VOLTTRON_HOME: /var/volttron
+      AEMS_MESSAGE_BUS_ADDRESS: ws://derhost-server:8000
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    mem_limit: 256m
+    pids_limit: 100
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os,sys; sys.exit(0 if any(b'start-legacy.py' in open(f'/proc/{p}/cmdline','rb').read() for p in os.listdir('/proc') if p.isdigit()) else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - derhost-net
+
+networks:
+  derhost-net:
+    external: true

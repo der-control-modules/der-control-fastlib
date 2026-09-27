@@ -1,0 +1,12 @@
+# Third-party packages src/interoperability actually imports (agent.py,
+# resource.py, mapping_engine.py, transform_registry.py,
+# transform_parser.py). volttron-core is intentionally excluded: installing
+# it switches agent.py's import guard to the modern volttron.client.* path,
+# which fastlib's compatibility shim does not cover.
+# Ranges mirror interoperability-service's pyproject.toml; a bare poetry
+# version pin ("x.y.z") is a caret constraint, ">=x.y.z,<(x+1).0.0".
+convtools>=1.14.7
+networkx>=3.0
+pydantic>=2.11.9,<3.0.0
+pyparsing>=3.2.5
+treelib>=1.8.0,<2.0.0
