@@ -12,8 +12,11 @@ import ipaddress
 import json
 import os
 import re
+import shlex
+import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 from pathlib import Path
 
@@ -33,6 +36,23 @@ _OVERRIDE_KEYS = ("DERHOST_PUBLISH_HOST", "EXPECTED", "DERHOST_CHECK_BASE_URL", 
 _MAKE_RECURSION_KEYS = ("MAKELEVEL", "MAKEFLAGS", "MFLAGS")
 
 
+@pytest.fixture(autouse=True)
+def _no_real_docker_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Every docker/compose subprocess a test in this module starts sees a
+    # DOCKER_HOST pointing at a socket that does not exist, so a test whose
+    # code path skips its intended stub and reaches the real docker CLI
+    # fails to connect instead of touching, or starting, a real stack.
+    # Fixed under the process's own tempdir rather than pytest's per-test
+    # tmp_path: a unix socket path is capped at 108 bytes by the kernel, and
+    # tmp_path's nested per-test directories blow past that (measured: over
+    # 130 chars made docker fail to even start, "path is too long", instead
+    # of failing to connect, which defeats this fixture's own purpose).
+    # `docker compose ... config` needs no daemon and is unaffected (M:
+    # `docker compose -f docker/server/docker-compose.yml config -q` still
+    # exits 0 under this same override).
+    monkeypatch.setenv("DOCKER_HOST", f"unix://{tempfile.gettempdir()}/derhost-test-no-daemon.sock")
+
+
 def _run_make(*args: str, overrides: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     for key in (*_OVERRIDE_KEYS, *_MAKE_RECURSION_KEYS):
@@ -50,7 +70,7 @@ def _run_make(*args: str, overrides: dict[str, str] | None = None) -> subprocess
     )
 
 
-# --- DERHOST_PUBLISH_HOST validation (stack-preflight). ---------------------
+# --- DERHOST_PUBLISH_HOST resolution (_stack-resolve-host). ------------------
 
 
 @pytest.mark.parametrize(
@@ -63,23 +83,23 @@ def _run_make(*args: str, overrides: dict[str, str] | None = None) -> subprocess
     ],
 )
 def test_preflight_accepts(value: str, expected_host: str) -> None:
-    result = _run_make("stack-preflight", overrides={"DERHOST_PUBLISH_HOST": value})
+    result = _run_make("_stack-resolve-host", overrides={"DERHOST_PUBLISH_HOST": value})
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == expected_host
 
 
 def test_preflight_rejects_scope_id() -> None:
     # Control: ipaddress.ip_address() accepts a scope id on its own (3.9+),
-    # so this refusal is not free; stack-preflight adds the check itself,
+    # so this refusal is not free; the resolver adds the check itself,
     # since docker compose's ports mapping cannot use a scoped address.
     assert ipaddress.ip_address("fe80::1%eth0").version == 6
-    result = _run_make("stack-preflight", overrides={"DERHOST_PUBLISH_HOST": "fe80::1%eth0"})
+    result = _run_make("_stack-resolve-host", overrides={"DERHOST_PUBLISH_HOST": "fe80::1%eth0"})
     assert result.returncode != 0
     assert "scope id" in result.stderr
 
 
 def test_preflight_rejects_localhost() -> None:
-    result = _run_make("stack-preflight", overrides={"DERHOST_PUBLISH_HOST": "localhost"})
+    result = _run_make("_stack-resolve-host", overrides={"DERHOST_PUBLISH_HOST": "localhost"})
     assert result.returncode != 0
     assert "not a valid IP address" in result.stderr
 
@@ -87,7 +107,7 @@ def test_preflight_rejects_localhost() -> None:
 def test_preflight_rejects_quote_injection_without_executing_it(tmp_path: Path) -> None:
     marker = tmp_path / "pwned"
     payload = f'127.0.0.1"; touch {marker}; #'
-    result = _run_make("stack-preflight", overrides={"DERHOST_PUBLISH_HOST": payload})
+    result = _run_make("_stack-resolve-host", overrides={"DERHOST_PUBLISH_HOST": payload})
     assert result.returncode != 0
     assert "not a valid IP address" in result.stderr
     assert not marker.exists()
@@ -110,6 +130,14 @@ def test_preflight_refuses_when_port_busy() -> None:
 def test_preflight_succeeds_once_port_is_free() -> None:
     # Control: the same command on the same host succeeds once nothing holds
     # the port, so the refusal above is about the port, not a broken command.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("127.0.0.1", STACK_PORT))
+    except OSError:
+        pytest.skip(f"127.0.0.1:{STACK_PORT} is already held by something else on this host")
+    finally:
+        sock.close()
     result = _run_make("stack-preflight", overrides={"DERHOST_PUBLISH_HOST": "127.0.0.1"})
     assert result.returncode == 0, result.stderr
 
@@ -145,7 +173,7 @@ def test_preflight_agrees_with_compose_on_an_export_prefixed_env_line() -> None:
     assert not env_path.exists(), "a real .env here would be clobbered by this test"
     env_path.write_text("export DERHOST_PUBLISH_HOST=0.0.0.0\n")
     try:
-        result = _run_make("stack-preflight")
+        result = _run_make("_stack-resolve-host")
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == _compose_config_host_ip() == "0.0.0.0"
     finally:
@@ -161,7 +189,7 @@ def test_preflight_agrees_with_compose_on_a_duplicate_env_file_key() -> None:
     # script) picks 127.0.0.2 here instead of compose's 0.0.0.0.
     env_path.write_text("DERHOST_PUBLISH_HOST=127.0.0.2\nDERHOST_PUBLISH_HOST=0.0.0.0\n")
     try:
-        result = _run_make("stack-preflight")
+        result = _run_make("_stack-resolve-host")
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == _compose_config_host_ip() == "0.0.0.0"
     finally:
@@ -173,7 +201,7 @@ def test_preflight_agrees_with_compose_when_env_is_set_empty_over_env_file() -> 
     assert not env_path.exists(), "a real .env here would be clobbered by this test"
     env_path.write_text("DERHOST_PUBLISH_HOST=127.0.0.2\n")
     try:
-        result = _run_make("stack-preflight", overrides={"DERHOST_PUBLISH_HOST": ""})
+        result = _run_make("_stack-resolve-host", overrides={"DERHOST_PUBLISH_HOST": ""})
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == _compose_config_host_ip({"DERHOST_PUBLISH_HOST": ""}) == "127.0.0.1"
     finally:
@@ -188,9 +216,10 @@ def test_preflight_agrees_with_compose_when_env_is_set_empty_over_env_file() -> 
 # variable by name; a Make-level reference ($(NAME)) in recipe text has the
 # same problem. docker.mk avoids both routes for every caller-supplied
 # name. Swept: DERHOST_PUBLISH_HOST, C, EXPECTED, DERHOST_CHECK_BASE_URL
-# (the four caller-supplied names) and OTHER_COMPOSE_FILES (filesystem-
-# derived from `wildcard`); `git grep` for `$(NAME)` inside docker.mk finds
-# no remaining reference to any of the five outside their own declaration.
+# (the four caller-supplied names); `git grep` for `$(NAME)` inside
+# docker.mk finds no remaining reference to any of the four outside their
+# own declaration. AGENT_DIRS (#68 item 5) is fixed text this file itself
+# declares, not caller- or filesystem-derived, so it carries no such test.
 
 _INJECTION_TARGET = {
     "DERHOST_PUBLISH_HOST": "stack-status",
@@ -214,27 +243,6 @@ def test_no_caller_value_is_make_expanded_via_command_line(tmp_path: Path, var_n
     payload = f"$(shell touch {marker})"
     result = _run_make(f"{var_name}={payload}", _INJECTION_TARGET[var_name])
     assert not marker.exists(), result.stdout + result.stderr
-
-
-def test_no_compose_directory_name_reaches_the_shell_as_code() -> None:
-    # The marker name carries no path separator: a directory name is one
-    # shell word once spliced into recipe text, and `make` runs recipes
-    # with REPO_ROOT as the working directory, so a bare filename in the
-    # backtick payload lands there if the backtick is ever executed.
-    marker_name = "pwned-dirname-test-no-compose-directory-name"
-    marker = REPO_ROOT / marker_name
-    payload_dir = REPO_ROOT / "docker" / f"x`touch {marker_name}`"
-    payload_dir.mkdir()
-    try:
-        (payload_dir / "docker-compose.yml").write_text("name: probe-dirname\nservices: {}\n")
-        result = _run_make("stack-status")
-        assert not marker.exists(), result.stdout + result.stderr
-    finally:
-        if marker.exists():
-            marker.unlink()
-        for child in payload_dir.iterdir():
-            child.unlink()
-        payload_dir.rmdir()
 
 
 # --- stack-check: GET /connections against a stub server. -------------------
@@ -384,7 +392,10 @@ def test_stack_check_default_follows_env_file() -> None:
     # .env is written only after the bind below succeeds: if the bind fails
     # (the address or port is already taken), nothing has written .env yet,
     # so there is nothing left behind for a next run's own guard to trip on.
-    server = http.server.HTTPServer((host, STACK_PORT), _ConnectionsHandler)
+    try:
+        server = http.server.HTTPServer((host, STACK_PORT), _ConnectionsHandler)
+    except OSError:
+        pytest.skip(f"{host}:{STACK_PORT} is already held by something else on this host")
     env_path.write_text(f"DERHOST_PUBLISH_HOST={host}\n")
     try:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -399,40 +410,6 @@ def test_stack_check_default_follows_env_file() -> None:
             server.server_close()
     finally:
         env_path.unlink()
-
-
-# --- smoke.sh: never tears down a stack it did not start. ------------------
-
-
-def test_smoke_does_not_tear_down_a_stack_it_never_started() -> None:
-    # Port 5410 busy simulates a stack already up (the same convention
-    # test_preflight_refuses_when_port_busy uses). If smoke.sh's trap were
-    # armed before `up`, or if `build` ran ahead of `preflight`, a refusal
-    # here would still tear the existing stack down.
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("127.0.0.1", STACK_PORT))
-    sock.listen(1)
-    try:
-        env = os.environ.copy()
-        for key in _OVERRIDE_KEYS:
-            env.pop(key, None)
-        env["DERHOST_SMOKE_STEP_TIMEOUT"] = "20"
-        result = subprocess.run(
-            [str(REPO_ROOT / "docker" / "smoke.sh")],
-            cwd=REPO_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        assert result.returncode != 0
-        assert "[smoke] preflight" in result.stdout, result.stdout
-        assert "[smoke] build" not in result.stdout, result.stdout
-        assert "[smoke] down" not in result.stdout, result.stdout
-    finally:
-        sock.close()
 
 
 # --- make help: unaffected by docker.mk joining $(MAKEFILE_LIST). -----------
@@ -453,3 +430,289 @@ def test_help_lists_targets_with_no_filename_prefix_and_includes_stack_targets()
     assert re.search(r"^\x1b\[36mtest\s*\x1b\[0m", result.stdout, re.MULTILINE), result.stdout
     # A target docker.mk itself defines, only reachable through the include.
     assert re.search(r"^\x1b\[36mstack-up\s*\x1b\[0m", result.stdout, re.MULTILINE), result.stdout
+
+
+# --- shared docker stub: replaces the real `docker` CLI on PATH. -----------
+#
+# Every invocation is logged (argv plus DERHOST_PUBLISH_HOST) before it is
+# dispatched, so a test can assert on exactly what reached `docker` without
+# any of it reaching a real daemon. `compose ... config` is the one
+# subcommand forwarded to the real binary, since it needs no daemon and its
+# real output is what a caller (DERHOST_RESOLVE_PY, the disjointness test)
+# actually depends on; every other subcommand this stub knows about returns
+# a canned, per-test-configurable result, and anything else fails loudly
+# rather than silently doing nothing.
+_DOCKER_STUB = """#!/usr/bin/env bash
+set -euo pipefail
+{
+    printf 'DERHOST_PUBLISH_HOST=%s ARGS:' "${DERHOST_PUBLISH_HOST-unset}"
+    printf ' %q' "$@"
+    printf '\\n'
+} >> "$STUB_LOG"
+
+if [ "${1-}" = "compose" ]; then
+    shift
+    case " $* " in
+        *" config "*)
+            exec "$STUB_REAL_DOCKER" compose "$@"
+            ;;
+        *" port "*)
+            printf '%s\\n' "${STUB_PORT_OUTPUT:-0.0.0.0:32768}"
+            exit "${STUB_PORT_EXIT:-0}"
+            ;;
+        *" up "*)
+            exit "${STUB_UP_EXIT:-0}"
+            ;;
+        *" down "*)
+            exit "${STUB_DOWN_EXIT:-0}"
+            ;;
+        *" build "*)
+            exit "${STUB_BUILD_EXIT:-0}"
+            ;;
+        *" ps "*)
+            exit "${STUB_COMPOSE_PS_EXIT:-0}"
+            ;;
+        *)
+            echo "stub: unexpected docker compose invocation: $*" >&2
+            exit 1
+            ;;
+    esac
+elif [ "${1-}" = "ps" ]; then
+    printf '%s\\n' "${STUB_DOCKER_PS_OUTPUT:-}"
+    exit 0
+elif [ "${1-}" = "network" ] && [ "${2-}" = "ls" ]; then
+    printf '%s\\n' "${STUB_NETWORK_LS_OUTPUT:-}"
+    exit 0
+elif [ "${1-}" = "volume" ] && [ "${2-}" = "ls" ]; then
+    printf '%s\\n' "${STUB_VOLUME_LS_OUTPUT:-}"
+    exit 0
+else
+    echo "stub: unexpected docker invocation: $*" >&2
+    exit 1
+fi
+"""
+
+
+@pytest.fixture
+def docker_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    bin_dir = tmp_path / "stub-bin"
+    bin_dir.mkdir()
+    stub_path = bin_dir / "docker"
+    stub_path.write_text(_DOCKER_STUB)
+    stub_path.chmod(0o755)
+    real_docker = shutil.which("docker")
+    assert real_docker is not None, "the real docker CLI must be on PATH to forward `compose ... config`"
+    log_path = tmp_path / "stub.log"
+    log_path.write_text("")
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    monkeypatch.setenv("STUB_LOG", str(log_path))
+    monkeypatch.setenv("STUB_REAL_DOCKER", real_docker)
+    return log_path
+
+
+def _stub_calls(log_text: str) -> list[list[str]]:
+    calls = []
+    for line in log_text.splitlines():
+        if not line.strip():
+            continue
+        _, _, rest = line.partition("ARGS:")
+        calls.append(shlex.split(rest))
+    return calls
+
+
+def _compose_calls(calls: list[list[str]], subcommand: str) -> list[list[str]]:
+    return [c for c in calls if c and c[0] == "compose" and subcommand in c]
+
+
+def _flag_value(call: list[str], flag: str) -> str | None:
+    if flag not in call:
+        return None
+    return call[call.index(flag) + 1]
+
+
+# --- item 1: smoke.sh's overlay shares no object names with the base. ------
+
+
+def test_smoke_overlay_config_shares_no_names_with_the_base_stack() -> None:
+    env = os.environ.copy()
+    for key in _OVERRIDE_KEYS:
+        env.pop(key, None)
+
+    def _config(*extra_files: str, project: str | None = None) -> dict:
+        cmd = ["docker", "compose"]
+        if project:
+            cmd += ["-p", project]
+        cmd += ["-f", "docker/server/docker-compose.yml"]
+        for f in extra_files:
+            cmd += ["-f", f]
+        cmd += ["--project-directory", "docker/server", "config", "--format", "json"]
+        result = subprocess.run(cmd, cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=30, check=True)
+        return json.loads(result.stdout)
+
+    base = _config()
+    merged = _config("docker/server/compose.smoke.yml", project="derhost-smoke")
+
+    base_svc = base["services"]["derhost-server"]
+    merged_svc = merged["services"]["derhost-server"]
+    base_names = {
+        base["name"],
+        base_svc["container_name"],
+        base_svc["image"],
+        base["networks"]["derhost-net"]["name"],
+        base["volumes"]["derhost-home"]["name"],
+    }
+    merged_names = {
+        merged["name"],
+        merged_svc["container_name"],
+        merged_svc["image"],
+        merged["networks"]["derhost-net"]["name"],
+        merged["volumes"]["derhost-home"]["name"],
+    }
+    assert base_names.isdisjoint(merged_names), (base_names, merged_names)
+    assert len(merged_svc["ports"]) == 1, merged_svc["ports"]
+    assert "published" not in merged_svc["ports"][0], merged_svc["ports"]
+
+
+# --- item 2: smoke.sh's own project-label refusal and trap discipline. -----
+
+
+def _run_smoke(extra_env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.setdefault("DERHOST_SMOKE_STEP_TIMEOUT", "20")
+    env.update(extra_env)
+    return subprocess.run(
+        [str(REPO_ROOT / "docker" / "smoke.sh")],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=40,
+        check=False,
+    )
+
+
+def test_smoke_refuses_when_a_leftover_object_exists(docker_stub: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STUB_DOCKER_PS_OUTPUT", "deadbeef0001")
+    result = _run_smoke({})
+    assert result.returncode != 0
+    assert "[smoke] refusing" in result.stdout, result.stdout
+    calls = _stub_calls(docker_stub.read_text())
+    assert not _compose_calls(calls, "build"), calls
+    assert not _compose_calls(calls, "up"), calls
+    assert not _compose_calls(calls, "down"), calls
+
+
+def test_smoke_tears_down_once_when_up_fails(docker_stub: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STUB_UP_EXIT", "1")
+    result = _run_smoke({})
+    assert result.returncode != 0
+    calls = _stub_calls(docker_stub.read_text())
+    assert len(_compose_calls(calls, "build")) == 1, calls
+    assert len(_compose_calls(calls, "up")) == 1, calls
+    down_calls = _compose_calls(calls, "down")
+    assert len(down_calls) == 1, calls
+
+
+def test_smoke_every_compose_call_carries_the_smoke_project_flag(docker_stub: Path) -> None:
+    # Happy path through build/up/port; the final `check` step has nothing
+    # real to reach and fails, which still exercises every compose call
+    # this property covers (including the down the failure triggers).
+    result = _run_smoke({})
+    assert result.returncode != 0
+    calls = _stub_calls(docker_stub.read_text())
+    compose_calls = [c for c in calls if c and c[0] == "compose"]
+    assert compose_calls, "no compose calls logged"
+    for subcommand in ("build", "up", "port", "down"):
+        matching = _compose_calls(calls, subcommand)
+        assert matching, f"no compose {subcommand} call logged: {calls}"
+    for call in compose_calls:
+        assert _flag_value(call, "-p") == "derhost-smoke", call
+
+
+# --- item 3: docker.mk pins the server compose project name. ---------------
+
+
+def test_stack_down_passes_server_project_name(docker_stub: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "zzz")
+    _run_make("stack-down")
+    calls = _stub_calls(docker_stub.read_text())
+    down_calls = _compose_calls(calls, "down")
+    assert down_calls, calls
+    for call in down_calls:
+        assert _flag_value(call, "-p") == "derhost-server", call
+
+
+def test_stack_status_passes_server_project_name(docker_stub: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "zzz")
+    _run_make("stack-status")
+    calls = _stub_calls(docker_stub.read_text())
+    ps_calls = _compose_calls(calls, "ps")
+    assert ps_calls, calls
+    for call in ps_calls:
+        assert _flag_value(call, "-p") == "derhost-server", call
+
+
+def test_stack_up_passes_server_project_name(docker_stub: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("127.0.0.1", STACK_PORT))
+    except OSError:
+        pytest.skip(f"127.0.0.1:{STACK_PORT} is already held by something else on this host")
+    finally:
+        sock.close()
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "zzz")
+    # `up` fails at once so `_stack-wait-healthy` (a 60s loop against a
+    # container this stub never creates) never runs.
+    monkeypatch.setenv("STUB_UP_EXIT", "1")
+    _run_make("stack-up", overrides={"C": "server"})
+    calls = _stub_calls(docker_stub.read_text())
+    up_calls = _compose_calls(calls, "up")
+    assert up_calls, calls
+    for call in up_calls:
+        assert _flag_value(call, "-p") == "derhost-server", call
+
+
+# --- item 5: agent directories are a fixed list, not a filesystem glob. ----
+
+
+def test_stack_status_ignores_an_unlisted_directory_even_with_a_compose_file(docker_stub: Path) -> None:
+    payload_dir = REPO_ROOT / "docker" / "x y"
+    payload_dir.mkdir()
+    try:
+        (payload_dir / "docker-compose.yml").write_text("name: probe-dirname\nservices: {}\n")
+        result = _run_make("stack-status")
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = _stub_calls(docker_stub.read_text())
+        compose_calls = [c for c in calls if c and c[0] == "compose"]
+        assert len(compose_calls) == 1, calls
+        assert _flag_value(compose_calls[0], "-p") == "derhost-server", compose_calls
+    finally:
+        for child in payload_dir.iterdir():
+            child.unlink()
+        payload_dir.rmdir()
+
+
+# --- item 6: DERHOST_PUBLISH_HOST reaches stack-preflight's sub-make. -------
+
+
+def test_stack_up_forwards_publish_host_through_the_preflight_submake(
+    docker_stub: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # docker.mk's stack-up passes DERHOST_PUBLISH_HOST to the `stack-preflight`
+    # sub-make explicitly; without that, `_stack-resolve-host`'s own config
+    # call inside it sees no override and resolves the compose file's
+    # 127.0.0.1 default instead of the caller's 127.0.0.2.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("127.0.0.2", STACK_PORT))
+    except OSError:
+        pytest.skip(f"127.0.0.2:{STACK_PORT} is already held by something else on this host")
+    finally:
+        sock.close()
+    monkeypatch.setenv("STUB_UP_EXIT", "1")
+    _run_make("stack-up", overrides={"C": "server", "DERHOST_PUBLISH_HOST": "127.0.0.2"})
+    config_lines = [line for line in docker_stub.read_text().splitlines() if "ARGS:" in line and "config" in line]
+    assert config_lines, "no compose config call logged"
+    assert all("DERHOST_PUBLISH_HOST=127.0.0.2" in line for line in config_lines), config_lines
