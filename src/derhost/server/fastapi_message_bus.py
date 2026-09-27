@@ -325,7 +325,11 @@ class FastAPIMessageBus(MessageBus):
         @self.app.websocket("/ws/{identity}")
         async def websocket_endpoint(websocket: WebSocket, identity: str):
             # In a production environment, we'd validate the credentials here
-            await self.manager.connect(websocket, identity)
+            if not await self.manager.connect(websocket, identity):
+                # Refused: the socket was closed, never accepted. Reading
+                # from it here would raise and run the cleanup below against
+                # the live agent's identity (der-control-modules/der-control-fastlib#80).
+                return
 
             try:
                 while True:
@@ -469,10 +473,10 @@ class FastAPIMessageBus(MessageBus):
 
             except WebSocketDisconnect:
                 _log.debug(f"WebSocket disconnect for {identity}")
-                self.manager.disconnect(identity)
+                self.manager.disconnect(identity, websocket)
             except Exception as e:
                 _log.error(f"Error in websocket connection for {identity}: {e}")
-                self.manager.disconnect(identity)
+                self.manager.disconnect(identity, websocket)
 
         @self.app.websocket("/monitor/{monitor_id}")
         async def monitor_websocket(websocket: WebSocket, monitor_id: str):
@@ -486,10 +490,10 @@ class FastAPIMessageBus(MessageBus):
                     _log.debug(f"Monitor {monitor_id} sent: {_redact_secrets(data)}")
             except WebSocketDisconnect:
                 _log.debug(f"Monitor {monitor_id} disconnected")
-                self.manager.disconnect_monitor(monitor_id)
+                self.manager.disconnect_monitor(monitor_id, websocket)
             except Exception as e:
                 _log.error(f"Error in monitor websocket for {monitor_id}: {e}")
-                self.manager.disconnect_monitor(monitor_id)
+                self.manager.disconnect_monitor(monitor_id, websocket)
 
         @self.app.get("/config-store/list")
         async def list_configs(agent_id: str | None = None):
