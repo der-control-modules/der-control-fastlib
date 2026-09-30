@@ -1,11 +1,8 @@
 """
 Test issue #83: a restarting agent can be refused for 30 s or more.
 
-T6a-T6f are implemented below, one test function per id except T6d, which
-is the existing `#80` regression test in
-`test_duplicate_connection_state.py::TestDuplicateConnectionDoesNotEvictLiveAgent::
-test_refused_duplicate_preserves_state_and_rpc_delivery`: unchanged, and
-verified separately rather than duplicated here.
+The refused-duplicate case that keeps a live agent's state is the #80
+regression test in `test_duplicate_connection_state.py`, not repeated here.
 
 These tests run against a live uvicorn server (`MessageBusManager`, the same
 route `test_duplicate_connection_state.py` uses for #80), not Starlette's
@@ -49,8 +46,8 @@ def _uvicorn_call_kwargs(dotted_name: str) -> list[dict[str, ast.expr]]:
     return calls
 
 
-class TestT6aRestartReconnectsPromptly:
-    """T6a: a restart must not inherit the peer's RPC-wait lockout."""
+class TestRestartReconnectsPromptly:
+    """A restart must not inherit the peer's RPC-wait lockout."""
 
     @pytest.fixture(autouse=True)
     def setup(self, message_bus_manager_fixture):
@@ -91,8 +88,8 @@ class TestT6aRestartReconnectsPromptly:
             except ConnectionError as e:
                 elapsed = time.monotonic() - started
                 pytest.fail(
-                    f"restart refused for >{elapsed:.1f}s (design requires <5s): {e}. "
-                    "Design reason: the receive loop for the old socket is blocked "
+                    f"restart refused for >{elapsed:.1f}s (must be under 5s): {e}. "
+                    "Cause: the receive loop for the old socket is blocked "
                     "inside handle_rpc's 30s wait, so it never reads the TCP "
                     "close and keeps reporting CONNECTED (#83)."
                 )
@@ -121,8 +118,8 @@ class TestT6aRestartReconnectsPromptly:
                     pass
 
 
-class TestT6bKeepaliveConfiguredNotDefaulted:
-    """T6b: uvicorn's ping/pong keepalive is set explicitly, not left at 20/20."""
+class TestKeepaliveConfiguredNotDefaulted:
+    """Uvicorn's ping/pong keepalive is set explicitly, not left at 20/20."""
 
     def test_both_uvicorn_entry_points_set_ws_ping_defaults(self):
         for label in ("uvicorn.Config", "uvicorn.run"):
@@ -132,20 +129,19 @@ class TestT6bKeepaliveConfiguredNotDefaulted:
             missing = [n for n in ("ws_ping_interval", "ws_ping_timeout") if n not in kwargs]
             assert not missing, (
                 f"{label}(...) at fastapi_message_bus.py has no {missing}. "
-                "Design reason (#83): neither call site sets it, so uvicorn's "
+                "Cause (#83): neither call site sets it, so uvicorn's "
                 "own defaults (20.0/20.0) apply."
             )
             for name in ("ws_ping_interval", "ws_ping_timeout"):
                 value_node = kwargs[name]
                 if isinstance(value_node, ast.Constant):
                     assert value_node.value == 10, (
-                        f"{label}(...) passes {name}={value_node.value}, design decision 1.2 wants 10"
+                        f"{label}(...) passes {name}={value_node.value}, expected 10"
                     )
 
     def test_constructor_defaults_for_ws_ping_are_10(self):
-        """PR #100 review: the AST check above only reads the call sites;
-        nothing pinned the FastAPIMessageBus constructor defaults the call
-        sites forward."""
+        """The AST check above only reads the call sites; this pins the
+        FastAPIMessageBus constructor defaults the call sites forward."""
         sig = inspect.signature(fastapi_message_bus_module.FastAPIMessageBus.__init__)
         assert sig.parameters["ws_ping_interval"].default == 10
         assert sig.parameters["ws_ping_timeout"].default == 10
@@ -174,7 +170,7 @@ class TestT6bKeepaliveConfiguredNotDefaulted:
                     gevent.sleep(0.2)
             assert replaced, (
                 f"identity still refused after 5s of a stalled peer (last: {last_error}). "
-                "Design reason: with the fixture at 1s/1s the stalled peer should be "
+                "Expected: with the fixture at 1s/1s the stalled peer should be "
                 "failed by uvicorn's own keepalive (#83) within one cycle."
             )
         finally:
@@ -184,8 +180,8 @@ class TestT6bKeepaliveConfiguredNotDefaulted:
                 pass
 
 
-class TestT6cDuplicateGetsNamedRefusal:
-    """T6c: a live duplicate gets HTTP 409 naming the identity, not a bare close."""
+class TestDuplicateGetsNamedRefusal:
+    """A live duplicate gets HTTP 409 naming the identity, not a bare close."""
 
     @pytest.fixture(autouse=True)
     def setup(self, message_bus_manager_fixture):
@@ -204,7 +200,7 @@ class TestT6cDuplicateGetsNamedRefusal:
             response = excinfo.value.response
             assert response.status_code == 409, (
                 f"got HTTP {response.status_code}, body {bytes(response.body)!r}. "
-                "Design reason (#83): a pre-accept close today becomes a 403 with "
+                "Cause (#83): a pre-accept close today becomes a 403 with "
                 "an empty body; the reason never reaches the wire."
             )
             assert identity.encode() in bytes(response.body)
@@ -212,8 +208,8 @@ class TestT6cDuplicateGetsNamedRefusal:
             agent1.disconnect()
 
 
-class TestT6eConcurrentConnectsToOneFreeIdentity:
-    """T6e control: reservation must not admit two winners under contention."""
+class TestConcurrentConnectsToOneFreeIdentity:
+    """Reservation must not admit two winners under contention."""
 
     @pytest.fixture(autouse=True)
     def setup(self, message_bus_manager_fixture):
@@ -248,14 +244,14 @@ class TestT6eConcurrentConnectsToOneFreeIdentity:
             gevent.sleep(0.05)
 
         assert not bad_rounds, (
-            f"rounds with != 1 accepted: {bad_rounds}. Design reason: this control "
-            "rules out a reservation-vs-accept race; it must stay green after #83's "
-            "fix reserves the identity before any await."
+            f"rounds with != 1 accepted: {bad_rounds}. This control "
+            "rules out a reservation-vs-accept race; it must stay green while the "
+            "identity is reserved before any await."
         )
 
 
-class TestT6fIdleAgentSurvivesFastKeepalive:
-    """T6f control: keepalive must never evict a live, answering client."""
+class TestIdleAgentSurvivesFastKeepalive:
+    """Keepalive must never evict a live, answering client."""
 
     def test_idle_agent_stays_registered_across_5_keepalive_cycles(self, message_bus_manager_fixture):
         manager = message_bus_manager_fixture
