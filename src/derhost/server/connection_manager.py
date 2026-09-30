@@ -48,6 +48,8 @@ class ConnectionManager:
         self.prefix_subscriptions: dict[str, dict[str, list[tuple[str, SubscriptionCallback]]]] = {}
         self.regex_subscriptions: dict[str, list[tuple[Pattern, str, SubscriptionCallback]]] = {}
         self.rpc_responses: dict[str, asyncio.Future] = {}
+        # One deadline covers forwarding an RPC and waiting for its answer.
+        self.rpc_timeout: float = 30.0  # BACnet operations can be slow
         self._status_task: asyncio.Task = None
         self._status_reporter_started = False
         self._no_connections_count = 0  # Track consecutive periods with no connections
@@ -66,9 +68,9 @@ class ConnectionManager:
             socket, since it was never accepted (der-control-modules/der-control-fastlib#80).
         """
         # VOLTTRON compatibility: Only one agent per identity allowed. Any
-        # state short of DISCONNECTED still owns the identity (#83 decision
-        # 5): a socket whose accept() has not finished (CONNECTING) must
-        # also be refused, or a concurrent connect can slip in.
+        # state short of DISCONNECTED still owns the identity: a socket whose
+        # accept() has not finished (CONNECTING) must also be refused, or a
+        # concurrent connect can slip in.
         existing_ws = self.active_connections.get(identity)
         if existing_ws is not None:
             if existing_ws.client_state != WebSocketState.DISCONNECTED:
@@ -97,10 +99,10 @@ class ConnectionManager:
         try:
             await websocket.accept()
         except BaseException:
-            # A failed accept must release the reservation now (#83 decision
-            # 5): otherwise this identity is refused with 409 until the
-            # server restarts, since the entry never reaches DISCONNECTED on
-            # its own.
+            # A failed accept must release the reservation now: otherwise
+            # this identity is refused with 409 until the server restarts,
+            # since the entry never reaches DISCONNECTED on its own.
+            _log.warning(f"Accept failed for {identity}; releasing its reservation", exc_info=True)
             self.disconnect(identity, websocket)
             raise
 
@@ -143,7 +145,7 @@ class ConnectionManager:
         -------
             True only when `send_json` completed; existing callers that
             ignore the return value are unaffected. False when there is no
-            live socket to send to (#83 decision 4).
+            live socket to send to.
         """
         if identity in self.active_connections:
             websocket = self.active_connections[identity]
@@ -262,10 +264,10 @@ class ConnectionManager:
         """Send `message` on `websocket`, only while it is still the socket
         registered for `identity`.
 
-        Guards every reply `handle_rpc` sends to its caller (#83 decision
-        3.3): the caller may have reconnected under the same identity on a
-        new socket by the time a peer's answer or a forward failure comes
-        back, and a stale reply must not reach the replacement.
+        Guards every reply `handle_rpc` sends to its caller: the caller may
+        have reconnected under the same identity on a new socket by the time
+        a peer's answer or a forward failure comes back, and a stale reply
+        must not reach the replacement.
         """
         if self.active_connections.get(identity) is websocket:
             await websocket.send_json(message)
@@ -285,8 +287,8 @@ class ConnectionManager:
         """Handle RPC request between clients.
 
         Every reply to the caller goes to `sender_ws` through
-        `_send_to_socket_if_current` (#83 decision 3.3), never by an
-        identity lookup that could resolve to a different, later socket.
+        `_send_to_socket_if_current`, never by an identity lookup that could
+        resolve to a different, later socket.
         """
         # Log at INFO level with full parameters for visibility
         _log.info(
@@ -319,13 +321,16 @@ class ConnectionManager:
         future = self.register_rpc_response_future(msg_id)
 
         try:
-            # Send to the target peer. A failed forward (#83 decision 4)
-            # answers the caller instead of leaving the future to time out.
+            # A failed or stalled forward answers the caller instead of
+            # leaving the future to time out. The forward shares the RPC
+            # deadline: a peer that stops reading must not hold the call, and
+            # the caller's in-flight slot, without limit.
+            deadline = asyncio.get_running_loop().time() + self.rpc_timeout
             forward_exc: Exception | None = None
             delivered = False
             try:
                 _log.debug(f"Sending RPC request to {peer}")
-                delivered = await self.send_message(peer, rpc_message)
+                delivered = await asyncio.wait_for(self.send_message(peer, rpc_message), self.rpc_timeout)
             except Exception as e:
                 forward_exc = e
 
@@ -342,7 +347,8 @@ class ConnectionManager:
             # Wait for response with timeout
             try:
                 _log.debug(f"Waiting for RPC response for msg_id {msg_id}")
-                response = await asyncio.wait_for(future, 30.0)  # 30 second timeout for BACnet operations
+                remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+                response = await asyncio.wait_for(future, remaining)
                 _log.info(f"RPC response from {peer} to {sender}: {method} returned {redact_secrets(response)}")
                 _log.debug(f"Received RPC response for msg_id {msg_id}: {truncate_debug_message(response)}")
                 await self._send_to_socket_if_current(
@@ -351,7 +357,7 @@ class ConnectionManager:
             except asyncio.TimeoutError:
                 _log.warning(
                     f"RPC request from {sender} to {peer}.{method}(args={redact_secrets(args)}, "
-                    f"kwargs={redact_secrets(kwargs)}) timed out after 30s [msg_id: {msg_id}]"
+                    f"kwargs={redact_secrets(kwargs)}) timed out after {self.rpc_timeout:g}s [msg_id: {msg_id}]"
                 )
                 _log.debug(f"RPC request timed out for msg_id {msg_id}")
                 await self._send_to_socket_if_current(
@@ -374,9 +380,9 @@ class ConnectionManager:
                 )
         finally:
             # Release this call's own future even on asyncio.CancelledError,
-            # which `except Exception` above never catches (#83 decision
-            # 3.2). The `is future` check means this never clears a later
-            # caller's own future registered under the same msg_id.
+            # which `except Exception` above never catches. The `is future`
+            # check means this never clears a later caller's own future
+            # registered under the same msg_id.
             if self.rpc_responses.get(msg_id) is future:
                 del self.rpc_responses[msg_id]
 

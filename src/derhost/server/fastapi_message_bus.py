@@ -279,13 +279,13 @@ class FastAPIMessageBus(MessageBus):
         _check_jwt_secret_key()
         # Set explicitly rather than left at uvicorn's own defaults (20/20):
         # a silent peer is then detected in about one 20s cycle instead of
-        # about 40s (#83 decision 1.2).
+        # about 40s.
         self.ws_ping_interval = ws_ping_interval
         self.ws_ping_timeout = ws_ping_timeout
         if max_rpcs_in_flight < 1:
             raise ValueError(f"max_rpcs_in_flight must be at least 1, got {max_rpcs_in_flight}")
-        # Bounds one connection's own in-flight RPC tasks (#83 decision 3.1);
-        # 128 is a guess, not a measured production fan-out.
+        # Bounds one connection's own in-flight RPC tasks; 128 is a guess,
+        # not a measured production fan-out.
         self.max_rpcs_in_flight = max_rpcs_in_flight
         self.app = FastAPI(title="AEMS MessageBus", lifespan=lifespan)
 
@@ -347,17 +347,23 @@ class FastAPIMessageBus(MessageBus):
 
             # RPC calls run as tasks this connection owns rather than being
             # awaited inline: an unanswering peer must not block this loop
-            # from reading its own socket's disconnect (#83 decision 1.1).
+            # from reading its own socket's disconnect.
             # Referenced here until done so a task is never GC'd mid-flight.
             rpc_tasks: set[asyncio.Task] = set()
+            # True from the first refusal at the cap until the connection
+            # drops below it, so a flood of refusals logs one warning.
+            cap_warned = False
 
             def _on_rpc_task_done(task: asyncio.Task) -> None:
+                nonlocal cap_warned
                 rpc_tasks.discard(task)
+                if len(rpc_tasks) < self.max_rpcs_in_flight:
+                    cap_warned = False
                 if task.cancelled():
                     return
                 exc = task.exception()
                 if exc is not None:
-                    _log.error(f"Unhandled error in RPC task for {identity}: {exc}")
+                    _log.error(f"Unhandled error in RPC task for {identity}: {exc}", exc_info=exc)
 
             try:
                 while True:
@@ -467,13 +473,14 @@ class FastAPIMessageBus(MessageBus):
                             msg_id = data["msg_id"]
 
                             if len(rpc_tasks) >= self.max_rpcs_in_flight:
-                                # #83 decision 3.1: bound RPCs per connection
-                                # so one busy agent cannot grow its own task
-                                # set without limit.
-                                _log.warning(
-                                    f"Connection {identity} at RPC in-flight cap "
-                                    f"({self.max_rpcs_in_flight}); rejecting new RPCs"
-                                )
+                                # Bounds RPCs per connection so one busy agent
+                                # cannot grow its own task set without limit.
+                                if not cap_warned:
+                                    cap_warned = True
+                                    _log.warning(
+                                        f"Connection {identity} at RPC in-flight cap "
+                                        f"({self.max_rpcs_in_flight}); rejecting new RPCs"
+                                    )
                                 _log.debug(f"Rejecting RPC {msg_id} from {identity}: in-flight cap reached")
                                 await websocket.send_json(
                                     {
@@ -531,8 +538,8 @@ class FastAPIMessageBus(MessageBus):
                 _log.error(f"Error in websocket connection for {identity}: {e}")
                 self.manager.disconnect(identity, websocket)
             finally:
-                # #83 decision 3.2: a connection's own RPC tasks must not
-                # outlive it waiting on peers that will never answer.
+                # A connection's own RPC tasks must not outlive it waiting on
+                # peers that will never answer.
                 if rpc_tasks:
                     _log.info(f"Cancelling {len(rpc_tasks)} in-flight RPC task(s) for {identity}")
                     for task in list(rpc_tasks):
