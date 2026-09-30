@@ -42,7 +42,12 @@ class MessageBusManager:
         self.host = "127.0.0.1"
 
     def start_bus(
-        self, port: int | None = None, host: str = "127.0.0.1"
+        self,
+        port: int | None = None,
+        host: str = "127.0.0.1",
+        ws_ping_interval: float | None = None,
+        ws_ping_timeout: float | None = None,
+        max_rpcs_in_flight: int | None = None,
     ) -> tuple[FastAPIMessageBus, int]:
         """
         Start a message bus for testing.
@@ -50,6 +55,13 @@ class MessageBusManager:
         Args:
             port: Specific port to use, or None for random port
             host: Host to bind to (default: 127.0.0.1)
+            ws_ping_interval: Forwarded to FastAPIMessageBus when given (#83:
+                lets a test shorten the keepalive cycle instead of waiting on
+                the production default).
+            ws_ping_timeout: Forwarded to FastAPIMessageBus when given (#83).
+            max_rpcs_in_flight: Forwarded to FastAPIMessageBus when given
+                (#83), to test the per-connection RPC cap without waiting on
+                the production default of 128.
 
         Returns:
             Tuple of (message_bus_instance, port_number)
@@ -70,9 +82,17 @@ class MessageBusManager:
         # Create temporary config directory
         self.temp_config_dir = tempfile.mkdtemp(prefix="aems_test_config_")
 
-        # Create and start the bus
+        # Create and start the bus. Only forwarded when given, so every
+        # existing caller keeps today's FastAPIMessageBus defaults unchanged.
+        bus_kwargs = {}
+        if ws_ping_interval is not None:
+            bus_kwargs["ws_ping_interval"] = ws_ping_interval
+        if ws_ping_timeout is not None:
+            bus_kwargs["ws_ping_timeout"] = ws_ping_timeout
+        if max_rpcs_in_flight is not None:
+            bus_kwargs["max_rpcs_in_flight"] = max_rpcs_in_flight
         self.bus = FastAPIMessageBus(
-            host=host, port=port, config_store_dir=self.temp_config_dir
+            host=host, port=port, config_store_dir=self.temp_config_dir, **bus_kwargs
         )
 
         print(

@@ -135,12 +135,18 @@ class TestSimpleChain:
         ), f"Should complete quickly, took {end_time - start_time:.2f}s"
 
     def test_concurrent_rpc_handling(self):
-        """Verify that multiple concurrent RPC calls work correctly without blocking."""
+        """Verify that multiple concurrent RPC calls overlap rather than run one after another."""
+
+        # Each call records its own [start, end) window so the test can check
+        # for overlap directly, instead of inferring it from total wall time.
+        call_windows = []
 
         # Set up Agent B with a method that has a delay
         def slow_method(value, delay=0.5):
             _log.debug(f"Agent B executing slow_method with {value}, delay={delay}")
+            start = time.time()
             gevent.sleep(delay)  # Simulate processing time
+            call_windows.append((start, time.time()))
             return f"Agent B slow result: {value}"
 
         self.agent_b.vip.rpc.export_method("slow_method", slow_method)
@@ -200,19 +206,29 @@ class TestSimpleChain:
                 response[i] == expected
             ), f"Item {i} mismatch: expected {expected}, got {response[i]}"
 
-        # Should complete in roughly the time of all calls running concurrently
-        # 5 calls of 0.5s each should take ~2.5s when running concurrently (not sequentially blocked)
-        # This proves the RPC system is not blocking and all calls can run concurrently
-        min_expected_time = 2.0  # Should take at least 2s (5 * 0.5s - some tolerance)
-        max_expected_time = 3.5  # Allow overhead but shouldn't take much longer
+        # A serialised implementation takes the sum of the individual delays;
+        # a concurrent one takes well under that. There is no lower bound
+        # here: a lower bound close to the serial sum is exactly the
+        # assumption that made this test pass for a serialised loop.
+        serial_sum = 0.5 * len(test_values)
+        assert end_time - start_time < serial_sum * 0.6, (
+            f"Concurrent calls took {end_time - start_time:.2f}s, not well "
+            f"under the serial sum of {serial_sum:.2f}s"
+        )
 
-        assert (
-            end_time - start_time >= min_expected_time
-        ), f"Calls completed too quickly: {end_time - start_time:.2f}s (may not be running the full delay)"
-        assert (
-            end_time - start_time < max_expected_time
-        ), f"Concurrent calls took too long: {end_time - start_time:.2f}s"
+        # Overlap is the direct evidence of concurrency: a serialised loop
+        # produces windows that never overlap, whatever the total time is.
+        assert len(call_windows) == len(test_values), (
+            f"Expected {len(test_values)} call windows, got {len(call_windows)}"
+        )
+        overlapping = any(
+            a_start < b_end and b_start < a_end
+            for i, (a_start, a_end) in enumerate(call_windows)
+            for j, (b_start, b_end) in enumerate(call_windows)
+            if i != j
+        )
+        assert overlapping, f"No overlapping call windows: {call_windows}"
 
         _log.info(
-            f"✅ SUCCESS: {len(test_values)} concurrent RPC calls completed efficiently!"
+            f"SUCCESS: {len(test_values)} concurrent RPC calls completed efficiently!"
         )

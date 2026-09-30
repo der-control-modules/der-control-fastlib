@@ -272,8 +272,21 @@ class FastAPIMessageBus(MessageBus):
         reload: bool = False,
         reload_dirs: list = None,
         reload_delay: float = 0.25,
+        ws_ping_interval: float = 10,
+        ws_ping_timeout: float = 10,
+        max_rpcs_in_flight: int = 128,
     ):
         _check_jwt_secret_key()
+        # Set explicitly rather than left at uvicorn's own defaults (20/20):
+        # a silent peer is then detected in about one 20s cycle instead of
+        # about 40s.
+        self.ws_ping_interval = ws_ping_interval
+        self.ws_ping_timeout = ws_ping_timeout
+        if max_rpcs_in_flight < 1:
+            raise ValueError(f"max_rpcs_in_flight must be at least 1, got {max_rpcs_in_flight}")
+        # Bounds one connection's own in-flight RPC tasks; 128 is a guess,
+        # not a measured production fan-out.
+        self.max_rpcs_in_flight = max_rpcs_in_flight
         self.app = FastAPI(title="AEMS MessageBus", lifespan=lifespan)
 
         # Setup templates directory
@@ -326,10 +339,31 @@ class FastAPIMessageBus(MessageBus):
         async def websocket_endpoint(websocket: WebSocket, identity: str):
             # In a production environment, we'd validate the credentials here
             if not await self.manager.connect(websocket, identity):
-                # Refused: the socket was closed, never accepted. Reading
-                # from it here would raise and run the cleanup below against
-                # the live agent's identity (der-control-modules/der-control-fastlib#80).
+                # Refused: a 409 denial response was already sent, and the
+                # socket was never accepted. Reading from it here would raise
+                # and run the cleanup below against the live agent's identity
+                # (der-control-modules/der-control-fastlib#80).
                 return
+
+            # RPC calls run as tasks this connection owns rather than being
+            # awaited inline: an unanswering peer must not block this loop
+            # from reading its own socket's disconnect.
+            # Referenced here until done so a task is never GC'd mid-flight.
+            rpc_tasks: set[asyncio.Task] = set()
+            # True from the first refusal at the cap until the connection
+            # drops below it, so a flood of refusals logs one warning.
+            cap_warned = False
+
+            def _on_rpc_task_done(task: asyncio.Task) -> None:
+                nonlocal cap_warned
+                rpc_tasks.discard(task)
+                if len(rpc_tasks) < self.max_rpcs_in_flight:
+                    cap_warned = False
+                if task.cancelled():
+                    return
+                exc = task.exception()
+                if exc is not None:
+                    _log.error(f"Unhandled error in RPC task for {identity}: {exc}", exc_info=exc)
 
             try:
                 while True:
@@ -438,14 +472,40 @@ class FastAPIMessageBus(MessageBus):
                             kwargs = data.get("kwargs", {})
                             msg_id = data["msg_id"]
 
-                            await self.manager.handle_rpc(
-                                sender=identity,
-                                peer=peer,
-                                method=method,
-                                args=args,
-                                kwargs=kwargs,
-                                msg_id=msg_id,
-                            )
+                            if len(rpc_tasks) >= self.max_rpcs_in_flight:
+                                # Bounds RPCs per connection so one busy agent
+                                # cannot grow its own task set without limit.
+                                if not cap_warned:
+                                    cap_warned = True
+                                    _log.warning(
+                                        f"Connection {identity} at RPC in-flight cap "
+                                        f"({self.max_rpcs_in_flight}); rejecting new RPCs"
+                                    )
+                                _log.debug(f"Rejecting RPC {msg_id} from {identity}: in-flight cap reached")
+                                await websocket.send_json(
+                                    {
+                                        "type": "rpc_error",
+                                        "msg_id": msg_id,
+                                        "error": (
+                                            "too many RPCs in flight on this connection "
+                                            f"(limit {self.max_rpcs_in_flight}); retry later"
+                                        ),
+                                    }
+                                )
+                            else:
+                                task = asyncio.create_task(
+                                    self.manager.handle_rpc(
+                                        sender=identity,
+                                        sender_ws=websocket,
+                                        peer=peer,
+                                        method=method,
+                                        args=args,
+                                        kwargs=kwargs,
+                                        msg_id=msg_id,
+                                    )
+                                )
+                                rpc_tasks.add(task)
+                                task.add_done_callback(_on_rpc_task_done)
 
                     elif data["type"] == "rpc_response":
                         # Handle RPC response messages
@@ -477,6 +537,13 @@ class FastAPIMessageBus(MessageBus):
             except Exception as e:
                 _log.error(f"Error in websocket connection for {identity}: {e}")
                 self.manager.disconnect(identity, websocket)
+            finally:
+                # A connection's own RPC tasks must not outlive it waiting on
+                # peers that will never answer.
+                if rpc_tasks:
+                    _log.info(f"Cancelling {len(rpc_tasks)} in-flight RPC task(s) for {identity}")
+                    for task in list(rpc_tasks):
+                        task.cancel()
 
         @self.app.websocket("/monitor/{monitor_id}")
         async def monitor_websocket(websocket: WebSocket, monitor_id: str):
@@ -1193,6 +1260,8 @@ class FastAPIMessageBus(MessageBus):
             reload=self.reload,
             reload_dirs=self.reload_dirs,
             reload_delay=self.reload_delay,
+            ws_ping_interval=self.ws_ping_interval,
+            ws_ping_timeout=self.ws_ping_timeout,
         )
 
         # Create and start the server
@@ -1413,6 +1482,8 @@ def _main():
             reload=args.reload,
             log_level="debug",
             log_config=None,  # Disable uvicorn's logging config since we set it up ourselves
+            ws_ping_interval=server.ws_ping_interval,
+            ws_ping_timeout=server.ws_ping_timeout,
         )
     else:
         # Use the threaded approach for production
