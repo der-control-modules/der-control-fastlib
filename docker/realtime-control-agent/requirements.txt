@@ -1,0 +1,11 @@
+# Third-party packages rt_control actually imports beyond the standard
+# library (agent.py, ess/__init__.py, modes/*, use_cases/*): gevent only,
+# already provided by derhost-base's own venv (der-control-fastlib's
+# pyproject.toml pins gevent>=25.9.1,<26.10.0 as a base dependency, not an
+# extra), so nothing is installed here.
+# volttron and julia are intentionally excluded: installing volttron would
+# switch agent.py's import guard to the modern volttron.client.* path,
+# which fastlib's compatibility shim does not cover, and no mode configured
+# here sets use_julia=True (every rt_control/modes/*/*.py mode defaults
+# use_julia to False; Julia is not installed in this image, per the
+# operator's native-control-modes-only decision).
