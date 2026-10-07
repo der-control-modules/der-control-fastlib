@@ -9,6 +9,7 @@ refusal path the 409 travels on.
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -43,9 +44,24 @@ class _StubMonitorSocket:
     def __init__(self, state: WebSocketState):
         self.client_state = state
         self.sent: list[dict] = []
+        self.denials: list[object] = []
 
     async def send_json(self, data: dict) -> None:
         self.sent.append(data)
+
+    async def send_denial_response(self, response) -> None:
+        self.denials.append(response)
+
+    async def accept(self) -> None:
+        self.client_state = WebSocketState.CONNECTED
+
+
+class _YieldingAcceptSocket(_StubMonitorSocket):
+    """A socket whose accept() yields to the loop, as a real handshake does."""
+
+    async def accept(self) -> None:
+        await asyncio.sleep(0)
+        self.client_state = WebSocketState.CONNECTED
 
 
 class TestDuplicateMonitorIdIsRefused:
@@ -98,6 +114,26 @@ class TestDuplicateMonitorIdIsRefused:
         finally:
             for sock in accepted:
                 sock.close()
+
+    def test_refused_duplicate_logs_no_error(self, caplog):
+        monitor_id = f"quiet-{uuid.uuid4().hex[:8]}"
+        first = ws_connect(self.manager.get_monitor_ws_url(monitor_id), open_timeout=5)
+        try:
+            with caplog.at_level(logging.DEBUG):
+                with pytest.raises(InvalidStatus):
+                    ws_connect(self.manager.get_monitor_ws_url(monitor_id), open_timeout=5)
+                # The refused handler runs on the server thread after the 409 is sent.
+                time.sleep(0.5)
+            # uvicorn's own logger is out of scope: only the handler's records count.
+            errors = [
+                r.getMessage()
+                for r in caplog.records
+                if r.name.startswith("derhost") and r.levelno >= logging.ERROR
+            ]
+            assert errors == []
+            assert any("refusing new connection" in r.getMessage() for r in caplog.records)
+        finally:
+            first.close()
 
 
 class TestDistinctMonitorIdsAreUnaffected:
@@ -174,3 +210,74 @@ class TestMonitorReservationBookkeeping:
         with pytest.raises(RuntimeError):
             asyncio.run(manager.connect_monitor(failing, "m"))
         assert "m" not in manager.monitor_connections
+
+
+class TestMonitorReservationOrder:
+    """Unit level: the reservation precedes the accept that yields."""
+
+    def test_two_concurrent_connects_on_one_id_admit_exactly_one(self):
+        manager = ConnectionManager()
+        first = _YieldingAcceptSocket(WebSocketState.CONNECTING)
+        second = _YieldingAcceptSocket(WebSocketState.CONNECTING)
+
+        async def race():
+            return await asyncio.gather(
+                manager.connect_monitor(first, "m"), manager.connect_monitor(second, "m")
+            )
+
+        results = asyncio.run(race())
+
+        assert sorted(results) == [False, True]
+        assert len(first.denials) + len(second.denials) == 1
+        winner, loser = (first, second) if results[0] else (second, first)
+        assert manager.monitor_connections["m"] is winner
+        assert len(loser.denials) == 1
+        assert loser.denials[0].status_code == 409
+        assert loser.denials[0].body == b"monitor m is already connected"
+
+    def test_a_disconnected_holder_is_replaced(self):
+        manager = ConnectionManager()
+        stale = _StubMonitorSocket(WebSocketState.DISCONNECTED)
+        fresh = _StubMonitorSocket(WebSocketState.CONNECTING)
+        manager.monitor_connections["m"] = stale
+
+        admitted = asyncio.run(manager.connect_monitor(fresh, "m"))
+
+        assert admitted is True
+        assert manager.monitor_connections["m"] is fresh
+        assert fresh.denials == []
+
+    def test_a_cancelled_accept_releases_the_id(self):
+        manager = ConnectionManager()
+
+        class CancelledAccept(_StubMonitorSocket):
+            async def accept(self):
+                raise asyncio.CancelledError
+
+        async def attempt():
+            try:
+                await manager.connect_monitor(CancelledAccept(WebSocketState.CONNECTING), "m")
+            except asyncio.CancelledError:
+                return "cancelled"
+            return "returned"
+
+        assert asyncio.run(attempt()) == "cancelled"
+        assert "m" not in manager.monitor_connections
+
+    def test_broadcast_survives_a_monitor_reserved_mid_send(self):
+        manager = ConnectionManager()
+        late = _StubMonitorSocket(WebSocketState.CONNECTING)
+
+        class ReservingMonitor(_StubMonitorSocket):
+            async def send_json(self, data: dict) -> None:
+                await super().send_json(data)
+                manager.monitor_connections["late"] = late
+
+        reserving = ReservingMonitor(WebSocketState.CONNECTED)
+        manager.monitor_connections["reserving"] = reserving
+
+        asyncio.run(manager._broadcast_to_monitors({"type": "pubsub_message", "topic": "t"}))
+
+        assert reserving.sent == [{"type": "pubsub_message", "topic": "t"}]
+        assert manager.monitor_connections["late"] is late
+        assert late.sent == []
