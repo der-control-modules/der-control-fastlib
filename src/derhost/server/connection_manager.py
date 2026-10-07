@@ -444,19 +444,51 @@ class ConnectionManager:
         self.rpc_responses.clear()
 
     # Message bus monitoring methods
-    async def connect_monitor(self, websocket: WebSocket, monitor_id: str):
-        """Connect a message bus monitor client."""
-        await websocket.accept()
+    async def connect_monitor(self, websocket: WebSocket, monitor_id: str) -> bool:
+        """Connect a message bus monitor client.
+
+        Returns
+        -------
+            True if `websocket` was accepted and registered for `monitor_id`.
+            False if it was refused because `monitor_id` already holds a
+            non-DISCONNECTED socket; the caller must not read from a refused
+            socket, since it was never accepted.
+        """
+        existing_ws = self.monitor_connections.get(monitor_id)
+        if existing_ws is not None:
+            if existing_ws.client_state != WebSocketState.DISCONNECTED:
+                _log.warning(f"Monitor {monitor_id} already connected - refusing new connection")
+                # Refuse before accept so the reason reaches the client as a
+                # named HTTP 409; closing the holder instead would let any
+                # peer silence a named monitor at will.
+                await websocket.send_denial_response(
+                    PlainTextResponse(
+                        content=f"monitor {monitor_id} is already connected",
+                        status_code=409,
+                    )
+                )
+                return False
+            self.disconnect_monitor(monitor_id, existing_ws)
+
+        # Reserve before any await so a concurrent duplicate is refused above.
         self.monitor_connections[monitor_id] = websocket
+        try:
+            await websocket.accept()
+        except BaseException:
+            # Otherwise the id stays refused until restart: a socket whose
+            # accept failed never reaches DISCONNECTED on its own.
+            _log.warning(f"Accept failed for monitor {monitor_id}; releasing its reservation", exc_info=True)
+            self.disconnect_monitor(monitor_id, websocket)
+            raise
         _log.info(f"Message bus monitor {monitor_id} connected")
+        return True
 
     def disconnect_monitor(self, monitor_id: str, websocket: WebSocket) -> None:
         """Disconnect a message bus monitor client.
 
-        Same ownership check as `disconnect`: `connect_monitor` does not
-        refuse a duplicate `monitor_id`, it overwrites the entry, so a
-        superseded socket's own cleanup must not delete the socket that
-        replaced it (der-control-modules/der-control-fastlib#80 class).
+        Removes the entry only when `websocket` is still the socket
+        registered for `monitor_id`, so a refused or already-replaced socket's
+        cleanup never deletes another socket's entry.
         """
         if self.monitor_connections.get(monitor_id) is not websocket:
             _log.debug(f"Skipping monitor disconnect for {monitor_id}: socket is not the current one")
@@ -467,11 +499,13 @@ class ConnectionManager:
     async def _broadcast_to_monitors(self, data: dict):
         """Broadcast pub/sub message to all connected monitors."""
         disconnected = []
-        for monitor_id, websocket in self.monitor_connections.items():
+        # A snapshot: the sends below await, and a connecting monitor may
+        # reserve its id meanwhile.
+        for monitor_id, websocket in list(self.monitor_connections.items()):
             try:
                 if websocket.client_state == WebSocketState.CONNECTED:
                     await websocket.send_json(data)
-                else:
+                elif websocket.client_state == WebSocketState.DISCONNECTED:
                     disconnected.append((monitor_id, websocket))
             except Exception as e:
                 _log.error(f"Error broadcasting to monitor {monitor_id}: {e}")

@@ -548,7 +548,9 @@ class FastAPIMessageBus(MessageBus):
         @self.app.websocket("/monitor/{monitor_id}")
         async def monitor_websocket(websocket: WebSocket, monitor_id: str):
             """WebSocket endpoint for message bus monitoring."""
-            await self.manager.connect_monitor(websocket, monitor_id)
+            if not await self.manager.connect_monitor(websocket, monitor_id):
+                # Refused with a 409 before accept; reading from it would raise.
+                return
             try:
                 # Keep connection alive and handle any incoming control messages
                 while True:
