@@ -24,7 +24,7 @@ classifiers = [
 # Here's how to specify dependencies in pyproject.toml format:
 dependencies = [
     "colorama~=0.4.6",
-    "fastapi>=0.141.1,<0.142.0",
+    "fastapi>=0.141.1,<0.143.0",
     "uvicorn>=0.38,<0.54",
     "websocket-client~=1.9.0",
     "websockets>=15.0.1,<16.2.0",
