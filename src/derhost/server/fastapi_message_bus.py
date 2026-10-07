@@ -556,12 +556,12 @@ class FastAPIMessageBus(MessageBus):
                 while True:
                     # Just wait for messages (could be used for control later)
                     data = await websocket.receive_json()
-                    _log.debug(f"Monitor {monitor_id} sent: {_redact_secrets(data)}")
+                    _log.debug(f"Monitor {monitor_id!r} sent: {_redact_secrets(data)}")
             except WebSocketDisconnect:
-                _log.debug(f"Monitor {monitor_id} disconnected")
+                _log.debug(f"Monitor {monitor_id!r} disconnected")
                 self.manager.disconnect_monitor(monitor_id, websocket)
             except Exception as e:
-                _log.error(f"Error in monitor websocket for {monitor_id}: {e}")
+                _log.error(f"Error in monitor websocket for {monitor_id!r}: {e}")
                 self.manager.disconnect_monitor(monitor_id, websocket)
 
         @self.app.get("/config-store/list")

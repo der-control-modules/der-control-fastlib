@@ -457,7 +457,7 @@ class ConnectionManager:
         existing_ws = self.monitor_connections.get(monitor_id)
         if existing_ws is not None:
             if existing_ws.client_state != WebSocketState.DISCONNECTED:
-                _log.warning(f"Monitor {monitor_id} already connected - refusing new connection")
+                _log.warning(f"Monitor {monitor_id!r} already connected - refusing new connection")
                 # Refuse before accept so the reason reaches the client as a
                 # named HTTP 409; closing the holder instead would let any
                 # peer silence a named monitor at will.
@@ -477,10 +477,10 @@ class ConnectionManager:
         except BaseException:
             # Otherwise the id stays refused until restart: a socket whose
             # accept failed never reaches DISCONNECTED on its own.
-            _log.warning(f"Accept failed for monitor {monitor_id}; releasing its reservation", exc_info=True)
+            _log.warning(f"Accept failed for monitor {monitor_id!r}; releasing its reservation", exc_info=True)
             self.disconnect_monitor(monitor_id, websocket)
             raise
-        _log.info(f"Message bus monitor {monitor_id} connected")
+        _log.info(f"Message bus monitor {monitor_id!r} connected")
         return True
 
     def disconnect_monitor(self, monitor_id: str, websocket: WebSocket) -> None:
@@ -491,10 +491,10 @@ class ConnectionManager:
         cleanup never deletes another socket's entry.
         """
         if self.monitor_connections.get(monitor_id) is not websocket:
-            _log.debug(f"Skipping monitor disconnect for {monitor_id}: socket is not the current one")
+            _log.debug(f"Skipping monitor disconnect for {monitor_id!r}: socket is not the current one")
             return
         del self.monitor_connections[monitor_id]
-        _log.info(f"Message bus monitor {monitor_id} disconnected")
+        _log.info(f"Message bus monitor {monitor_id!r} disconnected")
 
     async def _broadcast_to_monitors(self, data: dict):
         """Broadcast pub/sub message to all connected monitors."""
@@ -508,7 +508,7 @@ class ConnectionManager:
                 elif websocket.client_state == WebSocketState.DISCONNECTED:
                     disconnected.append((monitor_id, websocket))
             except Exception as e:
-                _log.error(f"Error broadcasting to monitor {monitor_id}: {e}")
+                _log.error(f"Error broadcasting to monitor {monitor_id!r}: {e}")
                 disconnected.append((monitor_id, websocket))
 
         # Clean up disconnected monitors

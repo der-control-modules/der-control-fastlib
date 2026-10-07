@@ -135,6 +135,27 @@ class TestDuplicateMonitorIdIsRefused:
         finally:
             first.close()
 
+    def test_monitor_id_with_encoded_newline_writes_no_raw_newline_to_any_log_record(self, caplog):
+        monitor_id = f"evil%0Afake-{uuid.uuid4().hex[:8]}"
+        with caplog.at_level(logging.DEBUG):
+            first = ws_connect(self.manager.get_monitor_ws_url(monitor_id), open_timeout=5)
+            try:
+                first.send(json.dumps({"ping": 1}))
+                with pytest.raises(InvalidStatus) as excinfo:
+                    ws_connect(self.manager.get_monitor_ws_url(monitor_id), open_timeout=5)
+                assert excinfo.value.response.status_code == 409
+                time.sleep(0.3)
+            finally:
+                first.close()
+            time.sleep(0.5)
+        mentioning = [
+            r.getMessage() for r in caplog.records if r.name.startswith("derhost") and "evil" in r.getMessage()
+        ]
+        # Registered, refused, received a message and disconnected: each logs the id.
+        assert len(mentioning) >= 4
+        assert [m for m in mentioning if "\n" in m] == []
+        assert all("evil\\nfake" in m for m in mentioning)
+
 
 class TestDistinctMonitorIdsAreUnaffected:
     @pytest.fixture(autouse=True)
@@ -281,3 +302,36 @@ class TestMonitorReservationOrder:
         assert reserving.sent == [{"type": "pubsub_message", "topic": "t"}]
         assert manager.monitor_connections["late"] is late
         assert late.sent == []
+
+    def test_unit_log_records_escape_a_newline_in_the_id(self, caplog):
+        manager = ConnectionManager()
+        evil = "evil\nfake"
+        holder = _StubMonitorSocket(WebSocketState.CONNECTED)
+        manager.monitor_connections[evil] = holder
+
+        class FailingAccept(_StubMonitorSocket):
+            async def accept(self):
+                raise RuntimeError("accept failed")
+
+        async def exercise():
+            await manager.connect_monitor(_StubMonitorSocket(WebSocketState.CONNECTING), evil)
+            holder.client_state = WebSocketState.DISCONNECTED
+            with pytest.raises(RuntimeError):
+                await manager.connect_monitor(FailingAccept(WebSocketState.CONNECTING), evil)
+            await manager.connect_monitor(_StubMonitorSocket(WebSocketState.CONNECTING), evil)
+            manager.disconnect_monitor(evil, object())
+
+            class Raising(_StubMonitorSocket):
+                async def send_json(self, data):
+                    raise RuntimeError("send failed")
+
+            manager.monitor_connections[evil] = Raising(WebSocketState.CONNECTED)
+            await manager._broadcast_to_monitors({"t": 1})
+
+        with caplog.at_level(logging.DEBUG):
+            asyncio.run(exercise())
+
+        mentioning = [r.getMessage() for r in caplog.records if "evil" in r.getMessage()]
+        assert len(mentioning) >= 6
+        assert [m for m in mentioning if "\n" in m] == []
+        assert all("evil\\nfake" in m for m in mentioning)
