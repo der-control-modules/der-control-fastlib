@@ -548,18 +548,20 @@ class FastAPIMessageBus(MessageBus):
         @self.app.websocket("/monitor/{monitor_id}")
         async def monitor_websocket(websocket: WebSocket, monitor_id: str):
             """WebSocket endpoint for message bus monitoring."""
-            await self.manager.connect_monitor(websocket, monitor_id)
+            if not await self.manager.connect_monitor(websocket, monitor_id):
+                # Refused with a 409 before accept; reading from it would raise.
+                return
             try:
                 # Keep connection alive and handle any incoming control messages
                 while True:
                     # Just wait for messages (could be used for control later)
                     data = await websocket.receive_json()
-                    _log.debug(f"Monitor {monitor_id} sent: {_redact_secrets(data)}")
+                    _log.debug(f"Monitor {monitor_id!r} sent: {_redact_secrets(data)}")
             except WebSocketDisconnect:
-                _log.debug(f"Monitor {monitor_id} disconnected")
+                _log.debug(f"Monitor {monitor_id!r} disconnected")
                 self.manager.disconnect_monitor(monitor_id, websocket)
             except Exception as e:
-                _log.error(f"Error in monitor websocket for {monitor_id}: {e}")
+                _log.error(f"Error in monitor websocket for {monitor_id!r}: {e}")
                 self.manager.disconnect_monitor(monitor_id, websocket)
 
         @self.app.get("/config-store/list")

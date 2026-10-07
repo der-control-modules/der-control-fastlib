@@ -223,6 +223,12 @@ class MessageBusManager:
             raise RuntimeError("Message bus is not started")
         return f"ws://{self.host}:{self.port}/ws/{identity}"
 
+    def get_monitor_ws_url(self, monitor_id: str) -> str:
+        """Get the WebSocket URL for a message bus monitor id."""
+        if self.port is None:
+            raise RuntimeError("Message bus is not started")
+        return f"ws://{self.host}:{self.port}/monitor/{monitor_id}"
+
     def __enter__(self):
         """Context manager entry."""
         return self
