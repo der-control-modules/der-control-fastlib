@@ -285,19 +285,36 @@ class TestMonitorReservationOrder:
         assert asyncio.run(attempt()) == "cancelled"
         assert "m" not in manager.monitor_connections
 
-    def test_broadcast_survives_a_monitor_reserved_mid_send(self):
+    def test_broadcast_survives_a_monitor_reserved_while_it_iterates(self):
         manager = ConnectionManager()
         late = _StubMonitorSocket(WebSocketState.CONNECTING)
 
         class ReservingMonitor(_StubMonitorSocket):
-            async def send_json(self, data: dict) -> None:
-                await super().send_json(data)
-                manager.monitor_connections["late"] = late
+            """Reserves a new id the first time the broadcast loop reads its state."""
 
-        reserving = ReservingMonitor(WebSocketState.CONNECTED)
-        manager.monitor_connections["reserving"] = reserving
+            @property
+            def client_state(self):
+                manager.monitor_connections.setdefault("late", late)
+                return self._state
 
-        asyncio.run(manager._broadcast_to_monitors({"type": "pubsub_message", "topic": "t"}))
+            @client_state.setter
+            def client_state(self, value):
+                self._state = value
+
+            async def send_text(self, text: str) -> None:
+                self.sent.append(json.loads(text))
+
+        reserving = ReservingMonitor(WebSocketState.CONNECTING)
+
+        async def scenario():
+            await manager.connect_monitor(reserving, "reserving")
+            assert "late" not in manager.monitor_connections
+            sender = asyncio.create_task(manager.run_monitor_sender("reserving", reserving))
+            await manager._broadcast_to_monitors({"type": "pubsub_message", "topic": "t"})
+            await asyncio.sleep(0.05)
+            sender.cancel()
+
+        asyncio.run(scenario())
 
         assert reserving.sent == [{"type": "pubsub_message", "topic": "t"}]
         assert manager.monitor_connections["late"] is late

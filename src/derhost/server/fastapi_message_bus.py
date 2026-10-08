@@ -27,7 +27,12 @@ except ImportError:
 
 from derhost._redact import redact_secrets as _redact_secrets, redact_text as _redact_text
 from derhost.server.config_store import ConfigStore
-from derhost.server.connection_manager import ConnectionManager
+from derhost.server.connection_manager import (
+    DEFAULT_MONITOR_MAX_LAG,
+    DEFAULT_MONITOR_QUEUE_BYTES,
+    DEFAULT_MONITOR_QUEUE_DEPTH,
+    ConnectionManager,
+)
 from derhost.server.models import Message, MessageBus
 
 
@@ -275,6 +280,9 @@ class FastAPIMessageBus(MessageBus):
         ws_ping_interval: float = 10,
         ws_ping_timeout: float = 10,
         max_rpcs_in_flight: int = 128,
+        monitor_queue_depth: int = DEFAULT_MONITOR_QUEUE_DEPTH,
+        monitor_queue_bytes: int = DEFAULT_MONITOR_QUEUE_BYTES,
+        monitor_max_lag: float = DEFAULT_MONITOR_MAX_LAG,
     ):
         _check_jwt_secret_key()
         # Set explicitly rather than left at uvicorn's own defaults (20/20):
@@ -317,7 +325,11 @@ class FastAPIMessageBus(MessageBus):
         self.host = host
         self.port = port
         self.running = False
-        self.manager = ConnectionManager()
+        self.manager = ConnectionManager(
+            monitor_queue_depth=monitor_queue_depth,
+            monitor_queue_bytes=monitor_queue_bytes,
+            monitor_max_lag=monitor_max_lag,
+        )
         self._stop_handler = None
         self.server = None
 
@@ -331,6 +343,25 @@ class FastAPIMessageBus(MessageBus):
 
         self.config_store = ConfigStore(config_store_dir, messagebus=self)
         self.message_queue = asyncio.Queue()
+
+    async def _read_monitor(self, websocket: WebSocket, monitor_id: str) -> None:
+        """Read a monitor's incoming messages until it disconnects."""
+        try:
+            while True:
+                # Just wait for messages (could be used for control later)
+                data = await websocket.receive_json()
+                _log.debug(f"Monitor {monitor_id!r} sent: {_redact_secrets(data)}")
+        except WebSocketDisconnect:
+            _log.debug(f"Monitor {monitor_id!r} disconnected")
+        except Exception as e:
+            _log.error(f"Error in monitor websocket for {monitor_id!r}: {e}")
+
+    async def _close_slow_monitor(self, websocket: WebSocket, monitor_id: str) -> None:
+        """Tell a dropped monitor why, without waiting on a peer that is not reading."""
+        try:
+            await asyncio.wait_for(websocket.close(code=1008, reason="monitor too slow"), timeout=1.0)
+        except Exception as e:
+            _log.debug(f"Close of dropped monitor {monitor_id!r} did not complete: {e!r}")
 
     def setup_routes(self):
         """Set up the FastAPI routes."""
@@ -551,18 +582,21 @@ class FastAPIMessageBus(MessageBus):
             if not await self.manager.connect_monitor(websocket, monitor_id):
                 # Refused with a 409 before accept; reading from it would raise.
                 return
+            outbox = self.manager.monitor_outboxes[monitor_id]
+            receiver = asyncio.create_task(self._read_monitor(websocket, monitor_id))
+            sender = asyncio.create_task(self.manager.run_monitor_sender(monitor_id, websocket))
             try:
-                # Keep connection alive and handle any incoming control messages
-                while True:
-                    # Just wait for messages (could be used for control later)
-                    data = await websocket.receive_json()
-                    _log.debug(f"Monitor {monitor_id!r} sent: {_redact_secrets(data)}")
-            except WebSocketDisconnect:
-                _log.debug(f"Monitor {monitor_id!r} disconnected")
+                await asyncio.wait({receiver, sender}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                # Neither task may outlive the handler.
+                receiver.cancel()
+                sender.cancel()
+                await asyncio.gather(receiver, sender, return_exceptions=True)
                 self.manager.disconnect_monitor(monitor_id, websocket)
-            except Exception as e:
-                _log.error(f"Error in monitor websocket for {monitor_id!r}: {e}")
-                self.manager.disconnect_monitor(monitor_id, websocket)
+            if not sender.cancelled() and sender.exception() is not None:
+                _log.error(f"Error sending to monitor {monitor_id!r}: {sender.exception()}")
+            if outbox.drop_reason is not None:
+                await self._close_slow_monitor(websocket, monitor_id)
 
         @self.app.get("/config-store/list")
         async def list_configs(agent_id: str | None = None):

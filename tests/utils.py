@@ -48,6 +48,9 @@ class MessageBusManager:
         ws_ping_interval: float | None = None,
         ws_ping_timeout: float | None = None,
         max_rpcs_in_flight: int | None = None,
+        monitor_queue_depth: int | None = None,
+        monitor_queue_bytes: int | None = None,
+        monitor_max_lag: float | None = None,
     ) -> tuple[FastAPIMessageBus, int]:
         """
         Start a message bus for testing.
@@ -62,6 +65,12 @@ class MessageBusManager:
             max_rpcs_in_flight: Forwarded to FastAPIMessageBus when given
                 (#83), to test the per-connection RPC cap without waiting on
                 the production default of 128.
+            monitor_queue_depth: Forwarded to FastAPIMessageBus when given
+                (#110): frames one monitor may have waiting.
+            monitor_queue_bytes: Forwarded to FastAPIMessageBus when given
+                (#110): bytes one monitor may have waiting.
+            monitor_max_lag: Forwarded to FastAPIMessageBus when given
+                (#110), so a test need not wait out the production default.
 
         Returns:
             Tuple of (message_bus_instance, port_number)
@@ -91,6 +100,12 @@ class MessageBusManager:
             bus_kwargs["ws_ping_timeout"] = ws_ping_timeout
         if max_rpcs_in_flight is not None:
             bus_kwargs["max_rpcs_in_flight"] = max_rpcs_in_flight
+        if monitor_queue_depth is not None:
+            bus_kwargs["monitor_queue_depth"] = monitor_queue_depth
+        if monitor_queue_bytes is not None:
+            bus_kwargs["monitor_queue_bytes"] = monitor_queue_bytes
+        if monitor_max_lag is not None:
+            bus_kwargs["monitor_max_lag"] = monitor_max_lag
         self.bus = FastAPIMessageBus(
             host=host, port=port, config_store_dir=self.temp_config_dir, **bus_kwargs
         )
