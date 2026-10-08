@@ -1,8 +1,10 @@
 # connection_manager.py
 
 import asyncio
+import json
 import logging
 import re
+from collections import deque
 from collections.abc import Callable
 from re import Pattern
 from typing import Any
@@ -38,10 +40,76 @@ def truncate_debug_message(message: Any, max_length: int = 200) -> str:
 SubscriptionCallback = Callable[[str, str, str, str, dict, Any], None]
 
 
+class _MonitorOutbox:
+    """Frames waiting for one monitor, bounded by count and by bytes."""
+
+    def __init__(self, websocket: WebSocket):
+        self.websocket = websocket
+        self.frames: deque[tuple[str, int]] = deque()
+        self.pending_bytes = 0
+        self.drop_reason: str | None = None
+        self.closed = False
+        self.sender: asyncio.Task | None = None
+        self._wakeup = asyncio.Event()
+
+    def offer(self, text: str, size: int, max_frames: int, max_bytes: int) -> str | None:
+        """Append a frame; return why it did not fit, or None when it did."""
+        if len(self.frames) >= max_frames:
+            return f"outbox full at {max_frames} frames"
+        if self.pending_bytes + size > max_bytes:
+            return f"pending bytes would exceed {max_bytes}"
+        self.frames.append((text, size))
+        self.pending_bytes += size
+        self._wakeup.set()
+        return None
+
+    async def take(self) -> str | None:
+        """Wait for the next frame; None once the outbox is closed."""
+        while not self.frames:
+            if self.closed:
+                return None
+            self._wakeup.clear()
+            await self._wakeup.wait()
+        text, size = self.frames.popleft()
+        self.pending_bytes -= size
+        return text
+
+    def close(self, drop_reason: str | None) -> None:
+        self.closed = True
+        self.drop_reason = drop_reason
+        self.frames.clear()
+        self.pending_bytes = 0
+        self._wakeup.set()
+        # A sender stuck in a send would otherwise outlive the drop by up to its timeout.
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:
+            current = None
+        if self.sender is not None and self.sender is not current and not self.sender.done():
+            self.sender.cancel()
+
+
 class ConnectionManager:
     """Manages WebSocket connections for the MessageBus."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        monitor_queue_depth: int = 256,
+        monitor_queue_bytes: int = 8 * 1024 * 1024,
+        monitor_send_timeout: float = 10.0,
+    ):
+        if monitor_queue_depth < 1:
+            raise ValueError(f"monitor_queue_depth must be at least 1, got {monitor_queue_depth}")
+        if monitor_queue_bytes < 1:
+            raise ValueError(f"monitor_queue_bytes must be at least 1, got {monitor_queue_bytes}")
+        if monitor_send_timeout <= 0:
+            raise ValueError(f"monitor_send_timeout must be positive, got {monitor_send_timeout}")
+        # A monitor behind either bound is dropped. queue_bytes must exceed the
+        # largest frame or that frame drops every monitor; the defaults are
+        # guesses, and send_timeout is one keepalive interval.
+        self.monitor_queue_depth = monitor_queue_depth
+        self.monitor_queue_bytes = monitor_queue_bytes
+        self.monitor_send_timeout = monitor_send_timeout
         self.active_connections: dict[str, WebSocket] = {}
         self.agent_rpc_methods: dict[str, list[str]] = {}  # Store RPC methods for each agent
         self.message_queue: asyncio.Queue = asyncio.Queue()
@@ -56,6 +124,7 @@ class ConnectionManager:
         # Message bus monitoring
         self.known_topics: set[str] = set()  # Track all topics that have been published
         self.monitor_connections: dict[str, WebSocket] = {}  # WebSocket connections for monitors
+        self.monitor_outboxes: dict[str, _MonitorOutbox] = {}  # One per accepted monitor
 
     async def connect(self, websocket: WebSocket, identity: str) -> bool:
         """Connect a client to the message bus.
@@ -480,6 +549,7 @@ class ConnectionManager:
             _log.warning(f"Accept failed for monitor {monitor_id!r}; releasing its reservation", exc_info=True)
             self.disconnect_monitor(monitor_id, websocket)
             raise
+        self.monitor_outboxes[monitor_id] = _MonitorOutbox(websocket)
         _log.info(f"Message bus monitor {monitor_id!r} connected")
         return True
 
@@ -490,30 +560,77 @@ class ConnectionManager:
         registered for `monitor_id`, so a refused or already-replaced socket's
         cleanup never deletes another socket's entry.
         """
+        self._release_monitor(monitor_id, websocket)
+
+    def _release_monitor(self, monitor_id: str, websocket: WebSocket, drop_reason: str | None = None) -> bool:
+        """Remove `websocket`'s entry and outbox if it still owns `monitor_id`.
+
+        A `drop_reason` marks a monitor removed for falling behind. Returns
+        whether anything was removed.
+        """
         if self.monitor_connections.get(monitor_id) is not websocket:
             _log.debug(f"Skipping monitor disconnect for {monitor_id!r}: socket is not the current one")
-            return
+            return False
         del self.monitor_connections[monitor_id]
-        _log.info(f"Message bus monitor {monitor_id!r} disconnected")
+        outbox = self.monitor_outboxes.pop(monitor_id, None)
+        if outbox is not None:
+            outbox.close(drop_reason)
+        if drop_reason is None:
+            _log.info(f"Message bus monitor {monitor_id!r} disconnected")
+        else:
+            _log.warning(f"Dropping message bus monitor {monitor_id!r}: {drop_reason}")
+        return True
+
+    async def run_monitor_sender(self, monitor_id: str, websocket: WebSocket) -> None:
+        """Send queued frames to one monitor until it is dropped or disconnects.
+
+        A send that outlasts `monitor_send_timeout` drops the monitor. Cancelling
+        a waiting send is safe because nothing is written before the transport
+        is writable.
+        """
+        outbox = self.monitor_outboxes.get(monitor_id)
+        if outbox is None or outbox.websocket is not websocket or outbox.closed:
+            return
+        outbox.sender = asyncio.current_task()
+        while True:
+            text = await outbox.take()
+            if text is None:
+                return
+            try:
+                await asyncio.wait_for(websocket.send_text(text), self.monitor_send_timeout)
+            except asyncio.TimeoutError:
+                self._release_monitor(monitor_id, websocket, f"send timed out after {self.monitor_send_timeout}s")
+                return
+            except Exception as e:
+                self._release_monitor(monitor_id, websocket, f"send failed: {e}")
+                return
 
     async def _broadcast_to_monitors(self, data: dict):
-        """Broadcast pub/sub message to all connected monitors."""
-        disconnected = []
-        # A snapshot: the sends below await, and a connecting monitor may
-        # reserve its id meanwhile.
-        for monitor_id, websocket in list(self.monitor_connections.items()):
-            try:
-                if websocket.client_state == WebSocketState.CONNECTED:
-                    await websocket.send_json(data)
-                elif websocket.client_state == WebSocketState.DISCONNECTED:
-                    disconnected.append((monitor_id, websocket))
-            except Exception as e:
-                _log.error(f"Error broadcasting to monitor {monitor_id!r}: {e}")
-                disconnected.append((monitor_id, websocket))
+        """Queue a pub/sub message for every connected monitor.
 
-        # Clean up disconnected monitors
-        for monitor_id, websocket in disconnected:
-            self.disconnect_monitor(monitor_id, websocket)
+        Never awaits a monitor: a monitor that stops reading must not delay the
+        publisher. The frame is serialized once, in the form `send_json` writes.
+        """
+        if not self.monitor_connections:
+            return
+        try:
+            text = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+            size = len(text.encode("utf-8"))
+        except (TypeError, ValueError) as e:
+            _log.error(f"Cannot serialize a message for the monitors: {e}")
+            return
+
+        # A snapshot: dropping a monitor edits the map.
+        for monitor_id, websocket in list(self.monitor_connections.items()):
+            if websocket.client_state == WebSocketState.DISCONNECTED:
+                self.disconnect_monitor(monitor_id, websocket)
+                continue
+            outbox = self.monitor_outboxes.get(monitor_id)
+            if outbox is None or outbox.websocket is not websocket:
+                continue  # Reserved, not yet accepted.
+            reason = outbox.offer(text, size, self.monitor_queue_depth, self.monitor_queue_bytes)
+            if reason is not None:
+                self._release_monitor(monitor_id, websocket, reason)
 
     def get_known_topics(self) -> list[str]:
         """Get list of all known topics (sorted)."""
