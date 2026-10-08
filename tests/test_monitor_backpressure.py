@@ -40,7 +40,7 @@ def _small_rcvbuf_socket(host: str, port: int) -> socket.socket:
 
 
 def _open_stalled_monitor(manager, monitor_id: str) -> socket.socket:
-    """Complete the monitor handshake by hand, then never read again."""
+    """Complete the monitor handshake by hand; the caller decides whether and when to read."""
     sock = _small_rcvbuf_socket(manager.host, manager.port)
     key = base64.b64encode(os.urandom(16)).decode()
     sock.sendall(
@@ -58,6 +58,37 @@ def _open_stalled_monitor(manager, monitor_id: str) -> socket.socket:
         head += chunk
     assert head.startswith(b"HTTP/1.1 101"), head
     return sock
+
+
+class _RawMonitor:
+    """Reads monitor frames straight off a socket, so TCP-level reading is under the test's control.
+
+    A websockets client reads eagerly on a background thread, which would hide a
+    slow reader from the server.
+    """
+
+    def __init__(self, sock: socket.socket):
+        self.sock = sock
+
+    def _exact(self, count: int) -> bytes:
+        data = b""
+        while len(data) < count:
+            chunk = self.sock.recv(count - len(data))
+            if not chunk:
+                raise ConnectionError("server closed the monitor socket")
+            data += chunk
+        return data
+
+    def recv(self, timeout: float) -> str:
+        self.sock.settimeout(timeout)
+        first, second = self._exact(2)
+        assert first & 0x0F == 0x1, f"expected a text frame, got opcode {first & 0x0F}"
+        length = second & 0x7F
+        if length == 126:
+            length = int.from_bytes(self._exact(2), "big")
+        elif length == 127:
+            length = int.from_bytes(self._exact(8), "big")
+        return self._exact(length).decode("utf-8")
 
 
 def _start_burst(manager, identity: str, count: int, pad: str):
@@ -212,8 +243,7 @@ class TestSlowButLiveMonitorKeepsEveryFrame:
 
     def test_monitor_that_reads_slowly_and_pauses_receives_all_frames_in_order(self):
         monitor_id = f"slow-{uuid.uuid4().hex[:8]}"
-        sock = _small_rcvbuf_socket(self.manager.host, self.manager.port)
-        slow = ws_connect(self.manager.get_monitor_ws_url(monitor_id), sock=sock, open_timeout=5)
+        slow = _RawMonitor(_open_stalled_monitor(self.manager, monitor_id))
         publisher, worker, _ = _start_burst(self.manager, f"pub-{uuid.uuid4().hex[:8]}", 100, PAD_64K)
         try:
             topics = _read_topics(slow, deadline_s=40, pause_after=10, per_frame_s=0.02)
@@ -221,7 +251,7 @@ class TestSlowButLiveMonitorKeepsEveryFrame:
             assert monitor_id in self.manager.bus.manager.monitor_connections
         finally:
             _finish_burst(publisher, worker)
-            slow.close()
+            slow.sock.close()
 
 
 class TestMonitorFrameOnTheWire:
@@ -359,9 +389,9 @@ class TestBroadcastNeverAwaitsAMonitor:
             stub = _Stub(hang=True)
             await _admit(manager, stub)
             outbox = manager.monitor_outboxes["m"]
-            frame = {"pad": "x" * 30}
+            frame = {"pad": "x" * 35}
             size = len(_frame_text(frame).encode())
-            assert 40 < size <= 50
+            assert 45 == size
             # One frame in flight, two pending, and the next would exceed 100 bytes.
             for _ in range(4):
                 await asyncio.wait_for(manager._broadcast_to_monitors(frame), 0.1)
