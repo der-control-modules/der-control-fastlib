@@ -61,14 +61,14 @@ pass-through = $(if $(filter-out undefined,$($(1)_ORIGIN)),$(1)=$(call shell-saf
 # Agent directories under docker/, named here rather than discovered by a
 # filesystem glob: a name this list does not carry is invisible to every
 # stack-* target, so filesystem text (a stray directory, a name with a
-# shell metacharacter) never reaches a recipe. Empty at this PR; each later
-# per-agent PR adds its one directory name. A listed directory with no
-# docker-compose.yml fails `stack-up` the same way a typo would. Each
+# shell metacharacter) never reaches a recipe. Each later per-agent PR adds
+# its one directory name. A listed directory with no docker-compose.yml
+# fails `stack-up` the same way a typo would. Each
 # agent's own compose calls below pass -p derhost-<dir>, the same pinning
 # the server project already has, so an exported COMPOSE_PROJECT_NAME
 # cannot retarget an agent's stack-up/down/status the way it could the
 # server's before that fix.
-AGENT_DIRS :=
+AGENT_DIRS := interoperability-service realtime-control-agent
 
 override OTHER_COMPOSE_FILES := $(foreach d,$(AGENT_DIRS),$(DOCKER_DIR)/$(d)/docker-compose.yml)
 export OTHER_COMPOSE_FILES

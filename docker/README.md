@@ -6,23 +6,37 @@ as they are and run a different set of services (see the root `docker-*` and
 `compose-*` make targets).
 
 Layout: `docker/<name>/` holds that service's `Dockerfile`, `docker-compose.yml`
-and `.env.example`. Only `docker/server/` exists at this PR; an agent
-directory lands per later PR.
+and `.env.example`; an agent directory also holds `requirements.txt`,
+`config.example.json`, `build.sh` and `check-clean.sh`. `docker/lib/` holds
+the archive and dirty-checkout logic shared by every agent's `build.sh` and
+`check-clean.sh` wrapper. `docker/server/` and `docker/interoperability-service/`
+land in earlier PRs; `docker/realtime-control-agent/` runs native control
+modes only, with no Julia in the image (operator decision, #68): its baked-in
+`config.example.json` sets no mode's `use_julia` to true.
+
+If a configured mode ever sets `use_julia: true` with no `julia` package
+installed, the agent does not crash or refuse to start: the import happens
+lazily, on the first control tick that mode runs. `derhost`'s scheduler runs
+each periodic tick in its own greenlet (`gevent.spawn`, uncaught by the
+scheduler's own error handling), so the `ModuleNotFoundError` is logged by
+gevent's default handler and the tick is lost, but the process keeps running
+and reschedules the next tick regardless.
 
 ## Commands
 
 Run from the repository root.
 
 - `make stack-up C=server` - build and start the server.
-- `make stack-up C=all` - start the server, then any other
-  `docker/*/docker-compose.yml` (currently none: agents come in later PRs).
-- `make stack-down` - stop everything under `docker/` (any agent first, then
+- `make stack-up C=all` - start the server, then every directory in
+  `AGENT_DIRS` (`docker/docker.mk`): interoperability-service and
+  realtime-control-agent.
+- `make stack-down` - stop everything under `docker/` (each agent first, then
   the server, since agents join the server's network and it must be free of
   attached containers before the server's own `down` can remove it).
 - `make stack-status` - `docker compose ps` for each stack.
 - `make stack-check` - `GET /connections` from the host and confirm the
   identities in `EXPECTED` (comma-separated) are connected; `EXPECTED=`
-  (the default) trivially passes, since no agent is expected yet.
+  (the default) trivially passes.
 
 `stack-up` refuses before touching Docker when `DERHOST_PUBLISH_HOST` is not
 a usable value, or when host port 5410 is already bound.
