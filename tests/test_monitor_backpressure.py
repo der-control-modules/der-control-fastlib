@@ -9,6 +9,7 @@ monitor that completes the handshake and never reads. Unit tests drive
 import asyncio
 import base64
 import json
+import logging
 import os
 import socket
 import threading
@@ -16,11 +17,12 @@ import time
 import uuid
 
 import pytest
-from starlette.websockets import WebSocketState
-from websockets.exceptions import InvalidStatus
+from starlette.websockets import WebSocketDisconnect, WebSocketState
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import connect as ws_connect
 
 from derhost.server.connection_manager import ConnectionManager, _MonitorOutbox
+from derhost.server.fastapi_message_bus import FastAPIMessageBus
 
 PAD_32K = "x" * 32768
 PAD_64K = "x" * 65536
@@ -121,6 +123,49 @@ def _start_burst(manager, identity: str, count: int, pad: str):
     return publisher, worker, errors
 
 
+def _masked_text_frame(text: str) -> bytes:
+    """A client text frame with an all-zero mask key, so the payload bytes are the text itself."""
+    payload = text.encode("utf-8")
+    if len(payload) < 126:
+        head = bytes([0x81, 0x80 | len(payload)])
+    elif len(payload) < 65536:
+        head = bytes([0x81, 0x80 | 126]) + len(payload).to_bytes(2, "big")
+    else:
+        head = bytes([0x81, 0x80 | 127]) + len(payload).to_bytes(8, "big")
+    return head + b"\x00\x00\x00\x00" + payload
+
+
+def _start_batched_burst(manager, identity: str, count: int, pad: str):
+    """Like `_start_burst`, but writes every frame in one `sendall`, so the server reads many at once."""
+    publisher = ws_connect(manager.get_ws_url(identity), open_timeout=5)
+    errors: list[Exception] = []
+    topics = [f"burst/{i}" for i in range(count)] + [END_TOPIC]
+    frames = b"".join(
+        _masked_text_frame(
+            json.dumps(
+                {
+                    "type": "publish",
+                    "bus": "",
+                    "topic": topic,
+                    "headers": {},
+                    "message": {"i": i, "pad": pad},
+                }
+            )
+        )
+        for i, topic in enumerate(topics)
+    )
+
+    def run():
+        try:
+            publisher.socket.sendall(frames)
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    return publisher, worker, errors
+
+
 def _finish_burst(publisher, worker) -> None:
     """Close the publisher; a sender wedged in a full buffer is shut down first."""
     worker.join(timeout=10)
@@ -143,7 +188,7 @@ def _read_topics(monitor, deadline_s: float, pause_after: int | None = None, per
     while time.monotonic() < deadline:
         try:
             raw = monitor.recv(timeout=max(0.1, deadline - time.monotonic()))
-        except TimeoutError:
+        except (TimeoutError, ConnectionClosed, ConnectionError):
             break
         topic = json.loads(raw)["topic"]
         if topic == END_TOPIC:
@@ -204,7 +249,7 @@ class TestStalledMonitorDoesNotStallPublishers:
             stalled.close()
 
     def test_stalled_monitor_is_dropped_and_its_id_reusable(self):
-        self.manager.start_bus(monitor_send_timeout=1.0)
+        self.manager.start_bus(monitor_max_lag=1.0)
         bus_manager = self.manager.bus.manager
         stalled_id = f"stalled-{uuid.uuid4().hex[:8]}"
         stalled = _open_stalled_monitor(self.manager, stalled_id)
@@ -232,6 +277,51 @@ class TestStalledMonitorDoesNotStallPublishers:
                 reused.close()
             healthy.close()
             stalled.close()
+
+
+class TestHealthyMonitorKeepsUpAtDefaultBounds:
+    @pytest.fixture(autouse=True)
+    def setup(self, message_bus_manager_fixture):
+        self.manager = message_bus_manager_fixture
+        self.manager.start_bus()
+        yield
+
+    def _burst_reaches_a_healthy_monitor(self, count: int, pad: str, deadline_s: float) -> None:
+        monitor_id = f"healthy-{uuid.uuid4().hex[:8]}"
+        healthy = ws_connect(self.manager.get_monitor_ws_url(monitor_id), open_timeout=5)
+        publisher, worker, _ = _start_burst(self.manager, f"pub-{uuid.uuid4().hex[:8]}", count, pad)
+        try:
+            topics = _read_topics(healthy, deadline_s=deadline_s)
+        finally:
+            _finish_burst(publisher, worker)
+            healthy.close()
+        assert topics == [f"burst/{i}" for i in range(count)]
+
+    def test_a_thousand_small_frames_and_a_marker_reach_a_monitor_that_is_reading(self):
+        self._burst_reaches_a_healthy_monitor(1000, "", 20)
+
+    def test_three_hundred_32k_frames_reach_a_monitor_that_is_reading(self):
+        self._burst_reaches_a_healthy_monitor(300, PAD_32K, 30)
+
+
+class TestPublisherYieldsToTheMonitorSender:
+    @pytest.fixture(autouse=True)
+    def setup(self, message_bus_manager_fixture):
+        self.manager = message_bus_manager_fixture
+        self.manager.start_bus(monitor_queue_depth=256)
+        yield
+
+    def test_frames_the_server_reads_in_one_go_do_not_overflow_a_monitor_that_is_reading(self):
+        # One socket write holds far more frames than the 256 deep queue, so
+        # the monitor survives only if its sender runs between publishes.
+        healthy = ws_connect(self.manager.get_monitor_ws_url(f"healthy-{uuid.uuid4().hex[:8]}"), open_timeout=5)
+        publisher, worker, _ = _start_batched_burst(self.manager, f"pub-{uuid.uuid4().hex[:8]}", 1000, "")
+        try:
+            topics = _read_topics(healthy, deadline_s=20)
+        finally:
+            _finish_burst(publisher, worker)
+            healthy.close()
+        assert topics == [f"burst/{i}" for i in range(1000)]
 
 
 class TestSlowButLiveMonitorKeepsEveryFrame:
@@ -302,11 +392,27 @@ class TestMonitorFrameOnTheWire:
 
 
 class _Stub:
-    """A monitor socket for unit tests; `hang` makes every send wait forever."""
+    """A monitor socket for unit tests.
 
-    def __init__(self, hang: bool = False):
+    `hang` makes every send wait forever, `send_delay` makes each take that
+    long, and `send_error` is raised by every send. `hang_close` and
+    `hang_receive` make the endpoint's close and receive wait forever.
+    """
+
+    def __init__(
+        self,
+        hang: bool = False,
+        send_delay: float = 0.0,
+        send_error: Exception | None = None,
+        hang_close: bool = False,
+        hang_receive: bool = False,
+    ):
         self.client_state = WebSocketState.CONNECTING
         self.hang = hang
+        self.send_delay = send_delay
+        self.send_error = send_error
+        self.hang_close = hang_close
+        self.hang_receive = hang_receive
         self.texts: list[str] = []
         self.jsons: list[dict] = []
         self.close_calls: list[tuple] = []
@@ -315,9 +421,18 @@ class _Stub:
         self.client_state = WebSocketState.CONNECTED
 
     async def send_text(self, text: str) -> None:
+        if self.send_error is not None:
+            raise self.send_error
         if self.hang:
             await asyncio.Event().wait()
+        if self.send_delay:
+            await asyncio.sleep(self.send_delay)
         self.texts.append(text)
+
+    async def receive_json(self) -> dict:
+        if self.hang_receive:
+            await asyncio.Event().wait()
+        raise WebSocketDisconnect(code=1000)
 
     async def send_json(self, data: dict) -> None:
         if self.hang:
@@ -329,6 +444,8 @@ class _Stub:
 
     async def close(self, code: int = 1000, reason: str | None = None) -> None:
         self.close_calls.append((code, reason))
+        if self.hang_close:
+            await asyncio.Event().wait()
 
 
 async def _admit(manager: ConnectionManager, stub: _Stub, monitor_id: str = "m") -> asyncio.Task:
@@ -350,7 +467,7 @@ class TestBroadcastNeverAwaitsAMonitor:
         depth = 3
 
         async def scenario():
-            manager = ConnectionManager(monitor_queue_depth=depth, monitor_send_timeout=30.0)
+            manager = ConnectionManager(monitor_queue_depth=depth, monitor_max_lag=30.0)
             stub = _Stub(hang=True)
             sender = await _admit(manager, stub)
             outbox = manager.monitor_outboxes["m"]
@@ -370,7 +487,7 @@ class TestBroadcastNeverAwaitsAMonitor:
 
     def test_a_monitor_that_keeps_up_gets_every_frame_and_is_never_dropped(self):
         async def scenario():
-            manager = ConnectionManager(monitor_queue_depth=3, monitor_send_timeout=30.0)
+            manager = ConnectionManager(monitor_queue_depth=3, monitor_max_lag=30.0)
             stub = _Stub()
             sender = await _admit(manager, stub)
             for i in range(10):
@@ -385,7 +502,7 @@ class TestBroadcastNeverAwaitsAMonitor:
 
     def test_pending_bytes_over_the_bound_drop_the_monitor(self):
         async def scenario():
-            manager = ConnectionManager(monitor_queue_depth=100, monitor_queue_bytes=100, monitor_send_timeout=30.0)
+            manager = ConnectionManager(monitor_queue_depth=100, monitor_queue_bytes=100, monitor_max_lag=30.0)
             stub = _Stub(hang=True)
             await _admit(manager, stub)
             outbox = manager.monitor_outboxes["m"]
@@ -416,31 +533,81 @@ class TestBroadcastNeverAwaitsAMonitor:
         assert any("serialize" in r.getMessage() for r in caplog.records)
 
 
-class TestSendTimeout:
-    def test_a_send_that_outlasts_the_timeout_drops_the_monitor_with_no_further_publish(self):
+class TestLagDeadline:
+    def test_a_send_that_outlasts_the_lag_drops_the_monitor_with_no_further_publish(self):
         async def scenario():
-            manager = ConnectionManager(monitor_send_timeout=0.2)
+            manager = ConnectionManager(monitor_max_lag=0.2)
             stub = _Stub(hang=True)
             sender = await _admit(manager, stub)
             outbox = manager.monitor_outboxes["m"]
             await asyncio.wait_for(manager._broadcast_to_monitors({"i": 0}), 1.0)
             assert "m" in manager.monitor_connections
             assert await _wait_until(lambda: "m" not in manager.monitor_connections, 1.0)
-            assert "timed out" in outbox.drop_reason
+            assert "behind" in outbox.drop_reason
             done, _ = await asyncio.wait({sender}, timeout=1)
             assert done
 
         asyncio.run(scenario())
 
-    def test_a_send_inside_the_timeout_leaves_the_monitor_registered(self):
+    def test_a_send_inside_the_lag_leaves_the_monitor_registered(self):
         async def scenario():
-            manager = ConnectionManager(monitor_send_timeout=5.0)
+            manager = ConnectionManager(monitor_max_lag=5.0)
             stub = _Stub(hang=True)
             sender = await _admit(manager, stub)
             await asyncio.wait_for(manager._broadcast_to_monitors({"i": 0}), 1.0)
             await asyncio.sleep(1.0)
             assert "m" in manager.monitor_connections
             sender.cancel()
+
+        asyncio.run(scenario())
+
+    def test_lag_counts_from_enqueue_so_frames_queued_behind_a_slow_send_expire(self):
+        # Each send takes 0.4 s, under the 1 s lag, but the third of four
+        # frames queued together is still in flight at its 1 s deadline.
+        async def scenario():
+            manager = ConnectionManager(monitor_max_lag=1.0)
+            stub = _Stub(send_delay=0.4)
+            sender = await _admit(manager, stub)
+            outbox = manager.monitor_outboxes["m"]
+            for i in range(4):
+                await manager._broadcast_to_monitors({"i": i})
+            assert await _wait_until(lambda: "m" not in manager.monitor_connections, 3.0)
+            assert "behind" in outbox.drop_reason
+            assert [json.loads(t)["i"] for t in stub.texts] == [0, 1]
+            done, _ = await asyncio.wait({sender}, timeout=1)
+            assert done
+
+        asyncio.run(scenario())
+
+    def test_the_same_slow_stub_fed_one_frame_at_a_time_stays_registered(self):
+        # Three sends of 0.4 s take longer than the 1 s lag together, but none
+        # waited behind another.
+        async def scenario():
+            manager = ConnectionManager(monitor_max_lag=1.0)
+            stub = _Stub(send_delay=0.4)
+            sender = await _admit(manager, stub)
+            for i in range(3):
+                await manager._broadcast_to_monitors({"i": i})
+                assert await _wait_until(lambda delivered=i + 1: len(stub.texts) == delivered, 2.0)
+            assert [json.loads(t)["i"] for t in stub.texts] == [0, 1, 2]
+            assert "m" in manager.monitor_connections
+            sender.cancel()
+
+        asyncio.run(scenario())
+
+    def test_a_frame_already_past_its_deadline_when_taken_drops_the_monitor_without_a_send(self):
+        async def scenario():
+            manager = ConnectionManager(monitor_max_lag=0.2)
+            stub = _Stub()
+            sender = await _admit(manager, stub)
+            outbox = manager.monitor_outboxes["m"]
+            await manager._broadcast_to_monitors({"i": 0})
+            time.sleep(0.3)  # Hold the loop so the sender takes the frame late.
+            done, _ = await asyncio.wait({sender}, timeout=1)
+            assert done
+            assert stub.texts == []
+            assert "m" not in manager.monitor_connections
+            assert "behind" in outbox.drop_reason
 
         asyncio.run(scenario())
 
@@ -494,11 +661,78 @@ class TestFrameBytesAndOrder:
 class TestBoundsAreValidated:
     @pytest.mark.parametrize(
         "kwargs",
-        [{"monitor_queue_depth": 0}, {"monitor_queue_bytes": 0}, {"monitor_send_timeout": 0}],
+        [{"monitor_queue_depth": 0}, {"monitor_queue_bytes": 0}, {"monitor_max_lag": 0}],
     )
     def test_non_positive_bound_is_refused(self, kwargs):
         with pytest.raises(ValueError):
             ConnectionManager(**kwargs)
+
+
+class TestOversizeFrameIsReplacedNotQueued:
+    LIMIT = 1000  # a quarter of the 4000 byte cap
+
+    @staticmethod
+    def _frame(pad_length: int) -> dict:
+        return {"type": "pubsub_message", "topic": "big/topic", "sender": "agent-x", "message": "x" * pad_length}
+
+    def test_a_frame_over_the_limit_reaches_every_monitor_without_its_message_and_drops_none(self, caplog):
+        original = self._frame(5000)  # Larger than the whole 4000 byte cap.
+        original_size = len(_frame_text(original).encode())
+
+        async def scenario():
+            manager = ConnectionManager(monitor_queue_bytes=4000)
+            one, two = _Stub(), _Stub()
+            sender_one = await _admit(manager, one, "one")
+            sender_two = await _admit(manager, two, "two")
+            await manager._broadcast_to_monitors(original)
+            follow_up = {"type": "pubsub_message", "topic": "after", "message": "ok"}
+            await manager._broadcast_to_monitors(follow_up)
+            assert await _wait_until(lambda: len(one.texts) == 2 and len(two.texts) == 2)
+            assert set(manager.monitor_connections) == {"one", "two"}
+            assert one.texts == two.texts
+            replacement = json.loads(one.texts[0])
+            assert replacement == {
+                "type": "pubsub_message",
+                "topic": "big/topic",
+                "sender": "agent-x",
+                "message": None,
+                "omitted": {"bytes": original_size, "limit": self.LIMIT},
+            }
+            assert one.texts[1] == _frame_text(follow_up)
+            sender_one.cancel()
+            sender_two.cancel()
+
+        with caplog.at_level(logging.WARNING):
+            asyncio.run(scenario())
+        warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        for expected in ("'big/topic'", "'agent-x'", str(original_size), str(self.LIMIT)):
+            assert expected in warnings[0]
+
+    def test_a_frame_of_exactly_the_limit_arrives_unchanged_and_one_byte_more_is_replaced(self, caplog):
+        at_limit = self._frame(0)
+        at_limit["message"] = "x" * (self.LIMIT - len(_frame_text(at_limit).encode()))
+        assert len(_frame_text(at_limit).encode()) == self.LIMIT
+        over = dict(at_limit, message=at_limit["message"] + "x")
+
+        async def scenario():
+            manager = ConnectionManager(monitor_queue_bytes=4000)
+            stub = _Stub()
+            sender = await _admit(manager, stub)
+            await manager._broadcast_to_monitors(at_limit)
+            assert await _wait_until(lambda: len(stub.texts) == 1)
+            assert stub.texts[0] == _frame_text(at_limit)
+            await manager._broadcast_to_monitors(over)
+            assert await _wait_until(lambda: len(stub.texts) == 2)
+            replaced = json.loads(stub.texts[1])
+            assert replaced["message"] is None
+            assert replaced["omitted"] == {"bytes": self.LIMIT + 1, "limit": self.LIMIT}
+            assert "m" in manager.monitor_connections
+            sender.cancel()
+
+        with caplog.at_level(logging.WARNING):
+            asyncio.run(scenario())
+        assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
 
 
 class TestOutboxBoundsAtTheBoundary:
@@ -523,5 +757,81 @@ class TestOutboxBoundsAtTheBoundary:
             reason = outbox.offer("c", 1, 100, 10)
             assert reason is not None and "10" in reason
             assert outbox.pending_bytes == 10
+
+        asyncio.run(scenario())
+
+
+class TestMonitorEndpointAfterTheMonitorLeaves:
+    @staticmethod
+    def _endpoint(tmp_path, **bounds):
+        bus = FastAPIMessageBus(config_store_dir=str(tmp_path), **bounds)
+        route = next(r for r in bus.app.routes if getattr(r, "path", "") == "/monitor/{monitor_id}")
+        return bus, route.endpoint
+
+    @staticmethod
+    async def _run_handler_until_a_frame_is_sent(bus, endpoint, stub):
+        handler = asyncio.create_task(endpoint(stub, "m"))
+        assert await _wait_until(lambda: "m" in bus.manager.monitor_outboxes)
+        outbox = bus.manager.monitor_outboxes["m"]
+        await bus.manager.publish("", "t", {}, "payload", "s")
+        return handler, outbox
+
+    def test_handler_returns_and_closes_once_with_1008_after_a_drop_when_receive_and_close_hang(self, tmp_path):
+        bus, endpoint = self._endpoint(tmp_path, monitor_max_lag=0.1)
+        stub = _Stub(hang=True, hang_close=True, hang_receive=True)
+
+        async def scenario():
+            handler, outbox = await self._run_handler_until_a_frame_is_sent(bus, endpoint, stub)
+            try:
+                done, _ = await asyncio.wait({handler}, timeout=1.5)
+                assert done, "handler still running 1.5 s after the drop"
+                assert handler.exception() is None
+                assert "behind" in outbox.drop_reason
+                assert stub.close_calls == [(1008, "monitor too slow")]
+                assert "m" not in bus.manager.monitor_connections
+            finally:
+                handler.cancel()
+                await asyncio.gather(handler, return_exceptions=True)
+
+        asyncio.run(scenario())
+
+    def test_a_send_that_raises_websocket_disconnect_is_logged_as_a_disconnect_and_not_closed(self, tmp_path, caplog):
+        bus, endpoint = self._endpoint(tmp_path)
+        stub = _Stub(send_error=WebSocketDisconnect(code=1006), hang_receive=True)
+
+        async def scenario():
+            handler, outbox = await self._run_handler_until_a_frame_is_sent(bus, endpoint, stub)
+            try:
+                done, _ = await asyncio.wait({handler}, timeout=1.5)
+                assert done
+                assert outbox.drop_reason is None
+                assert stub.close_calls == []
+                assert "m" not in bus.manager.monitor_connections
+            finally:
+                handler.cancel()
+                await asyncio.gather(handler, return_exceptions=True)
+
+        with caplog.at_level(logging.DEBUG):
+            asyncio.run(scenario())
+        messages = [(r.levelno, r.getMessage()) for r in caplog.records]
+        assert any(lvl == logging.INFO and "WebSocketDisconnect" in m and "1006" in m for lvl, m in messages)
+        assert not any("Dropping message bus monitor" in m for _, m in messages)
+
+    @pytest.mark.parametrize("error", [RuntimeError("boom"), RuntimeError()], ids=["with-text", "empty"])
+    def test_a_send_that_raises_anything_else_drops_with_a_named_reason_and_closes_once(self, tmp_path, error):
+        bus, endpoint = self._endpoint(tmp_path)
+        stub = _Stub(send_error=error, hang_receive=True)
+
+        async def scenario():
+            handler, outbox = await self._run_handler_until_a_frame_is_sent(bus, endpoint, stub)
+            try:
+                done, _ = await asyncio.wait({handler}, timeout=1.5)
+                assert done
+                assert outbox.drop_reason.startswith("send failed: RuntimeError")
+                assert str(error) in outbox.drop_reason
+                assert stub.close_calls == [(1008, "monitor too slow")]
+            finally:
+                handler.cancel()
+                await asyncio.gather(handler, return_exceptions=True)
 
         asyncio.run(scenario())

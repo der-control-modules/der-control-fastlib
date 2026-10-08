@@ -27,7 +27,12 @@ except ImportError:
 
 from derhost._redact import redact_secrets as _redact_secrets, redact_text as _redact_text
 from derhost.server.config_store import ConfigStore
-from derhost.server.connection_manager import ConnectionManager
+from derhost.server.connection_manager import (
+    DEFAULT_MONITOR_MAX_LAG,
+    DEFAULT_MONITOR_QUEUE_BYTES,
+    DEFAULT_MONITOR_QUEUE_DEPTH,
+    ConnectionManager,
+)
 from derhost.server.models import Message, MessageBus
 
 
@@ -275,9 +280,9 @@ class FastAPIMessageBus(MessageBus):
         ws_ping_interval: float = 10,
         ws_ping_timeout: float = 10,
         max_rpcs_in_flight: int = 128,
-        monitor_queue_depth: int = 256,
-        monitor_queue_bytes: int = 8 * 1024 * 1024,
-        monitor_send_timeout: float = 10.0,
+        monitor_queue_depth: int = DEFAULT_MONITOR_QUEUE_DEPTH,
+        monitor_queue_bytes: int = DEFAULT_MONITOR_QUEUE_BYTES,
+        monitor_max_lag: float = DEFAULT_MONITOR_MAX_LAG,
     ):
         _check_jwt_secret_key()
         # Set explicitly rather than left at uvicorn's own defaults (20/20):
@@ -323,7 +328,7 @@ class FastAPIMessageBus(MessageBus):
         self.manager = ConnectionManager(
             monitor_queue_depth=monitor_queue_depth,
             monitor_queue_bytes=monitor_queue_bytes,
-            monitor_send_timeout=monitor_send_timeout,
+            monitor_max_lag=monitor_max_lag,
         )
         self._stop_handler = None
         self.server = None

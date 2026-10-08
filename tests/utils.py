@@ -50,7 +50,7 @@ class MessageBusManager:
         max_rpcs_in_flight: int | None = None,
         monitor_queue_depth: int | None = None,
         monitor_queue_bytes: int | None = None,
-        monitor_send_timeout: float | None = None,
+        monitor_max_lag: float | None = None,
     ) -> tuple[FastAPIMessageBus, int]:
         """
         Start a message bus for testing.
@@ -69,7 +69,7 @@ class MessageBusManager:
                 (#110): frames one monitor may have waiting.
             monitor_queue_bytes: Forwarded to FastAPIMessageBus when given
                 (#110): bytes one monitor may have waiting.
-            monitor_send_timeout: Forwarded to FastAPIMessageBus when given
+            monitor_max_lag: Forwarded to FastAPIMessageBus when given
                 (#110), so a test need not wait out the production default.
 
         Returns:
@@ -104,8 +104,8 @@ class MessageBusManager:
             bus_kwargs["monitor_queue_depth"] = monitor_queue_depth
         if monitor_queue_bytes is not None:
             bus_kwargs["monitor_queue_bytes"] = monitor_queue_bytes
-        if monitor_send_timeout is not None:
-            bus_kwargs["monitor_send_timeout"] = monitor_send_timeout
+        if monitor_max_lag is not None:
+            bus_kwargs["monitor_max_lag"] = monitor_max_lag
         self.bus = FastAPIMessageBus(
             host=host, port=port, config_store_dir=self.temp_config_dir, **bus_kwargs
         )

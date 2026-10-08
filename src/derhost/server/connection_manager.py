@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from collections import deque
 from collections.abc import Callable
 from re import Pattern
@@ -11,7 +12,7 @@ from typing import Any
 
 from fastapi import WebSocket
 from starlette.responses import PlainTextResponse
-from starlette.websockets import WebSocketState
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from derhost._redact import redact_known_secret_values, redact_secrets, redact_text, truncate_for_log
 
@@ -39,13 +40,19 @@ def truncate_debug_message(message: Any, max_length: int = 200) -> str:
 # Subscription callback type
 SubscriptionCallback = Callable[[str, str, str, str, dict, Any], None]
 
+# Monitor outbox limits, shared by ConnectionManager and FastAPIMessageBus. The
+# count and byte caps bound memory only; lag is what marks a monitor as stalled.
+DEFAULT_MONITOR_QUEUE_DEPTH = 4096
+DEFAULT_MONITOR_QUEUE_BYTES = 16 * 1024 * 1024
+DEFAULT_MONITOR_MAX_LAG = 10.0
+
 
 class _MonitorOutbox:
     """Frames waiting for one monitor, bounded by count and by bytes."""
 
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
-        self.frames: deque[tuple[str, int]] = deque()
+        self.frames: deque[tuple[str, int, float]] = deque()
         self.pending_bytes = 0
         self.drop_reason: str | None = None
         self.closed = False
@@ -58,21 +65,21 @@ class _MonitorOutbox:
             return f"outbox full at {max_frames} frames"
         if self.pending_bytes + size > max_bytes:
             return f"pending bytes would exceed {max_bytes}"
-        self.frames.append((text, size))
+        self.frames.append((text, size, time.monotonic()))
         self.pending_bytes += size
         self._wakeup.set()
         return None
 
-    async def take(self) -> str | None:
-        """Wait for the next frame; None once the outbox is closed."""
+    async def take(self) -> tuple[str, float] | None:
+        """Wait for the next frame; return it with its enqueue time, or None once the outbox is closed."""
         while not self.frames:
             if self.closed:
                 return None
             self._wakeup.clear()
             await self._wakeup.wait()
-        text, size = self.frames.popleft()
+        text, size, enqueued = self.frames.popleft()
         self.pending_bytes -= size
-        return text
+        return text, enqueued
 
     def close(self, drop_reason: str | None) -> None:
         self.closed = True
@@ -80,7 +87,7 @@ class _MonitorOutbox:
         self.frames.clear()
         self.pending_bytes = 0
         self._wakeup.set()
-        # A sender stuck in a send would otherwise outlive the drop by up to its timeout.
+        # A sender stuck in a send would otherwise outlive the drop by up to the lag.
         try:
             current = asyncio.current_task()
         except RuntimeError:
@@ -94,22 +101,23 @@ class ConnectionManager:
 
     def __init__(
         self,
-        monitor_queue_depth: int = 256,
-        monitor_queue_bytes: int = 8 * 1024 * 1024,
-        monitor_send_timeout: float = 10.0,
+        monitor_queue_depth: int = DEFAULT_MONITOR_QUEUE_DEPTH,
+        monitor_queue_bytes: int = DEFAULT_MONITOR_QUEUE_BYTES,
+        monitor_max_lag: float = DEFAULT_MONITOR_MAX_LAG,
     ):
         if monitor_queue_depth < 1:
             raise ValueError(f"monitor_queue_depth must be at least 1, got {monitor_queue_depth}")
         if monitor_queue_bytes < 1:
             raise ValueError(f"monitor_queue_bytes must be at least 1, got {monitor_queue_bytes}")
-        if monitor_send_timeout <= 0:
-            raise ValueError(f"monitor_send_timeout must be positive, got {monitor_send_timeout}")
-        # A monitor behind either bound is dropped. queue_bytes must exceed the
-        # largest frame or that frame drops every monitor; the defaults are
-        # guesses, and send_timeout is one keepalive interval.
+        if monitor_max_lag <= 0:
+            raise ValueError(f"monitor_max_lag must be positive, got {monitor_max_lag}")
+        # A monitor is dropped when its oldest undelivered frame is older than
+        # max_lag (one keepalive interval by default). The caps bound memory
+        # and also drop; a frame over a quarter of queue_bytes is replaced
+        # rather than queued.
         self.monitor_queue_depth = monitor_queue_depth
         self.monitor_queue_bytes = monitor_queue_bytes
-        self.monitor_send_timeout = monitor_send_timeout
+        self.monitor_max_lag = monitor_max_lag
         self.active_connections: dict[str, WebSocket] = {}
         self.agent_rpc_methods: dict[str, list[str]] = {}  # Store RPC methods for each agent
         self.message_queue: asyncio.Queue = asyncio.Queue()
@@ -289,6 +297,11 @@ class ConnectionManager:
                         callback(peer, sender, bus, topic, headers, message)
                     except Exception as e:
                         _log.error(f"Error in regex subscription callback: {e}")
+
+        # uvicorn queues a whole read's worth of messages, so the receive loop
+        # may never suspend; without this a monitor's sender never gets a turn.
+        if self.monitor_connections:
+            await asyncio.sleep(0)
 
     def register_rpc_response_future(self, msg_id: str) -> asyncio.Future:
         """Register a future for an RPC response."""
@@ -584,26 +597,56 @@ class ConnectionManager:
     async def run_monitor_sender(self, monitor_id: str, websocket: WebSocket) -> None:
         """Send queued frames to one monitor until it is dropped or disconnects.
 
-        A send that outlasts `monitor_send_timeout` drops the monitor. Cancelling
-        a waiting send is safe because nothing is written before the transport
-        is writable.
+        A monitor whose oldest undelivered frame, the one in flight included,
+        is older than `monitor_max_lag` is dropped. Cancelling a waiting send
+        is safe because nothing is written before the transport is writable.
         """
         outbox = self.monitor_outboxes.get(monitor_id)
         if outbox is None or outbox.websocket is not websocket or outbox.closed:
             return
         outbox.sender = asyncio.current_task()
         while True:
-            text = await outbox.take()
-            if text is None:
+            item = await outbox.take()
+            if item is None:
                 return
+            text, enqueued = item
             try:
-                await asyncio.wait_for(websocket.send_text(text), self.monitor_send_timeout)
-            except asyncio.TimeoutError:
-                self._release_monitor(monitor_id, websocket, f"send timed out after {self.monitor_send_timeout}s")
+                delivered = await self._send_before_deadline(websocket, text, enqueued + self.monitor_max_lag)
+            except WebSocketDisconnect as e:
+                # The peer left; that is a disconnect, not a monitor that fell behind.
+                _log.info(f"Monitor {monitor_id!r} went away during a send: {type(e).__name__} code {e.code}")
+                self.disconnect_monitor(monitor_id, websocket)
                 return
             except Exception as e:
-                self._release_monitor(monitor_id, websocket, f"send failed: {e}")
+                self._release_monitor(monitor_id, websocket, f"send failed: {type(e).__name__}: {e}")
                 return
+            if not delivered:
+                self._release_monitor(monitor_id, websocket, f"behind by more than {self.monitor_max_lag}s")
+                return
+
+    async def _send_before_deadline(self, websocket: WebSocket, text: str, deadline: float) -> bool:
+        """Send `text`; return False when `deadline` (a time.monotonic value) passed first."""
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        task = asyncio.current_task()
+        expired = False
+
+        def expire() -> None:
+            nonlocal expired
+            expired = True
+            task.cancel()
+
+        timer = asyncio.get_running_loop().call_later(remaining, expire)
+        try:
+            await websocket.send_text(text)
+        except asyncio.CancelledError:
+            if expired:
+                return False
+            raise
+        finally:
+            timer.cancel()
+        return True
 
     async def _broadcast_to_monitors(self, data: dict):
         """Queue a pub/sub message for every connected monitor.
@@ -616,6 +659,20 @@ class ConnectionManager:
         try:
             text = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
             size = len(text.encode("utf-8"))
+            limit = self.monitor_queue_bytes // 4
+            if size > limit:
+                # Queuing it would drop every monitor, so each gets the same
+                # frame with the payload omitted and the topic still visible.
+                _log.warning(
+                    f"Monitor frame for topic {data.get('topic')!r} from {data.get('sender')!r} is "
+                    f"{size} bytes, over the {limit} byte limit; sending it without its message"
+                )
+                text = json.dumps(
+                    {**data, "message": None, "omitted": {"bytes": size, "limit": limit}},
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                size = len(text.encode("utf-8"))
         except (TypeError, ValueError) as e:
             _log.error(f"Cannot serialize a message for the monitors: {e}")
             return
