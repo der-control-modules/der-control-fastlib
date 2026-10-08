@@ -20,7 +20,7 @@ from starlette.websockets import WebSocketState
 from websockets.exceptions import InvalidStatus
 from websockets.sync.client import connect as ws_connect
 
-from derhost.server.connection_manager import ConnectionManager
+from derhost.server.connection_manager import ConnectionManager, _MonitorOutbox
 
 PAD_32K = "x" * 32768
 PAD_64K = "x" * 65536
@@ -499,3 +499,29 @@ class TestBoundsAreValidated:
     def test_non_positive_bound_is_refused(self, kwargs):
         with pytest.raises(ValueError):
             ConnectionManager(**kwargs)
+
+
+class TestOutboxBoundsAtTheBoundary:
+    def test_exactly_depth_frames_are_kept_and_one_more_is_refused(self):
+        async def scenario():
+            outbox = _MonitorOutbox(_Stub())
+            kept = [outbox.offer("a", 1, 3, 1000) for _ in range(3)]
+            assert kept == [None, None, None]
+            assert len(outbox.frames) == 3
+            reason = outbox.offer("a", 1, 3, 1000)
+            assert reason is not None and "3 frames" in reason
+            assert len(outbox.frames) == 3
+
+        asyncio.run(scenario())
+
+    def test_pending_bytes_equal_to_the_cap_are_kept_and_one_more_byte_is_refused(self):
+        async def scenario():
+            outbox = _MonitorOutbox(_Stub())
+            assert outbox.offer("aaaa", 4, 100, 10) is None
+            assert outbox.offer("bbbbbb", 6, 100, 10) is None
+            assert outbox.pending_bytes == 10
+            reason = outbox.offer("c", 1, 100, 10)
+            assert reason is not None and "10" in reason
+            assert outbox.pending_bytes == 10
+
+        asyncio.run(scenario())
